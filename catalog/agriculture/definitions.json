@@ -1,0 +1,1571 @@
+[
+  {
+    "id": "kunde.anlegen",
+    "version": "1.0.0",
+    "name": "Kunden anlegen",
+    "description": "Ein neuer Kunde ist gespeichert.",
+    "kind": "action",
+    "category": "Erfassung",
+    "semanticKey": "agriculture.createCustomer",
+    "inputs": [
+      {
+        "key": "name",
+        "label": "Name des Kunden",
+        "type": "text",
+        "required": true,
+        "default": "Johanna Bauer"
+      },
+      {
+        "key": "email",
+        "label": "E-Mail",
+        "type": "text",
+        "required": true,
+        "default": "johanna.bauer@example.test"
+      },
+      {
+        "key": "phone",
+        "label": "Telefon",
+        "type": "text",
+        "required": true,
+        "default": "0831 5550120"
+      },
+      {
+        "key": "street",
+        "label": "Straße",
+        "type": "text",
+        "required": true,
+        "default": "Dorfstraße 12"
+      },
+      {
+        "key": "postalCode",
+        "label": "Postleitzahl",
+        "type": "text",
+        "required": true,
+        "default": "87437"
+      },
+      {
+        "key": "city",
+        "label": "Ort",
+        "type": "text",
+        "required": true,
+        "default": "Kempten"
+      }
+    ],
+    "outputs": [
+      {
+        "key": "customer",
+        "label": "Kunde",
+        "type": "customer-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "fach.kunde-betrieb"
+    ],
+    "preconditions": [
+      "Rolle Vermittler."
+    ],
+    "postconditions": [
+      "Ein neuer Kunde ist gespeichert."
+    ],
+    "operation": "createCustomer",
+    "bindingId": "ui.createCustomer",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "betrieb.anlegen",
+    "version": "1.0.0",
+    "name": "Betrieb anlegen",
+    "description": "Der neue Betrieb gehört zu genau diesem Kunden.",
+    "kind": "action",
+    "category": "Erfassung",
+    "semanticKey": "agriculture.createFarm",
+    "inputs": [
+      {
+        "key": "customerId",
+        "label": "Kunde",
+        "type": "customer-ref",
+        "required": true
+      },
+      {
+        "key": "name",
+        "label": "Betriebsname",
+        "type": "text",
+        "required": true,
+        "default": "Bauernhof Sonnleitner"
+      },
+      {
+        "key": "state",
+        "label": "Bundesland",
+        "type": "choice",
+        "required": true,
+        "default": "Niedersachsen",
+        "options": [
+          {
+            "value": "Baden-Württemberg",
+            "label": "Baden-Württemberg"
+          },
+          {
+            "value": "Bayern",
+            "label": "Bayern"
+          },
+          {
+            "value": "Berlin",
+            "label": "Berlin"
+          },
+          {
+            "value": "Brandenburg",
+            "label": "Brandenburg"
+          },
+          {
+            "value": "Bremen",
+            "label": "Bremen"
+          },
+          {
+            "value": "Hamburg",
+            "label": "Hamburg"
+          },
+          {
+            "value": "Hessen",
+            "label": "Hessen"
+          },
+          {
+            "value": "Mecklenburg-Vorpommern",
+            "label": "Mecklenburg-Vorpommern"
+          },
+          {
+            "value": "Niedersachsen",
+            "label": "Niedersachsen"
+          },
+          {
+            "value": "Nordrhein-Westfalen",
+            "label": "Nordrhein-Westfalen"
+          },
+          {
+            "value": "Rheinland-Pfalz",
+            "label": "Rheinland-Pfalz"
+          },
+          {
+            "value": "Saarland",
+            "label": "Saarland"
+          },
+          {
+            "value": "Sachsen",
+            "label": "Sachsen"
+          },
+          {
+            "value": "Sachsen-Anhalt",
+            "label": "Sachsen-Anhalt"
+          },
+          {
+            "value": "Schleswig-Holstein",
+            "label": "Schleswig-Holstein"
+          },
+          {
+            "value": "Thüringen",
+            "label": "Thüringen"
+          }
+        ]
+      },
+      {
+        "key": "street",
+        "label": "Betriebsstraße",
+        "type": "text",
+        "required": true,
+        "default": "Hofweg 8"
+      },
+      {
+        "key": "postalCode",
+        "label": "Betriebspostleitzahl",
+        "type": "text",
+        "required": true,
+        "default": "29525"
+      },
+      {
+        "key": "city",
+        "label": "Betriebsort",
+        "type": "text",
+        "required": true,
+        "default": "Uelzen"
+      },
+      {
+        "key": "farmType",
+        "label": "Betriebsart",
+        "type": "choice",
+        "required": true,
+        "default": "Milchviehbetrieb",
+        "options": [
+          {
+            "value": "Milchviehbetrieb",
+            "label": "Milchviehbetrieb"
+          },
+          {
+            "value": "Gemischter Betrieb",
+            "label": "Gemischter Betrieb"
+          },
+          {
+            "value": "Pferdehaltung",
+            "label": "Pferdehaltung"
+          },
+          {
+            "value": "Schweinehaltung",
+            "label": "Schweinehaltung"
+          },
+          {
+            "value": "Tierhaltung",
+            "label": "Tierhaltung"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "key": "farm",
+        "label": "Betrieb",
+        "type": "farm-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "fach.kunde-betrieb"
+    ],
+    "preconditions": [
+      "Kunde existiert.",
+      "Rolle Vermittler."
+    ],
+    "postconditions": [
+      "Der neue Betrieb gehört zu genau diesem Kunden."
+    ],
+    "operation": "createFarm",
+    "bindingId": "ui.createFarm",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "tier.anlegen",
+    "version": "1.0.0",
+    "name": "Tier oder Bestand anlegen",
+    "description": "Ein Tier oder Bestand gehört zum gewählten Betrieb.",
+    "kind": "action",
+    "category": "Erfassung",
+    "semanticKey": "agriculture.createAnimal",
+    "inputs": [
+      {
+        "key": "farmId",
+        "label": "Betrieb",
+        "type": "farm-ref",
+        "required": true
+      },
+      {
+        "key": "species",
+        "label": "Tierart",
+        "type": "choice",
+        "required": true,
+        "default": "Rind",
+        "options": [
+          {
+            "value": "Rind",
+            "label": "Rind"
+          },
+          {
+            "value": "Pferd",
+            "label": "Pferd"
+          },
+          {
+            "value": "Hund",
+            "label": "Hund"
+          },
+          {
+            "value": "Schwein",
+            "label": "Schwein"
+          }
+        ]
+      },
+      {
+        "key": "name",
+        "label": "Name des Tiers oder Bestands",
+        "type": "text",
+        "required": true,
+        "default": "Alma"
+      },
+      {
+        "key": "sumInsured",
+        "label": "Versicherungssumme in EUR",
+        "type": "money",
+        "required": true,
+        "default": 3500,
+        "minimum": 1
+      },
+      {
+        "key": "earTag",
+        "label": "Ohrmarke",
+        "type": "text",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Rind"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Rind"
+          ]
+        }
+      },
+      {
+        "key": "breed",
+        "label": "Rasse",
+        "type": "text",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        }
+      },
+      {
+        "key": "birthDate",
+        "label": "Geburtsdatum",
+        "type": "date",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        }
+      },
+      {
+        "key": "use",
+        "label": "Nutzung",
+        "type": "text",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Rind",
+            "Pferd",
+            "Hund"
+          ]
+        }
+      },
+      {
+        "key": "chipNumber",
+        "label": "Chipnummer",
+        "type": "text",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Pferd",
+            "Hund"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Pferd",
+            "Hund"
+          ]
+        }
+      },
+      {
+        "key": "health",
+        "label": "Gesundheitszustand",
+        "type": "choice",
+        "required": false,
+        "options": [
+          {
+            "value": "Unauffällig",
+            "label": "Unauffällig"
+          },
+          {
+            "value": "Vorerkrankung",
+            "label": "Vorerkrankung"
+          }
+        ],
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Pferd"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Pferd"
+          ]
+        }
+      },
+      {
+        "key": "healthNotes",
+        "label": "Gesundheitsangaben",
+        "type": "text",
+        "required": false,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Pferd"
+          ]
+        },
+        "requiredWhen": {
+          "input": "health",
+          "values": [
+            "Vorerkrankung"
+          ]
+        }
+      },
+      {
+        "key": "animalCount",
+        "label": "Anzahl Schweine",
+        "type": "number",
+        "required": false,
+        "minimum": 1,
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        }
+      },
+      {
+        "key": "housing",
+        "label": "Haltungsform",
+        "type": "choice",
+        "required": false,
+        "options": [
+          {
+            "value": "Stallhaltung",
+            "label": "Stallhaltung"
+          },
+          {
+            "value": "Freilandhaltung",
+            "label": "Freilandhaltung"
+          }
+        ],
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        }
+      },
+      {
+        "key": "biosecurity",
+        "label": "Biosicherheit",
+        "type": "choice",
+        "required": false,
+        "options": [
+          {
+            "value": "Erfüllt",
+            "label": "Erfüllt"
+          },
+          {
+            "value": "Klärung erforderlich",
+            "label": "Klärung erforderlich"
+          }
+        ],
+        "applicableWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        },
+        "requiredWhen": {
+          "input": "species",
+          "values": [
+            "Schwein"
+          ]
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "key": "animal",
+        "label": "Tier oder Bestand",
+        "type": "animal-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "fach.tierarten",
+      "regel.direktionsanfrage"
+    ],
+    "preconditions": [
+      "Betrieb existiert.",
+      "Pflichtfelder der Tierart sind erfasst."
+    ],
+    "postconditions": [
+      "Ein Tier oder Bestand gehört zum gewählten Betrieb."
+    ],
+    "operation": "createAnimal",
+    "bindingId": "ui.createAnimal",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "vorschlag.anlegen",
+    "version": "1.0.0",
+    "name": "Versicherungsvorschlag anlegen",
+    "description": "Der Vorschlag hat den Zustand Entwurf.",
+    "kind": "action",
+    "category": "Erfassung",
+    "semanticKey": "agriculture.createProposal",
+    "inputs": [
+      {
+        "key": "customerId",
+        "label": "Kunde",
+        "type": "customer-ref",
+        "required": true
+      },
+      {
+        "key": "farmId",
+        "label": "Betrieb",
+        "type": "farm-ref",
+        "required": true
+      },
+      {
+        "key": "animalIds",
+        "label": "Versicherte Tiere",
+        "type": "list",
+        "required": true
+      },
+      {
+        "key": "product",
+        "label": "Versicherungsprodukt",
+        "type": "choice",
+        "required": true,
+        "default": "Tierlebensversicherung",
+        "options": [
+          {
+            "value": "Tierlebensversicherung",
+            "label": "Tierlebensversicherung"
+          },
+          {
+            "value": "Bestandsversicherung",
+            "label": "Bestandsversicherung"
+          }
+        ]
+      },
+      {
+        "key": "startDate",
+        "label": "Versicherungsbeginn",
+        "type": "date",
+        "required": true,
+        "default": "2027-01-01"
+      },
+      {
+        "key": "durationMonths",
+        "label": "Laufzeit in Monaten",
+        "type": "number",
+        "required": true,
+        "default": 12,
+        "minimum": 12,
+        "maximum": 12
+      }
+    ],
+    "outputs": [
+      {
+        "key": "proposal",
+        "label": "Vorschlag",
+        "type": "proposal-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "ablauf.vorschlag"
+    ],
+    "preconditions": [
+      "Kunde, Betrieb und Tiere gehören zusammen."
+    ],
+    "postconditions": [
+      "Der Vorschlag hat den Zustand Entwurf."
+    ],
+    "operation": "createProposal",
+    "bindingId": "ui.createProposal",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "angebot.berechnen",
+    "version": "1.0.0",
+    "name": "Angebot berechnen",
+    "description": "Beitrag ist berechnet. Der Vorschlag hat den Zustand Angebot.",
+    "kind": "action",
+    "category": "Vertrag",
+    "semanticKey": "agriculture.calculateOffer",
+    "inputs": [
+      {
+        "key": "proposalId",
+        "label": "Vorschlag",
+        "type": "proposal-ref",
+        "required": true
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "ablauf.vorschlag"
+    ],
+    "preconditions": [
+      "Vorschlag hat den Zustand Entwurf."
+    ],
+    "postconditions": [
+      "Beitrag ist berechnet.",
+      "Der Vorschlag hat den Zustand Angebot."
+    ],
+    "operation": "calculateOffer",
+    "bindingId": "ui.calculateOffer",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "antrag.einreichen",
+    "version": "1.0.0",
+    "name": "Antrag einreichen",
+    "description": "Vorschlag ist Freigegeben oder in Direktionsprüfung.",
+    "kind": "action",
+    "category": "Vertrag",
+    "semanticKey": "agriculture.submitProposal",
+    "inputs": [
+      {
+        "key": "proposalId",
+        "label": "Vorschlag",
+        "type": "proposal-ref",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "referral",
+        "label": "Direktionsanfrage",
+        "type": "referral-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "regel.direktionsanfrage"
+    ],
+    "preconditions": [
+      "Vorschlag hat den Zustand Angebot."
+    ],
+    "postconditions": [
+      "Vorschlag ist Freigegeben oder in Direktionsprüfung."
+    ],
+    "operation": "submitProposal",
+    "bindingId": "ui.submitProposal",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "direktion.entscheiden",
+    "version": "1.0.0",
+    "name": "Direktionsanfrage entscheiden",
+    "description": "Die dokumentierte Entscheidung bestimmt Freigegeben oder Abgelehnt.",
+    "kind": "action",
+    "category": "Vertrag",
+    "semanticKey": "agriculture.decideReferral",
+    "inputs": [
+      {
+        "key": "proposalId",
+        "label": "Vorschlag",
+        "type": "proposal-ref",
+        "required": true
+      },
+      {
+        "key": "decision",
+        "label": "Entscheidung",
+        "type": "choice",
+        "required": true,
+        "default": "Freigeben",
+        "options": [
+          {
+            "value": "Freigeben",
+            "label": "Freigeben"
+          },
+          {
+            "value": "Ablehnen",
+            "label": "Ablehnen"
+          }
+        ]
+      },
+      {
+        "key": "reason",
+        "label": "Begründung",
+        "type": "text",
+        "required": true,
+        "default": "Versicherungssumme und Tierdaten wurden geprüft."
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "regel.direktionsanfrage",
+      "fach.rollen"
+    ],
+    "preconditions": [
+      "Offene Direktionsanfrage.",
+      "Rolle Direktion."
+    ],
+    "postconditions": [
+      "Die dokumentierte Entscheidung bestimmt Freigegeben oder Abgelehnt."
+    ],
+    "operation": "decideReferral",
+    "bindingId": "ui.decideReferral",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "vertrag.abschliessen",
+    "version": "1.0.0",
+    "name": "Vertrag abschließen",
+    "description": "Vertrag ist aktiv, Vorschlag ist Abgeschlossen und Police liegt vor.",
+    "kind": "action",
+    "category": "Vertrag",
+    "semanticKey": "agriculture.completeContract",
+    "inputs": [
+      {
+        "key": "proposalId",
+        "label": "Vorschlag",
+        "type": "proposal-ref",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "key": "contract",
+        "label": "Vertrag",
+        "type": "contract-ref"
+      },
+      {
+        "key": "policy",
+        "label": "Police",
+        "type": "policy-ref"
+      },
+      {
+        "key": "document",
+        "label": "Policendokument",
+        "type": "document-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "ablauf.abschluss",
+      "fach.rollen"
+    ],
+    "preconditions": [
+      "Vorschlag ist Freigegeben.",
+      "Rolle Vermittler."
+    ],
+    "postconditions": [
+      "Vertrag ist aktiv, Vorschlag ist Abgeschlossen und Police liegt vor."
+    ],
+    "operation": "completeContract",
+    "bindingId": "ui.completeContract",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "police.neu-ausgeben",
+    "version": "1.0.0",
+    "name": "Police erneut ausgeben",
+    "description": "Eine zusätzliche Dokumentversion ist gespeichert. Der bestehende Vertrag bleibt unverändert.",
+    "kind": "action",
+    "category": "Police",
+    "semanticKey": "agriculture.reissuePolicy",
+    "inputs": [
+      {
+        "key": "policyId",
+        "label": "Police",
+        "type": "policy-ref",
+        "required": true
+      },
+      {
+        "key": "reason",
+        "label": "Grund der erneuten Ausgabe",
+        "type": "text",
+        "required": true,
+        "default": "Kunde benötigt eine weitere Ausfertigung."
+      }
+    ],
+    "outputs": [
+      {
+        "key": "document",
+        "label": "Neue Dokumentversion",
+        "type": "document-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "ablauf.policendruck",
+      "fach.rollen"
+    ],
+    "preconditions": [
+      "Abgeschlossener Vertrag mit Police.",
+      "Rolle Sachbearbeiter."
+    ],
+    "postconditions": [
+      "Eine zusätzliche Dokumentversion ist gespeichert.",
+      "Der bestehende Vertrag bleibt unverändert."
+    ],
+    "operation": "reissuePolicy",
+    "bindingId": "ui.reissuePolicy",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "police.drucken",
+    "version": "1.0.0",
+    "name": "Police drucken",
+    "description": "Ein Druckauftrag mit Dokument-ID und SHA-256 ist erfasst.",
+    "kind": "action",
+    "category": "Police",
+    "semanticKey": "agriculture.printPolicy",
+    "inputs": [
+      {
+        "key": "policyId",
+        "label": "Police",
+        "type": "policy-ref",
+        "required": true
+      },
+      {
+        "key": "documentId",
+        "label": "Dokumentversion",
+        "type": "document-ref",
+        "required": true
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "ablauf.policendruck",
+      "fach.rollen"
+    ],
+    "preconditions": [
+      "Police und Dokumentversion gehören zusammen.",
+      "Rolle Sachbearbeiter."
+    ],
+    "postconditions": [
+      "Ein Druckauftrag mit Dokument-ID und SHA-256 ist erfasst."
+    ],
+    "operation": "printPolicy",
+    "bindingId": "ui.printPolicy",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "pruefung.vorschlagsstatus",
+    "version": "1.0.0",
+    "name": "Zustand des Vorschlags prüfen",
+    "description": "Der sichtbare Zustand entspricht der Erwartung.",
+    "kind": "assertion",
+    "category": "Prüfung",
+    "semanticKey": "agriculture.expectProposalStatus",
+    "inputs": [
+      {
+        "key": "proposalId",
+        "label": "Vorschlag",
+        "type": "proposal-ref",
+        "required": true
+      },
+      {
+        "key": "expectedStatus",
+        "label": "Erwarteter Zustand",
+        "type": "choice",
+        "required": true,
+        "default": "Direktionsprüfung",
+        "options": [
+          {
+            "value": "Entwurf",
+            "label": "Entwurf"
+          },
+          {
+            "value": "Angebot",
+            "label": "Angebot"
+          },
+          {
+            "value": "Direktionsprüfung",
+            "label": "Direktionsprüfung"
+          },
+          {
+            "value": "Freigegeben",
+            "label": "Freigegeben"
+          },
+          {
+            "value": "Abgelehnt",
+            "label": "Abgelehnt"
+          },
+          {
+            "value": "Abgeschlossen",
+            "label": "Abgeschlossen"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "ablauf.vorschlag",
+      "regel.direktionsanfrage"
+    ],
+    "preconditions": [
+      "Vorschlag existiert."
+    ],
+    "postconditions": [
+      "Der sichtbare Zustand entspricht der Erwartung."
+    ],
+    "operation": "expectProposalStatus",
+    "bindingId": "ui.expectProposalStatus",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "pruefung.policendruck",
+    "version": "1.0.0",
+    "name": "Policendruck prüfen",
+    "description": "Die Anwendung bestätigt den erfassten Druckauftrag.",
+    "kind": "assertion",
+    "category": "Prüfung",
+    "semanticKey": "agriculture.expectPrint",
+    "inputs": [
+      {
+        "key": "policyId",
+        "label": "Police",
+        "type": "policy-ref",
+        "required": true
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "ablauf.policendruck"
+    ],
+    "preconditions": [
+      "Police existiert."
+    ],
+    "postconditions": [
+      "Die Anwendung bestätigt den erfassten Druckauftrag."
+    ],
+    "operation": "expectPrint",
+    "bindingId": "ui.expectPrint",
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "rolle.als",
+    "version": "1.0.0",
+    "name": "Als Benutzerrolle",
+    "description": "Alle enthaltenen Schritte werden in dieser Rolle ausgeführt.",
+    "kind": "context",
+    "category": "Ablauf",
+    "semanticKey": "execution.actor",
+    "inputs": [
+      {
+        "key": "role",
+        "label": "Benutzerrolle",
+        "type": "choice",
+        "required": true,
+        "default": "Vermittler",
+        "options": [
+          {
+            "value": "Vermittler",
+            "label": "Vermittler"
+          },
+          {
+            "value": "Direktion",
+            "label": "Direktion"
+          },
+          {
+            "value": "Sachbearbeiter",
+            "label": "Sachbearbeiter"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "fach.rollen"
+    ],
+    "preconditions": [],
+    "postconditions": [],
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.kuh-vorschlag",
+    "version": "1.0.0",
+    "name": "Kuhlebensversicherung vorbereiten",
+    "description": "Legt Kunde, Betrieb, eine Kuh und einen Vorschlag an. Endet bewusst beim Entwurf.",
+    "kind": "workflow",
+    "category": "Wiederverwendung",
+    "semanticKey": "agriculture.prepare-cow-proposal",
+    "inputs": [
+      {
+        "key": "customerName",
+        "label": "Kundenname",
+        "type": "text",
+        "required": true,
+        "default": "Johanna Bauer"
+      },
+      {
+        "key": "state",
+        "label": "Bundesland",
+        "type": "choice",
+        "required": true,
+        "default": "Niedersachsen",
+        "options": [
+          {
+            "value": "Baden-Württemberg",
+            "label": "Baden-Württemberg"
+          },
+          {
+            "value": "Bayern",
+            "label": "Bayern"
+          },
+          {
+            "value": "Berlin",
+            "label": "Berlin"
+          },
+          {
+            "value": "Brandenburg",
+            "label": "Brandenburg"
+          },
+          {
+            "value": "Bremen",
+            "label": "Bremen"
+          },
+          {
+            "value": "Hamburg",
+            "label": "Hamburg"
+          },
+          {
+            "value": "Hessen",
+            "label": "Hessen"
+          },
+          {
+            "value": "Mecklenburg-Vorpommern",
+            "label": "Mecklenburg-Vorpommern"
+          },
+          {
+            "value": "Niedersachsen",
+            "label": "Niedersachsen"
+          },
+          {
+            "value": "Nordrhein-Westfalen",
+            "label": "Nordrhein-Westfalen"
+          },
+          {
+            "value": "Rheinland-Pfalz",
+            "label": "Rheinland-Pfalz"
+          },
+          {
+            "value": "Saarland",
+            "label": "Saarland"
+          },
+          {
+            "value": "Sachsen",
+            "label": "Sachsen"
+          },
+          {
+            "value": "Sachsen-Anhalt",
+            "label": "Sachsen-Anhalt"
+          },
+          {
+            "value": "Schleswig-Holstein",
+            "label": "Schleswig-Holstein"
+          },
+          {
+            "value": "Thüringen",
+            "label": "Thüringen"
+          }
+        ]
+      },
+      {
+        "key": "animalName",
+        "label": "Name der Kuh",
+        "type": "text",
+        "required": true,
+        "default": "Alma"
+      },
+      {
+        "key": "sumInsured",
+        "label": "Versicherungssumme in EUR",
+        "type": "money",
+        "required": true,
+        "default": 3500,
+        "minimum": 1
+      },
+      {
+        "key": "startDate",
+        "label": "Versicherungsbeginn",
+        "type": "date",
+        "required": true,
+        "default": "2027-01-01"
+      },
+      {
+        "key": "farmStreet",
+        "label": "Betriebsstraße",
+        "type": "text",
+        "required": true,
+        "default": "Hofweg 8"
+      },
+      {
+        "key": "farmPostalCode",
+        "label": "Betriebspostleitzahl",
+        "type": "text",
+        "required": true,
+        "default": "29525"
+      },
+      {
+        "key": "farmCity",
+        "label": "Betriebsort",
+        "type": "text",
+        "required": true,
+        "default": "Uelzen"
+      }
+    ],
+    "outputs": [
+      {
+        "key": "customer",
+        "label": "Kunde",
+        "type": "customer-ref"
+      },
+      {
+        "key": "farm",
+        "label": "Betrieb",
+        "type": "farm-ref"
+      },
+      {
+        "key": "animal",
+        "label": "Kuh",
+        "type": "animal-ref"
+      },
+      {
+        "key": "proposal",
+        "label": "Vorschlag",
+        "type": "proposal-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "ablauf.kuh-vorschlag"
+    ],
+    "preconditions": [
+      "Rolle Vermittler."
+    ],
+    "postconditions": [
+      "Ein vollständiger Kuh-Vorschlag ist als Entwurf gespeichert."
+    ],
+    "body": [
+      {
+        "id": "kunde",
+        "definition": {
+          "id": "kunde.anlegen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "name": {
+            "param": "customerName"
+          }
+        },
+        "outputs": {
+          "customer": "kunde"
+        }
+      },
+      {
+        "id": "betrieb",
+        "definition": {
+          "id": "betrieb.anlegen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "customerId": {
+            "ref": "kunde"
+          },
+          "state": {
+            "param": "state"
+          },
+          "street": {
+            "param": "farmStreet"
+          },
+          "postalCode": {
+            "param": "farmPostalCode"
+          },
+          "city": {
+            "param": "farmCity"
+          }
+        },
+        "outputs": {
+          "farm": "betrieb"
+        }
+      },
+      {
+        "id": "tier",
+        "definition": {
+          "id": "tier.anlegen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "farmId": {
+            "ref": "betrieb"
+          },
+          "name": {
+            "param": "animalName"
+          },
+          "sumInsured": {
+            "param": "sumInsured"
+          },
+          "species": "Rind",
+          "earTag": "DE 09 123 45678",
+          "breed": "Fleckvieh",
+          "birthDate": "2022-04-15",
+          "use": "Milchkuh"
+        },
+        "outputs": {
+          "animal": "tier"
+        }
+      },
+      {
+        "id": "vorschlag",
+        "definition": {
+          "id": "vorschlag.anlegen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "customerId": {
+            "ref": "kunde"
+          },
+          "farmId": {
+            "ref": "betrieb"
+          },
+          "animalIds": [
+            {
+              "ref": "tier"
+            }
+          ],
+          "startDate": {
+            "param": "startDate"
+          }
+        },
+        "outputs": {
+          "proposal": "vorschlag"
+        }
+      }
+    ],
+    "exports": {
+      "customer": {
+        "ref": "kunde"
+      },
+      "farm": {
+        "ref": "betrieb"
+      },
+      "animal": {
+        "ref": "tier"
+      },
+      "proposal": {
+        "ref": "vorschlag"
+      }
+    },
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.standard-kuhvertrag",
+    "version": "1.0.0",
+    "name": "Standard-Kuhlebensversicherung abschließen",
+    "description": "Erstellt einen Kuh-Vorschlag, berechnet das Angebot und schließt nach Freigabe ab. Summen oberhalb der Direktionsgrenze passen nicht zu diesem Ablauf.",
+    "kind": "workflow",
+    "category": "Wiederverwendung",
+    "semanticKey": "agriculture.complete-standard-cow-contract",
+    "inputs": [
+      {
+        "key": "customerName",
+        "label": "Kundenname",
+        "type": "text",
+        "required": true,
+        "default": "Johanna Bauer"
+      },
+      {
+        "key": "state",
+        "label": "Bundesland",
+        "type": "choice",
+        "required": true,
+        "default": "Niedersachsen",
+        "options": [
+          {
+            "value": "Baden-Württemberg",
+            "label": "Baden-Württemberg"
+          },
+          {
+            "value": "Bayern",
+            "label": "Bayern"
+          },
+          {
+            "value": "Berlin",
+            "label": "Berlin"
+          },
+          {
+            "value": "Brandenburg",
+            "label": "Brandenburg"
+          },
+          {
+            "value": "Bremen",
+            "label": "Bremen"
+          },
+          {
+            "value": "Hamburg",
+            "label": "Hamburg"
+          },
+          {
+            "value": "Hessen",
+            "label": "Hessen"
+          },
+          {
+            "value": "Mecklenburg-Vorpommern",
+            "label": "Mecklenburg-Vorpommern"
+          },
+          {
+            "value": "Niedersachsen",
+            "label": "Niedersachsen"
+          },
+          {
+            "value": "Nordrhein-Westfalen",
+            "label": "Nordrhein-Westfalen"
+          },
+          {
+            "value": "Rheinland-Pfalz",
+            "label": "Rheinland-Pfalz"
+          },
+          {
+            "value": "Saarland",
+            "label": "Saarland"
+          },
+          {
+            "value": "Sachsen",
+            "label": "Sachsen"
+          },
+          {
+            "value": "Sachsen-Anhalt",
+            "label": "Sachsen-Anhalt"
+          },
+          {
+            "value": "Schleswig-Holstein",
+            "label": "Schleswig-Holstein"
+          },
+          {
+            "value": "Thüringen",
+            "label": "Thüringen"
+          }
+        ]
+      },
+      {
+        "key": "sumInsured",
+        "label": "Versicherungssumme in EUR",
+        "type": "money",
+        "required": true,
+        "default": 3500,
+        "minimum": 1,
+        "maximum": 10000
+      },
+      {
+        "key": "startDate",
+        "label": "Versicherungsbeginn",
+        "type": "date",
+        "required": true,
+        "default": "2027-01-01"
+      },
+      {
+        "key": "farmStreet",
+        "label": "Betriebsstraße",
+        "type": "text",
+        "required": true,
+        "default": "Hofweg 8"
+      },
+      {
+        "key": "farmPostalCode",
+        "label": "Betriebspostleitzahl",
+        "type": "text",
+        "required": true,
+        "default": "29525"
+      },
+      {
+        "key": "farmCity",
+        "label": "Betriebsort",
+        "type": "text",
+        "required": true,
+        "default": "Uelzen"
+      }
+    ],
+    "outputs": [
+      {
+        "key": "proposal",
+        "label": "Vorschlag",
+        "type": "proposal-ref"
+      },
+      {
+        "key": "contract",
+        "label": "Vertrag",
+        "type": "contract-ref"
+      },
+      {
+        "key": "policy",
+        "label": "Police",
+        "type": "policy-ref"
+      },
+      {
+        "key": "document",
+        "label": "Policendokument",
+        "type": "document-ref"
+      }
+    ],
+    "knowledgeRefs": [
+      "ablauf.standard-kuhvertrag",
+      "regel.direktionsanfrage"
+    ],
+    "preconditions": [
+      "Rolle Vermittler.",
+      "Versicherungssumme liegt höchstens bei 10.000 EUR."
+    ],
+    "postconditions": [
+      "Der Vertrag ist abgeschlossen und eine Police ist vorhanden."
+    ],
+    "body": [
+      {
+        "id": "vorbereiten",
+        "definition": {
+          "id": "ablauf.kuh-vorschlag",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "customerName": {
+            "param": "customerName"
+          },
+          "state": {
+            "param": "state"
+          },
+          "sumInsured": {
+            "param": "sumInsured"
+          },
+          "startDate": {
+            "param": "startDate"
+          },
+          "farmStreet": {
+            "param": "farmStreet"
+          },
+          "farmPostalCode": {
+            "param": "farmPostalCode"
+          },
+          "farmCity": {
+            "param": "farmCity"
+          }
+        },
+        "outputs": {
+          "proposal": "vorschlag"
+        }
+      },
+      {
+        "id": "angebot",
+        "definition": {
+          "id": "angebot.berechnen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          }
+        }
+      },
+      {
+        "id": "einreichen",
+        "definition": {
+          "id": "antrag.einreichen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          }
+        }
+      },
+      {
+        "id": "abschluss",
+        "definition": {
+          "id": "vertrag.abschliessen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          }
+        },
+        "outputs": {
+          "contract": "vertrag",
+          "policy": "police",
+          "document": "dokument"
+        }
+      }
+    ],
+    "exports": {
+      "proposal": {
+        "ref": "vorschlag"
+      },
+      "contract": {
+        "ref": "vertrag"
+      },
+      "policy": {
+        "ref": "police"
+      },
+      "document": {
+        "ref": "dokument"
+      }
+    },
+    "status": "approved",
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "origin": "seed"
+  }
+]

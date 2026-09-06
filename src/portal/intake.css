@@ -1,0 +1,75 @@
+.agr-intake { padding-top: 22px; font-size: 13px; color: #172c42; }
+.agr-intake-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.agr-intake-header h1 { margin: 3px 0 0; font-size: 22px; line-height: 1.25; }
+.agr-intake-kicker { margin: 0; color: #4b627a; font-size: 12px; }
+.agr-intake-header-actions, .agr-intake-form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.agr-intake-steps { border-bottom: 3px solid #235783; margin-bottom: 12px; }
+.agr-intake-steps ol { display: flex; gap: 4px; padding: 0; margin: 0; list-style: none; }
+.agr-intake-steps li { flex: 1; }
+.agr-intake-steps button { width: 100%; min-height: 40px; padding: 7px 14px; border: 1px solid #adc0d3; border-bottom: 0; border-radius: 3px 3px 0 0; background: #e1eaf3; color: #21425f; text-align: left; font: inherit; font-weight: 600; cursor: pointer; }
+.agr-intake-steps button[aria-current="step"] { border-color: #235783; background: #235783; color: white; }
+.agr-intake-steps button:disabled { color: #637389; background: #ebeff3; cursor: default; }
+.agr-intake-step-number { display: inline-flex; align-items: center; justify-content: center; width: 21px; height: 21px; margin-right: 9px; border: 1px solid currentColor; border-radius: 2px; font-size: 12px; }
+.agr-intake-notice { color: #205a38; font-size: 13px; line-height: 1.5; }
+.agr-intake-notice:not(:empty) { padding: 10px 12px; margin-bottom: 12px; border: 1px solid #a6c5b3; background: #f1f8f2; }
+.agr-intake-error { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.agr-intake-panel .agr-panel-heading h2 { margin: 0; font-size: 15px; }
+.agr-intake-panel .agr-panel-heading h2:focus { outline: none; }
+.agr-intake-body { padding: 18px; }
+.agr-intake-context { margin: -2px 0 16px; padding: 0 0 12px; border-bottom: 1px solid #d7e0e8; font-size: 13px; color: #465d74; }
+.agr-intake-selection { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 16px; }
+.agr-intake-selection .agr-field { flex: 1; max-width: 670px; }
+.agr-intake .agr-field { font-size: 13px; }
+.agr-intake .agr-field input, .agr-intake .agr-field select, .agr-intake .agr-field textarea { min-width: 0; font-size: 13px; }
+.agr-intake .agr-field textarea { resize: vertical; }
+.agr-intake-record { padding: 13px 14px; border: 1px solid #c4d1df; background: #f4f7fa; font-size: 13px; }
+.agr-intake-record > div { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.agr-intake .agr-intake-record p { margin: 5px 0 0; line-height: 1.5; }
+.agr-intake-record h3 { margin: 0 0 8px; font-size: 12px; color: #4b627a; }
+.agr-intake-record .agr-button { margin-top: 10px; }
+.agr-intake-fieldset { min-width: 0; margin: 0; padding: 16px; border: 1px solid #bcccdc; background: #fafbfd; }
+.agr-intake-fieldset legend { padding: 0 7px; font-size: 13px; font-weight: 700; color: #214a70; }
+.agr-intake .agr-intake-form-note { margin: 0 0 15px; font-size: 12px; }
+.agr-intake .agr-form-grid { gap: 15px 20px; padding: 0; }
+.agr-intake-form-actions { margin-top: 16px; }
+.agr-intake-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 22px; padding-top: 15px; border-top: 1px solid #cbd7e3; }
+.agr-intake-animal-tools { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.agr-intake-animal-tools p { max-width: 560px; margin: 0; line-height: 1.5; font-size: 12px; }
+.agr-intake-animal-tools .agr-button { flex-shrink: 0; }
+.agr-intake .agr-intake-rule { margin: 16px 0 0; padding: 10px 12px; border-left: 3px solid #9eb6ce; background: #edf2f7; font-size: 12px; line-height: 1.6; color: #344e68; }
+.agr-intake-wide { grid-column: 1 / -1; }
+.agr-intake-table-wrap { overflow-x: auto; margin-bottom: 18px; border: 1px solid #c4d1df; }
+.agr-intake-animal-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.agr-intake-animal-table caption { padding: 11px 12px; background: #f0f4f8; border-bottom: 1px solid #c4d1df; text-align: left; font-size: 13px; font-weight: 600; color: #214a70; }
+.agr-intake-animal-table thead th { padding: 10px 12px; white-space: nowrap; text-align: left; font-size: 12px; background: #e4edf5; }
+.agr-intake-animal-table tbody th, .agr-intake-animal-table tbody td, .agr-intake-animal-table tfoot th, .agr-intake-animal-table tfoot td { padding: 11px 12px; border-top: 1px solid #d7e0e9; vertical-align: middle; text-align: left; }
+.agr-intake-animal-table tbody th { font-size: 13px; font-weight: 400; background: inherit; white-space: normal; }
+.agr-intake-animal-table tfoot th { font-size: 12px; }
+.agr-intake-animal-table th strong, .agr-intake-animal-table th span { display: block; }
+.agr-intake-animal-table th span { margin-top: 4px; color: #50667b; font-size: 12px; }
+.agr-intake .agr-intake-animal-table input[type="checkbox"] { width: 24px; height: 24px; margin: 0; accent-color: #235783; cursor: pointer; }
+.agr-intake-animal-table tfoot { background: #eef3f8; }
+.agr-intake-animal-table .agr-intake-money { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.agr-intake-review-records { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+.agr-intake-fixed-value { display: flex; align-items: center; min-height: 35px; font-weight: 500; }
+.agr-intake .agr-muted { font-size: 12px; line-height: 1.5; }
+.agr-intake button:focus-visible, .agr-intake input:focus-visible, .agr-intake select:focus-visible, .agr-intake textarea:focus-visible { outline: 2px solid #076aba; outline-offset: 3px; }
+@media (hover: hover) and (pointer: fine) {
+  .agr-intake-steps button:not(:disabled):not([aria-current="step"]):hover { background: #cbddeb; }
+  .agr-intake-animal-table tbody tr:hover { background: #f2f6fa; }
+}
+@media (max-width: 760px) {
+  .agr-intake-header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .agr-intake-header h1 { font-size: 20px; }
+  .agr-intake-steps button { display: flex; align-items: center; gap: 5px; min-height: 54px; padding: 7px; font-size: 12px; }
+  .agr-intake-step-number { flex-shrink: 0; margin-right: 0; width: 18px; height: 18px; }
+  .agr-intake-body { padding: 12px; }
+  .agr-intake-selection { flex-direction: column; align-items: stretch; }
+  .agr-intake-selection .agr-field { max-width: none; }
+  .agr-intake-fieldset { padding: 12px; }
+  .agr-intake .agr-form-grid { grid-template-columns: 1fr; }
+  .agr-intake-animal-tools { flex-direction: column; }
+  .agr-intake-review-records { grid-template-columns: 1fr; gap: 12px; }
+  .agr-intake-footer { align-items: stretch; }
+  .agr-intake-footer > .agr-muted { flex-basis: 100%; }
+}

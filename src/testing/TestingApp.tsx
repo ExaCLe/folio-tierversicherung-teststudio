@@ -1,0 +1,310 @@
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronRight, Code2, FileText, GitBranch, History, Layers3, Leaf, List, Maximize2, Menu, Minus, Play, Plus, Redo2, Save, Settings2, Sparkles, Undo2, X } from 'lucide-react';
+import type { TestingAgentJob, TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingModel, TestingRun, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingValue } from '../../shared/testing';
+import { createTestingInstance, testingVersionKey } from '../../shared/testing';
+import { testingApi, testingPost, messageOf } from './api';
+import { Method } from './Method';
+import { Library, Knowledge, KnowledgeArticle } from './Library';
+import { Graph } from './Graph';
+import { DefinitionDialog } from './DefinitionDialog';
+import { Inspector } from './Inspector';
+import type { ScratchWorkspaceHandle } from './ScratchWorkspace';
+const ScratchWorkspace = lazy(() => import('./ScratchWorkspace').then(module => ({ default: module.ScratchWorkspace })));
+import { flattenBlocks, kindLabels, newInstance, phaseLabels, resolvedBlockInputs, statusLabels, updateBlockAtPath } from './model';
+import { Empty, formatDate, JsonView, Modal, Notice, Spinner } from './ui';
+import './testing.css';
+
+interface Bootstrap { catalog: TestingCatalog; scenarios: TestingScenario[]; jobs: TestingAgentJob[]; runs: TestingRun[]; approvals: TestingApproval[]; layouts: TestingScenarioLayout[]; cli: { executable: string; models: { luna: string; sol: string }; timeoutMs: number; sandbox: string; maxConcurrentCalls: number; invocation: string; explanation: string } }
+type View = 'start' | 'editor' | 'library' | 'knowledge' | 'graph' | 'runs' | 'method';
+interface OverrideProposal { scenario: TestingScenario; changes?: unknown; draft?: TestingBusinessDraft; applied: false }
+type OverrideReview = OverrideProposal & { job: TestingAgentJob };
+function overrideProposal(job?: TestingAgentJob): OverrideProposal | undefined {
+  if (job?.phase !== 'business' || job.status !== 'completed') return;
+  const result = job.result as Partial<OverrideProposal> | undefined;
+  if (result?.applied === false && result.scenario?.id === job.scenarioId) return result as OverrideProposal;
+}
+function overrideReviewIssue(review: OverrideReview, scenario: TestingScenario | undefined, compiled: TestingCompiledScenario | undefined, dirty: boolean): string | undefined {
+  if (!scenario || scenario.id !== review.job.scenarioId) return 'Öffne den Testfall, zu dem dieser Änderungsvorschlag gehört.';
+  if (scenario.revision !== review.job.scenarioRevision || review.scenario.revision !== scenario.revision) return 'Dieser Vorschlag gehört zu einer früheren Testfallrevision. Bitte die Ausnahme für den aktuellen Entwurf erneut beschreiben.';
+  if (dirty) return 'Der Entwurf enthält eigene, ungespeicherte Änderungen. Speichere oder verwerfe sie, bevor du einen KI-Vorschlag übernimmst.';
+  if (!compiled || compiled.scenarioId !== scenario.id) return 'Der aktuelle Fachstand wird noch geprüft. Die Übernahme ist danach möglich.';
+  if (compiled.scenarioRevision !== scenario.revision) return 'Der gespeicherte Testfall hat inzwischen eine andere Revision. Lade ihn erneut, bevor du eine Ausnahme prüfst.';
+  if (!review.job.fingerprint || compiled.fingerprint !== review.job.fingerprint) return 'Der fachliche Ablauf oder sein Wissen hat sich seit diesem Vorschlag geändert. Bitte die Ausnahme auf dem aktuellen Stand erneut beschreiben.';
+}
+const navigation = [{ id: 'start', label: 'Testfälle', icon: Layers3 }, { id: 'library', label: 'Blockbibliothek', icon: Layers3 }, { id: 'knowledge', label: 'Wissensbasis', icon: BookOpen }, { id: 'graph', label: 'Abhängigkeiten', icon: GitBranch }, { id: 'runs', label: 'Ausführungen', icon: History }, { id: 'method', label: 'So funktioniert es', icon: FileText }] as const;
+const examples = [
+  { tag: 'DIREKTIONSANFRAGE', title: 'Eine besonders wertvolle Kuh', text: 'Ich möchte eine Lebensversicherung für eine Kuh auf einem Betrieb in Bayern. Die Versicherungssumme beträgt 15.000 Euro. Prüfe, dass nach Einreichung des Antrags eine Direktionsanfrage entsteht.', detail: 'Kuh · 15.000 € · Betrieb in Bayern' },
+  { tag: 'POLICE ERNEUT DRUCKEN', title: 'Ein Dokument für den Kunden', text: 'Erstelle eine Standard-Kuhlebensversicherung mit 3.500 Euro Versicherungssumme und schließe den Vertrag ab. Danach möchte ich als Sachbearbeiter die Police erneut ausdrucken und das Dokument prüfen.', detail: 'Abgeschlossener Vertrag · Sachbearbeiter' },
+  { tag: 'BESTAND VERSICHERN', title: 'Ein Betrieb mit Schweinemast', text: 'Ich möchte für einen landwirtschaftlichen Betrieb einen Mastschweinebestand mit 120 Tieren versichern. Erstelle einen passenden Antrag und prüfe, welche Anforderungen für diese Tierart gelten.', detail: 'Schweine · Bestand · Eigene Pflichtangaben' },
+];
+
+function initialView(): View { const path = window.location.pathname.split('/')[2]; return navigation.some(item => item.id === path) ? path as View : path === 'editor' ? 'editor' : 'start'; }
+function storageDraft(scenario: TestingScenario): TestingScenario { try { const saved = sessionStorage.getItem(`folio-testing-draft:${scenario.id}`); if (saved) { const draft = JSON.parse(saved) as TestingScenario; if (draft.revision === scenario.revision) return draft; } } catch { /* The editor remains usable without browser storage. */ } return scenario; }
+
+export function TestingApp() {
+  const [data, setData] = useState<Bootstrap>();
+  const [view, setView] = useState<View>(initialView);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [request, setRequest] = useState(() => { try { return sessionStorage.getItem('folio-testing-request') ?? ''; } catch { return ''; } });
+  const [model, setModel] = useState<TestingModel>('luna');
+  const [draft, setDraft] = useState<TestingScenario>();
+  const draftRef = useRef(draft); draftRef.current = draft;
+  const [savedJson, setSavedJson] = useState('');
+  const [layout, setLayout] = useState<TestingScenarioLayout>();
+  const [compiled, setCompiled] = useState<TestingCompiledScenario>();
+  const [selected, setSelected] = useState<string>();
+  const [activeJob, setActiveJob] = useState<TestingAgentJob>();
+  const [activeRun, setActiveRun] = useState<TestingRun>();
+  const [busy, setBusy] = useState('');
+  const [knowledgeId, setKnowledgeId] = useState<string>();
+  const [knowledgeModal, setKnowledgeModal] = useState<string>();
+  const [definitionModal, setDefinitionModal] = useState<{ definition?: TestingBlockDefinition }>();
+  const [bindingId, setBindingId] = useState<string>();
+  const [libraryId, setLibraryId] = useState<string>();
+  const [outline, setOutline] = useState(false);
+  const [mobileNav, setMobileNav] = useState(false);
+  const [agentDetail, setAgentDetail] = useState(false);
+  const [pendingOverride, setPendingOverride] = useState<OverrideReview>();
+  const [overrideError, setOverrideError] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+  const scratch = useRef<ScratchWorkspaceHandle>(null);
+  const dirty = !!draft && JSON.stringify(draft) !== savedJson;
+  const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
+  const runRunning = activeRun?.status === 'queued' || activeRun?.status === 'running';
+  const actionLocked = !!busy || jobRunning || runRunning;
+  const isApproved = !!compiled?.approval && !dirty && compiled.approval.scenarioRevision === draft?.revision && compiled.approval.fingerprint === compiled.fingerprint;
+  const backgroundJobsRunning = data?.jobs.some(job => job.status === 'queued' || job.status === 'running') ?? false;
+  const savedOverrideJob = data?.jobs.find(job => job.scenarioId === draft?.id && overrideProposal(job));
+  const pendingOverrideIssue = pendingOverride ? overrideReviewIssue(pendingOverride, draft, compiled, dirty) : undefined;
+
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    const response = await testingApi<Bootstrap>('/bootstrap', { signal });
+    // Ordinary knowledge links refer to an identity and show its latest
+    // revision. Historical run snapshots and the graph retain their history.
+    const knowledge = [...new Map([...response.catalog.knowledge].sort((a, b) => a.revision - b.revision).map(document => [document.id, document])).values()];
+    const next = { ...response, catalog: { ...response.catalog, knowledge } };
+    setData(next);
+    setActiveRun(current => current ? next.runs.find(run => run.id === current.id) ?? current : current);
+    return next;
+  }, []);
+  useEffect(() => { const controller = new AbortController(); refresh(controller.signal).then(next => { const id = decodeURIComponent(window.location.pathname.split('/')[3] ?? ''); const scenario = next.scenarios.find(item => item.id === id); if (scenario) loadScenario(scenario, next); }).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); return () => controller.abort(); }, [refresh]);
+  useEffect(() => { const onPop = () => { setView(initialView()); setMobileNav(false); }; window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop); }, []);
+  useEffect(() => { if (!draft) return; try { if (dirty) sessionStorage.setItem(`folio-testing-draft:${draft.id}`, JSON.stringify(draft)); else sessionStorage.removeItem(`folio-testing-draft:${draft.id}`); } catch { /* Save remains available when session storage is disabled. */ } }, [draft, dirty]);
+  useEffect(() => { const beforeUnload = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', beforeUnload); return () => window.removeEventListener('beforeunload', beforeUnload); }, [dirty]);
+  useEffect(() => { if (!draft || dirty) { setCompiled(undefined); return; } const controller = new AbortController(); testingApi<TestingCompiledScenario>(`/scenarios/${encodeURIComponent(draft.id)}/compile`, { signal: controller.signal }).then(setCompiled).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); return () => controller.abort(); }, [draft?.id, draft?.revision, dirty, data?.catalog]);
+  useEffect(() => { if (!layout || !draft) return; const controller = new AbortController(); const timer = setTimeout(() => { testingApi(`/scenarios/${encodeURIComponent(layout.scenarioId)}/layout`, { method: 'PUT', body: JSON.stringify(layout), signal: controller.signal }).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); }, 700); return () => { clearTimeout(timer); controller.abort(); }; }, [layout, draft?.id]);
+  useEffect(() => {
+    if (!jobRunning || !activeJob) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const job = await testingApi<TestingAgentJob>(`/jobs/${encodeURIComponent(activeJob.id)}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        if (job.status === 'queued' || job.status === 'running') {
+          setActiveJob(job);
+          timer = setTimeout(poll, 1300);
+          return;
+        }
+        // Keep the polling effect alive until its terminal result has been
+        // processed. Publishing the completed job earlier aborts this refresh.
+        const next = await refresh(controller.signal);
+        if (controller.signal.aborted) return;
+        const result = job.result as { scenario?: TestingScenario; run?: TestingRun } | undefined;
+        const proposal = overrideProposal(job);
+        if (proposal) {
+          if (draftRef.current?.id === job.scenarioId) {
+            setPendingOverride({ ...proposal, job });
+            setOverrideError('');
+            setAgentDetail(false);
+          }
+        } else if (job.status === 'completed' && job.phase === 'business' && result?.scenario) {
+          loadScenario(result.scenario, next);
+          navigate('editor', result.scenario.id);
+        }
+        if (job.status === 'completed' && job.phase === 'technical') {
+          const run = result?.run ?? next.runs.find(item => item.scenarioId === job.scenarioId);
+          if (run) setActiveRun(run);
+        }
+        setActiveJob(job);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(messageOf(cause));
+          timer = setTimeout(poll, 2500);
+        }
+      }
+    };
+    timer = setTimeout(poll, 700);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [activeJob?.id, jobRunning, refresh]);
+  useEffect(() => {
+    if (!activeRun || !['queued', 'running'].includes(activeRun.status)) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const run = await testingApi<TestingRun>(`/runs/${encodeURIComponent(activeRun.id)}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setActiveRun(run);
+        if (run.status === 'queued' || run.status === 'running') timer = setTimeout(poll, 1000);
+        else await refresh(controller.signal);
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(messageOf(cause));
+          timer = setTimeout(poll, 2500);
+        }
+      }
+    };
+    timer = setTimeout(poll, 600);
+    return () => { clearTimeout(timer); controller.abort(); };
+    // A terminal status must not abort the final refresh. A different run or
+    // unmount cancels this effect; a completed run schedules no further poll.
+  }, [activeRun?.id, refresh]);
+
+  useEffect(() => { try { sessionStorage.setItem('folio-testing-request', request); } catch { /* The request remains editable without browser storage. */ } }, [request]);
+  useEffect(() => { if (!backgroundJobsRunning || jobRunning) return; const controller = new AbortController(); const timer = setInterval(() => { refresh(controller.signal).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); }, 1800); return () => { clearInterval(timer); controller.abort(); }; }, [backgroundJobsRunning, jobRunning, refresh]);
+
+  function navigate(next: View, id?: string) { const path = next === 'start' ? '/testing' : `/testing/${next}${id ? `/${encodeURIComponent(id)}` : ''}`; window.history.pushState({}, '', path); setView(next); setMobileNav(false); window.scrollTo({ top: 0 }); }
+  function loadScenario(scenario: TestingScenario, bootstrap = data) { setDraft(storageDraft(scenario)); setSavedJson(JSON.stringify(scenario)); setLayout(bootstrap?.layouts.find(item => item.scenarioId === scenario.id) ?? { id: `layout:${scenario.id}`, scenarioId: scenario.id, collapsed: [] }); setSelected(scenario.blocks[0]?.id); setCompiled(undefined); setActiveRun(undefined); }
+  async function saveDraft(): Promise<TestingScenario | undefined> {
+    const current = draftRef.current;
+    if (!current) return;
+    if (JSON.stringify(current) === savedJson) return current;
+    setBusy('save');
+    try {
+      const result = await testingApi<TestingScenario | { scenario: TestingScenario }>(`/scenarios/${encodeURIComponent(current.id)}`, { method: 'PUT', body: JSON.stringify({ ...current, expectedRevision: current.revision }) });
+      const saved = 'scenario' in result ? result.scenario : result;
+      setSavedJson(JSON.stringify(saved));
+      setDraft(latest => latest && latest.id === current.id ? JSON.stringify(latest) === JSON.stringify(current) ? saved : { ...latest, revision: saved.revision, updatedAt: saved.updatedAt } : latest);
+      setData(previous => previous ? { ...previous, scenarios: [saved, ...previous.scenarios.filter(item => item.id !== saved.id)] } : previous);
+      return saved;
+    } catch (cause) { setError(messageOf(cause)); return; } finally { setBusy(''); }
+  }
+  useEffect(() => { const onKey = (event: KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && draftRef.current) { event.preventDefault(); if (!busy) void saveDraft(); } if (event.key === 'Escape') setMobileNav(false); }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, [savedJson, busy]);
+  async function openScenario(id: string) { if (dirty && !await saveDraft()) return; const scenario = data?.scenarios.find(item => item.id === id); if (!scenario) return; loadScenario(scenario); setActiveJob(undefined); navigate('editor', scenario.id); }
+  async function action(name: string, task: () => Promise<void>) { if (busy) return; setBusy(name); setError(''); try { await task(); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(''); } }
+  async function beginBusiness() { if (!request.trim()) return; await action('business', async () => { const job = await testingPost<TestingAgentJob>('/jobs/business', { request, model }); setActiveJob(job); setAgentDetail(true); }); }
+  async function approve() { const saved = await saveDraft(); if (!saved) return; await action('approve', async () => { await testingPost(`/scenarios/${encodeURIComponent(saved.id)}/approve`, { revision: saved.revision }); await refresh(); setCompiled(await testingApi<TestingCompiledScenario>(`/scenarios/${encodeURIComponent(saved.id)}/compile`)); setNotice('Der fachliche Ablauf ist freigegeben. Jetzt kann die technische Umsetzung beginnen.'); }); }
+  async function technical() { if (!draft || dirty) return; await action('technical', async () => { const job = await testingPost<TestingAgentJob>('/jobs/technical', { scenarioId: draft.id, revision: draft.revision, model }); setActiveJob(job); setAgentDetail(true); }); }
+  async function run() { if (!draft || dirty) return; await action('run', async () => { const next = await testingPost<TestingRun>(`/scenarios/${encodeURIComponent(draft.id)}/run`, { revision: draft.revision }); setActiveRun(next); }); }
+  async function override(text: string) { if (!draft || !selected) return; const saved = await saveDraft(); if (!saved) return; await action('override', async () => { const job = await testingPost<TestingAgentJob>(`/scenarios/${encodeURIComponent(saved.id)}/interpret-override`, { instanceId: selected, text, model, revision: saved.revision }); setActiveJob(job); setAgentDetail(true); }); }
+  function reviewOverride(job: TestingAgentJob) {
+    const proposal = overrideProposal(job);
+    if (!proposal) return;
+    setPendingOverride({ ...proposal, job });
+    setOverrideError('');
+    setActiveJob(job);
+    setAgentDetail(false);
+  }
+  async function applyOverride() {
+    const review = pendingOverride;
+    if (!review) return;
+    await action('apply-override', async () => {
+      setOverrideError('');
+      try {
+        const current = draftRef.current;
+        const issue = overrideReviewIssue(review, current, compiled, JSON.stringify(current) !== savedJson);
+        if (!current || issue) { setOverrideError(issue ?? 'Der zugehörige Testfall ist nicht geöffnet.'); return; }
+        const currentJson = JSON.stringify(current);
+        const fresh = await testingApi<TestingCompiledScenario>(`/scenarios/${encodeURIComponent(current.id)}/compile`);
+        const latest = draftRef.current;
+        const freshIssue = overrideReviewIssue(review, latest, fresh, JSON.stringify(latest) !== savedJson);
+        if (freshIssue || JSON.stringify(latest) !== currentJson) { setOverrideError(freshIssue ?? 'Der lokale Entwurf wurde während der Prüfung geändert. Bitte prüfe die Ausnahme erneut.'); return; }
+        setDraft(structuredClone(review.scenario));
+        setPendingOverride(undefined);
+        setAgentDetail(false);
+        setNotice('Die Ausnahme wurde in den lokalen Entwurf übernommen. Speichere den Testfall, um die Änderung zu sichern.');
+      } catch (cause) { setOverrideError(messageOf(cause)); }
+    });
+  }
+  function editBlocks(blocks: TestingBlockInstance[]) { setDraft(current => current ? { ...current, blocks } : current); }
+  function startWith(text: string) { setRequest(text); navigate('start'); setTimeout(() => document.getElementById('testing-request')?.focus(), 0); }
+  function addDefinition(definition: TestingBlockDefinition) { if (!draft || !data) { setNotice('Öffne zuerst einen Testfall oder lasse einen fachlichen Entwurf erstellen.'); navigate('start'); return; } const block = newInstance(definition, draft.blocks, data.catalog); editBlocks([...draft.blocks, block]); setSelected(block.id); navigate('editor', draft.id); }
+  const entries = draft && data ? flattenBlocks(draft.blocks, data.catalog) : [];
+  const entry = entries.find(item => item.path === selected);
+  function updateSelected(update: (block: TestingBlockInstance) => TestingBlockInstance | null) { if (draft && data && selected) editBlocks(updateBlockAtPath(draft.blocks, selected, data.catalog, update)); }
+  function updateValue(key: string, value: TestingValue) { if (!draft || !data || !entry) return; if (entry.inherited && entry.parent) { const relative = entry.path.slice(entry.parent.path.length + 1); editBlocks(updateBlockAtPath(draft.blocks, entry.parent.path, data.catalog, parent => ({ ...parent, overrides: { ...parent.overrides, [relative]: { ...parent.overrides?.[relative], [key]: value } } }))); } else updateSelected(block => ({ ...block, inputs: { ...block.inputs, [key]: value } })); }
+  function moveSelected(direction: number) { if (!draft || !data || !entry) return; const move = (blocks: TestingBlockInstance[]) => { const index = blocks.findIndex(block => block.id === entry.block.id); if (index < 0 || index + direction < 0 || index + direction >= blocks.length) return blocks; const next = [...blocks]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; return next; }; if (entry.parent) editBlocks(updateBlockAtPath(draft.blocks, entry.parent.path, data.catalog, parent => ({ ...parent, children: move(parent.children ?? entry.parent?.definition?.body ?? []) }))); else editBlocks(move(draft.blocks)); }
+  function duplicateSelected() { if (!entry || !draft || !data || !entry.definition) return; const copy = createTestingInstance(entry.definition); copy.inputs = structuredClone(entry.block.inputs); copy.overrides = structuredClone(entry.block.overrides); copy.children = structuredClone(entry.block.children); const append = (blocks: TestingBlockInstance[]) => { const next = [...blocks]; next.splice(next.findIndex(block => block.id === entry.block.id) + 1, 0, copy); return next; }; if (entry.parent) editBlocks(updateBlockAtPath(draft.blocks, entry.parent.path, data.catalog, parent => ({ ...parent, children: append(parent.children ?? entry.parent?.definition?.body ?? []) }))); else editBlocks(append(draft.blocks)); setSelected(entry.parent ? `${entry.parent.path}/${copy.id}` : copy.id); }
+  async function saveDefinition(definition: TestingBlockDefinition) { await testingPost('/definitions', { definition }); const next = await refresh(); if (draft && entry && definition.supersedes && testingVersionKey(entry.block.definition) === testingVersionKey(definition.supersedes)) { const match = next.catalog.definitions.find(item => testingVersionKey(item) === testingVersionKey(definition)); if (match) updateSelected(block => ({ ...block, definition: { id: match.id, version: match.version } })); } setNotice(`„${definition.name}“ wurde als Version ${definition.version} gespeichert.`); }
+
+  return <div className={`testing-app ${mobileNav ? 'nav-open' : ''}`}><a className="t-skip" href="#testing-main">Zum Inhalt</a><header className="t-topbar"><a className="t-brand" href="/testing" onClick={event => { event.preventDefault(); navigate('start'); }}><span className="t-brand-mark"><i /><i /><i /></span><strong>folio</strong><span>TESTSTUDIO</span></a><nav aria-label="Teststudio-Navigation">{navigation.map(({ id, label, icon: Icon }) => <a key={id} href={id === 'start' ? '/testing' : `/testing/${id}`} aria-current={view === id || id === 'start' && view === 'editor' ? 'page' : undefined} onClick={event => { event.preventDefault(); navigate(id); }}><Icon size={15} />{label}</a>)}</nav><button className="t-local-state" onClick={() => setShowSettings(true)}><i />Lokal<Settings2 size={14} /></button><button className="t-icon t-mobile-menu" aria-label={mobileNav ? "Navigation schließen" : "Navigation öffnen"} aria-expanded={mobileNav} onClick={() => setMobileNav(!mobileNav)}>{mobileNav ? <X size={20} /> : <Menu size={20} />}</button></header><main id="testing-main">{error && <div className="t-global-notice"><Notice tone="error" onClose={() => setError('')}>{error}</Notice></div>}{notice && <div className="t-global-notice"><Notice tone="success" onClose={() => setNotice('')}>{notice}</Notice></div>}{!data ? <div className="t-loading-page">{error ? <button className="t-button" onClick={() => { setError(''); refresh().catch(cause => setError(messageOf(cause))); }}>Erneut verbinden</button> : <Spinner label="Teststudio wird geöffnet" />}</div> : <>
+    {view === 'start' && <div className="t-start-page"><div className="t-start-main"><div className="t-start-intro"><span className="t-eyebrow"><Leaf size={13} />TIERVERSICHERUNG · FACHLICHE TESTS</span><h1>Was möchtest du<br /><em>im Portal prüfen?</em></h1><p>Beschreibe den Fall in deinen Worten. Die KI liest das Fachwissen und baut einen Ablauf, den du als Scratch-Blöcke prüfen und bearbeiten kannst.</p></div><div className="t-request-card"><label htmlFor="testing-request">Deine Anforderung</label><textarea id="testing-request" value={request} onChange={event => setRequest(event.target.value)} placeholder="Ich hätte gerne eine Lebensversicherung für eine Kuh. Die Versicherungssumme ist so hoch, dass eine Direktionsanfrage entstehen soll …" rows={5} /><div className="t-request-bottom"><fieldset className="t-model-choice"><legend>Modell</legend>{(['luna', 'sol'] as const).map(value => <label key={value} className={model === value ? 'selected' : ''}><input type="radio" name="testing-model" checked={model === value} onChange={() => setModel(value)} /><span>{value === 'luna' ? 'Luna' : 'Sol'}</span></label>)}</fieldset><button className="t-button primary" disabled={actionLocked || !request.trim()} onClick={beginBusiness}>{busy === 'business' ? <Spinner label="Wird gestartet" /> : <><Sparkles size={16} />Fachlichen Entwurf erstellen <ArrowRight size={16} /></>}</button></div></div><p className="t-request-caption">Die lokale Codex CLI arbeitet mit deinem Modell. Du gibst den Entwurf frei, bevor die technische Phase beginnt.</p><div className="t-example-heading"><span>Oder beginne mit einem Beispiel</span><span>Zum Anpassen</span></div><div className="t-examples">{examples.map(example => <button key={example.tag} onClick={() => { setRequest(example.text); document.getElementById('testing-request')?.focus(); }}><span className="t-example-tag">{example.tag}</span><h3>{example.title}</h3><p>{example.detail}</p><ArrowRight size={16} /></button>)}</div><button className="t-method-link" onClick={() => navigate('method')}><BookOpen size={18} /><span>Warum Blöcke, Wissen und zwei Freigaben?<small>Die Methode Schritt für Schritt am Kuhbeispiel verstehen</small></span><ArrowRight size={17} /></button></div><aside className="t-saved-tests"><div className="t-section-heading"><h2>Gespeicherte Testfälle</h2><span>{data.scenarios.length}</span></div><p>Jeder Test besitzt seinen eigenen Ablauf und eigene Testdaten.</p><div>{data.scenarios.map(scenario => <button className="t-saved-test" key={scenario.id} onClick={() => void openScenario(scenario.id)}><span className={`t-scenario-dot ${scenario.source}`} /><span><strong>{scenario.title}</strong><small>{scenario.source === 'seed' ? 'Vorbereiteter Lernfall' : scenario.source === 'agent' ? 'Mit KI entworfen' : 'Fachlicher Entwurf'} · Revision {scenario.revision}</small><em>{scenario.expectedOutcome}</em></span><ChevronRight size={16} /></button>)}</div><div className="t-how-summary"><h3>Du behältst die Entscheidung</h3><ol><li><span>1</span>Anforderung beschreiben</li><li><span>2</span>Fachliche Blöcke prüfen</li><li><span>3</span>Technik und Probelauf</li><li><span>4</span>Wiederverwendung prüfen</li></ol></div></aside></div>}
+    {view === 'editor' && (!draft ? <Empty title="Noch kein Testfall geöffnet" action={<button className="t-button primary" onClick={() => navigate('start')}>Anforderung beschreiben</button>}>Öffne einen gespeicherten Testfall oder beginne mit einer Anforderung.</Empty> : <div className="t-editor-page"><header className="t-editor-header"><div className="t-editor-title"><button className="t-icon" aria-label="Zur Testfallübersicht" onClick={() => navigate('start')}><ArrowLeft size={19} /></button><div><input aria-label="Name des Testfalls" value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /><span>Revision {draft.revision} · {dirty ? 'Ungespeicherte Änderungen' : 'Gespeichert'}{isApproved ? ' · Fachlich freigegeben' : ''}</span></div></div><div className="t-editor-actions">{dirty && <button className="t-button" disabled={!!busy} onClick={() => { const saved = data.scenarios.find(scenario => scenario.id === draft.id); if (saved) { setDraft(saved); setSavedJson(JSON.stringify(saved)); } }}>Verwerfen</button>}<button className="t-button" disabled={!!busy || !dirty} onClick={() => void saveDraft()}><Save size={15} />Speichern</button>{isApproved ? <button className="t-button technical" disabled={actionLocked} onClick={technical}><Code2 size={16} />Technik & Probelauf</button> : <button className="t-button primary" disabled={actionLocked || !draft.blocks.length} onClick={approve}><CheckCheck size={16} />Fachlich freigeben</button>}</div></header><Pipeline active={runRunning || activeRun ? 3 : activeJob?.phase === 'technical' && jobRunning ? 2 : 1} /><div className="t-intent-bar"><span><FileText size={15} />Anforderung</span><p>{draft.intent}</p><button className="t-icon" aria-label="Anforderung im Detail anzeigen" onClick={() => setAgentDetail(true)}><ChevronDown size={15} /></button></div>{savedOverrideJob && <div className="t-edit-notice"><span>Gespeicherter Änderungsvorschlag von {savedOverrideJob.model === 'luna' ? 'Luna' : 'Sol'} · Revision {savedOverrideJob.scenarioRevision}</span> <button className="t-button small" onClick={() => reviewOverride(savedOverrideJob)}>Vorgeschlagene Ausnahme prüfen</button></div>}{compiled?.issues.length ? <div className="t-validation-strip">{compiled.issues.slice(0, 3).map((issue, index) => <button key={index} onClick={() => { if (issue.path || issue.instanceId) { const target = entries.find(item => item.path === issue.path || item.block.id === issue.instanceId); if (target) { setSelected(target.path); scratch.current?.select(target.path); } } }}><span>{issue.severity === 'error' ? '!' : 'i'}</span>{issue.message}<ChevronRight size={13} /></button>)}</div> : dirty ? <div className="t-edit-notice">Fachliche Änderungen heben die Freigabe auf. Speichere den Entwurf, um alle Werte zu prüfen.</div> : null}<div className="t-workbench"><section className="t-canvas-panel"><div className="t-canvas-toolbar"><div className="t-tabs compact"><button className={!outline ? 'active' : ''} onClick={() => setOutline(false)}><Layers3 size={14} />Scratch-Blöcke</button><button className={outline ? 'active' : ''} onClick={() => setOutline(true)}><List size={14} />Ablaufliste</button></div><div className="t-canvas-tools"><button className="t-icon" aria-label="Rückgängig" onClick={() => scratch.current?.undo()}><Undo2 size={15} /></button><button className="t-icon" aria-label="Wiederholen" onClick={() => scratch.current?.redo()}><Redo2 size={15} /></button><span /><button className="t-icon" aria-label="Verkleinern" onClick={() => scratch.current?.zoom(-1)}><Minus size={15} /></button><button className="t-icon" aria-label="Vergrößern" onClick={() => scratch.current?.zoom(1)}><Plus size={15} /></button><button className="t-icon" aria-label="Alle Blöcke ins Bild setzen" onClick={() => scratch.current?.center()}><Maximize2 size={15} /></button></div></div><div className={`t-canvas ${outline ? 'outline-active' : ''}`}><Suspense fallback={<div className="t-scratch-loading"><Spinner label="Scratch-Arbeitsfläche wird geladen" /></div>}><ScratchWorkspace ref={scratch} blocks={draft.blocks} catalog={data.catalog} layout={layout} selected={selected} onChange={editBlocks} onSelect={setSelected} onLayout={patch => setLayout(current => current ? { ...current, ...patch } : current)} /></Suspense>{outline && <div className="t-outline" aria-label="Tastaturbedienbare Ablaufliste">{entries.map((item, index) => <button key={item.path} className={selected === item.path ? 'active' : ''} style={{ paddingLeft: `${16 + item.depth * 20}px` }} onClick={() => setSelected(item.path)}><span>{String(index + 1).padStart(2, '0')}</span><i className={`t-block-dot ${item.definition?.kind}`} /><strong>{item.block.label || item.definition?.name || item.block.definition.id}</strong><small>v{item.block.definition.version}</small></button>)}</div>}</div><footer className="t-canvas-footer"><span><i />Nur die verbundene Startkette wird ausgeführt</span><span>{entries.length} sichtbare Schritte</span></footer>{!!layout?.parkedBlocks?.length && <div className="t-parked-warning">{layout.parkedBlocks.length} lose Blöcke sind noch nicht im Ablauf. Verbinde sie mit dem Startblock, um sie auszuführen.</div>}</section><Inspector key={selected ?? 'none'} entry={entry} entries={entries} catalog={data.catalog} onChange={updateSelected} onValue={updateValue} onDefinition={definition => setDefinitionModal({ definition })} onKnowledge={setKnowledgeModal} onOverride={override} busy={actionLocked} onMove={moveSelected} onDuplicate={duplicateSelected} /></div><div className="t-editor-footer"><button className="t-button small" onClick={() => setDefinitionModal({})}><Plus size={14} />Fehlenden Block definieren</button><span>{draft.expectedOutcome}</span>{isApproved && compiled?.executable && <button className="t-button small technical" disabled={actionLocked} onClick={run}><Play size={14} />Mit vorhandener Technik ausführen</button>}</div>{activeRun && <RunInline run={activeRun} onOpen={() => navigate('runs')} />}</div>)}
+    {view === 'library' && <Library initialId={libraryId} catalog={data.catalog} onEdit={definition => setDefinitionModal({ definition })} onAdd={addDefinition} onKnowledge={setKnowledgeModal} onImpact={id => { setBindingId(id); navigate('graph'); }} />}
+    {view === 'knowledge' && <Knowledge catalog={data.catalog} selectedId={knowledgeId} onSelect={setKnowledgeId} onDefinition={id => { setLibraryId(id); navigate('library'); }} />}
+    {view === 'graph' && <Graph key={bindingId ?? 'graph'} catalog={data.catalog} initialBinding={bindingId} onScenario={id => void openScenario(id)} />}
+    {view === 'runs' && <RunsPage runs={data.runs} jobs={data.jobs} activeRun={activeRun} onScenario={id => void openScenario(id)} onRefresh={async () => { const next = await refresh(); setActiveRun(current => next.runs.find(run => run.id === current?.id)); }} onImpact={id => { setBindingId(id); navigate('graph'); }} />}
+    {view === 'method' && <Method onStart={startWith} />}
+  </>}</main>{activeJob && <div className={`t-job-dock ${jobRunning ? 'running' : activeJob.status}`}><button onClick={() => setAgentDetail(true)}>{jobRunning ? <Spinner label={phaseLabels[activeJob.phase]} /> : <><Sparkles size={17} /><strong>{phaseLabels[activeJob.phase]}</strong></>}<span>{statusLabels[activeJob.status]} · {activeJob.model === 'luna' ? 'Luna' : 'Sol'}</span><ChevronRight size={15} /></button>{!jobRunning && <button className="t-icon" aria-label="Agentenstatus ausblenden" onClick={() => setActiveJob(undefined)}><X size={14} /></button>}</div>}{agentDetail && <Modal title={activeJob ? phaseLabels[activeJob.phase] : 'Anforderung und fachlicher Entwurf'} subtitle={activeJob ? `${activeJob.model === 'luna' ? 'Luna' : 'Sol'} · ${statusLabels[activeJob.status]} · ${formatDate(activeJob.startedAt)}` : draft?.title} onClose={() => setAgentDetail(false)} wide>{activeJob ? <><p className="t-job-prompt">{activeJob.prompt}</p>{activeJob.error && <Notice tone="error">{activeJob.error}</Notice>}<AgentEvents job={activeJob} />{activeJob.result !== undefined && <><AgentResult result={activeJob.result} /><DuplicateReview job={activeJob} catalog={data!.catalog} onResolved={async scenario => { const next = await refresh(); loadScenario(scenario, next); setAgentDetail(false); navigate('editor', scenario.id); }} /></>}<div className="t-dialog-actions">{jobRunning && <button className="t-button" onClick={() => void action('cancel', async () => { const job = await testingPost<TestingAgentJob>(`/jobs/${encodeURIComponent(activeJob.id)}/cancel`, {}); setActiveJob(job); })}>KI-Auftrag abbrechen</button>}<button className="t-button primary" onClick={() => overrideProposal(activeJob) ? reviewOverride(activeJob) : setAgentDetail(false)}>{overrideProposal(activeJob) ? 'Vorgeschlagene Ausnahme prüfen' : activeJob.status === 'completed' ? 'Entwurf ansehen' : 'Im Hintergrund weiterarbeiten'}</button></div></> : <><p className="t-lead small">{draft?.intent}</p><h3>Erwartetes Ergebnis</h3><p>{draft?.expectedOutcome}</p><JsonView value={draft} label="Testfalldaten anzeigen" /></>}</Modal>}{pendingOverride && <Modal title="Vorgeschlagene Ausnahme prüfen" subtitle="Der gespeicherte Testfall bleibt bis zur Übernahme unverändert." onClose={() => setPendingOverride(undefined)} wide><p>{pendingOverride.draft?.explanation ?? 'Die KI hat die Anforderung auf die Werte dieses Bausteins abgebildet.'}</p>{pendingOverrideIssue && <Notice>{pendingOverrideIssue}</Notice>}{overrideError && <Notice tone="error">{overrideError}</Notice>}<OverrideDiff previous={draft?.blocks ?? []} next={pendingOverride.scenario.blocks} catalog={data!.catalog} /><JsonView value={pendingOverride.changes ?? pendingOverride.scenario} label="Vollständigen Änderungsvorschlag anzeigen" /><div className="t-dialog-actions"><button className="t-button" onClick={() => setPendingOverride(undefined)}>Verwerfen</button><button className="t-button primary" disabled={!!pendingOverrideIssue || !!busy} onClick={() => void applyOverride()}>{busy === 'apply-override' ? <Spinner label="Fachstand wird geprüft" /> : 'Änderungen in Entwurf übernehmen'}</button></div></Modal>}{definitionModal && data && <DefinitionDialog definition={definitionModal.definition} catalog={data.catalog} onSave={saveDefinition} onClose={() => setDefinitionModal(undefined)} />}{knowledgeModal && data && <Modal title="Verknüpftes Fachwissen" onClose={() => setKnowledgeModal(undefined)} wide>{data.catalog.knowledge.find(doc => doc.id === knowledgeModal) ? <KnowledgeArticle doc={data.catalog.knowledge.find(doc => doc.id === knowledgeModal)!} catalog={data.catalog} onDefinition={id => { setKnowledgeModal(undefined); setLibraryId(id); navigate('library'); }} onKnowledge={setKnowledgeModal} /> : <Empty title="Wissensdokument nicht gefunden" />}</Modal>}{showSettings && <Modal title="Lokale Ausführung" onClose={() => setShowSettings(false)}><p>Versicherungsportal und Teststudio verwenden getrennte Oberflächen. Der Testbrowser öffnet das Portal für jede Ausführung.</p>{data?.cli && <><div className="t-reference"><strong>Modellauswahl</strong><code>Luna: {data.cli.models.luna}<br />Sol: {data.cli.models.sol}</code></div><p>{data.cli.explanation}</p><JsonView value={data.cli} label="Codex-CLI-Konfiguration anzeigen" /></>}<a className="t-button" href="/portal" target="_blank" rel="noreferrer">Versicherungsportal separat öffnen <ArrowRight size={14} /></a></Modal>}</div>;
+}
+
+function Pipeline({ active }: { active: number }) { return <ol className="t-pipeline" aria-label="Ablauf der Testerstellung">{['Anforderung beschreiben', 'Fachlich prüfen', 'Technisch umsetzen', 'Ausführung & Wiederverwendung'].map((label, index) => <li key={label} className={`${active === index ? 'active' : ''} ${active > index ? 'done' : ''} ${index > 1 ? 'technical' : ''}`}><span>{active > index ? <Check size={13} /> : index + 1}</span>{label}</li>)}</ol>; }
+function AgentResult({ result }: { result: unknown }) { const parsed = result as { draft?: TestingBusinessDraft; explanation?: string; assumptions?: string[]; openQuestions?: string[]; unsupported?: string[] }; const value = parsed.draft ?? (parsed as { plan?: typeof parsed }).plan ?? parsed; return <div className="t-agent-result">{value.explanation && <><h3>Begründung des Agenten</h3><p>{value.explanation}</p></>}{value.assumptions?.length ? <><h3>Getroffene Annahmen</h3><ul>{value.assumptions.map(item => <li key={item}>{item}</li>)}</ul></> : null}{value.openQuestions?.length ? <><h3>Offene fachliche Fragen</h3><ul>{value.openQuestions.map(item => <li key={item}>{item}</li>)}</ul></> : null}{parsed.unsupported?.length ? <Notice>{parsed.unsupported.join(' ')}</Notice> : null}<JsonView value={result} label="Prüfbare Agentenausgabe anzeigen" /></div>; }
+function RunInline({ run, onOpen }: { run: TestingRun; onOpen: () => void }) { return <div className={`t-run-inline ${run.status}`}><span className="t-run-icon">{run.status === 'passed' ? <CheckCheck size={23} /> : <Code2 size={23} />}</span><div><strong>{statusLabels[run.status]} · {run.steps.filter(step => step.status === 'passed').length} von {run.steps.length} Schritten bestanden</strong><p>{run.error ?? `Testrevision ${run.scenarioRevision} · ${formatDate(run.startedAt)}`}</p></div><button className="t-button small technical" onClick={onOpen}>Nachweise ansehen <ArrowRight size={15} /></button></div>; }
+function RunsPage({ runs, jobs, activeRun, onScenario, onRefresh, onImpact }: { runs: TestingRun[]; jobs: TestingAgentJob[]; activeRun?: TestingRun; onScenario: (id: string) => void; onRefresh: () => Promise<void>; onImpact: (id: string) => void }) { const [selectedId, setSelectedId] = useState(activeRun?.id ?? runs[0]?.id); const allRuns = activeRun ? [activeRun, ...runs.filter(run => run.id !== activeRun.id)] : runs; const selected = allRuns.find(run => run.id === selectedId) ?? allRuns[0]; return <div className="t-page t-runs-page"><header className="t-page-heading"><div><span className="t-eyebrow">TECHNISCHES TESTFRAMEWORK</span><h1>Ausführungen und Nachweise</h1><p>Beobachtete Ergebnisse aus dem echten Browser mit den ausgeführten Block- und Bindungsversionen.</p></div></header>{!allRuns.length ? <Empty title="Noch kein Test ausgeführt">Prüfe einen fachlichen Entwurf und starte danach die technische Umsetzung.</Empty> : <div className="t-runs-layout"><aside>{allRuns.map(run => <button key={run.id} className={selected?.id === run.id ? 'active' : ''} onClick={() => setSelectedId(run.id)}><i className={`t-result-dot ${run.status}`} /><span><strong>{run.scenarioTitle}</strong><small>{statusLabels[run.status]} · Revision {run.scenarioRevision} · {formatDate(run.startedAt)}</small></span></button>)}</aside><section>{selected && <><div className="t-run-heading"><div><span className={`t-status ${selected.status}`}>{statusLabels[selected.status]}</span><h2>{selected.scenarioTitle}</h2><p>Revision {selected.scenarioRevision} · {formatDate(selected.startedAt)}</p></div><button className="t-button small" onClick={() => onScenario(selected.scenarioId)}>Testfall öffnen <ArrowRight size={14} /></button></div>{selected.error && <Notice tone="error">{selected.error}</Notice>}<div className="t-run-steps">{selected.steps.map((step, index) => <details key={step.id}><summary><span className={`t-step-status ${step.status}`}>{step.status === 'passed' ? <Check size={14} /> : index + 1}</span><strong>{step.label}</strong><small>{step.durationMs === undefined ? statusLabels[step.status] : `${(step.durationMs / 1000).toLocaleString('de-DE')} s`}</small><ChevronDown size={14} /></summary><div><p>{step.path}</p>{step.error && <Notice tone="error">{step.error}</Notice>}{step.screenshot && <a className="t-evidence-image" href={step.screenshot} target="_blank" rel="noreferrer"><img src={step.screenshot} alt={`Browsernachweis für ${step.label}`} /></a>}<JsonView value={step} label="Schrittnachweis anzeigen" />{selected.compiled.steps.find(item => item.id === step.id)?.binding && <button className="t-button small" onClick={() => onImpact(selected.compiled.steps.find(item => item.id === step.id)!.binding!.id)}><GitBranch size={14} />Bindung und betroffene Tests anzeigen</button>}</div></details>)}</div><div className="t-run-artifacts">{selected.artifacts?.trace && <a className="t-button small" href={selected.artifacts.trace} download>Playwright-Trace</a>}{selected.artifacts?.source && <a className="t-button small" href={selected.artifacts.source} target="_blank" rel="noreferrer">Ausgeführter Testcode</a>}{selected.artifacts?.manifest && <a className="t-button small" href={selected.artifacts.manifest} target="_blank" rel="noreferrer">Laufmanifest</a>}</div><JsonView value={selected.compiled} label="Unveränderliche Ausführungsmomentaufnahme anzeigen" /><ReuseReview run={selected} jobs={jobs} onRefresh={onRefresh} /></>}</section></div>}</div>; }
+function OverrideDiff({ previous, next, catalog }: { previous: TestingBlockInstance[]; next: TestingBlockInstance[]; catalog: TestingCatalog }) { const before = flattenBlocks(previous, catalog); const after = flattenBlocks(next, catalog); const rows = after.flatMap(entry => { const old = before.find(item => item.path === entry.path); const oldValues = old ? resolvedBlockInputs(old) : {}; const newValues = resolvedBlockInputs(entry); return Object.entries(newValues).filter(([key, value]) => JSON.stringify(oldValues[key]) !== JSON.stringify(value)).map(([key, value]) => ({ path: entry.path, name: entry.definition?.name ?? entry.block.definition.id, key, label: entry.definition?.inputs.find(input => input.key === key)?.label ?? key, before: oldValues[key], after: value })); }); return <div className="t-override-diff">{rows.length ? rows.map(row => <div key={`${row.path}:${row.key}`}><h4>{row.name} · {row.label}</h4><div><del>{JSON.stringify(row.before) ?? 'Nicht gesetzt'}</del><ArrowRight size={14} /><ins>{JSON.stringify(row.after)}</ins></div></div>) : <p>Die Änderung betrifft die Ablaufstruktur. Prüfe die vollständige Ausgabe unten.</p>}</div>; }
+
+function ReuseReview({ run, jobs, onRefresh }: { run: TestingRun; jobs: TestingAgentJob[]; onRefresh: () => Promise<void> }) {
+  const [requestedJob, setRequestedJob] = useState<{ runId: string; job: TestingAgentJob }>();
+  const [model, setModel] = useState<TestingModel>('luna');
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState('');
+  const startingRef = useRef(false);
+  const technicalJob = jobs.find(item => item.phase === 'technical' && (item.result as { run?: { id?: string } } | undefined)?.run?.id === run.id);
+  const previousJobId = (technicalJob?.result as { reuseJobId?: string } | undefined)?.reuseJobId;
+  const requested = requestedJob?.runId === run.id ? requestedJob.job : undefined;
+  const job = (requested ? jobs.find(item => item.id === requested.id) ?? requested : undefined)
+    ?? jobs.find(item => item.phase === 'reuse' && (item.result as { runId?: string } | undefined)?.runId === run.id)
+    ?? jobs.find(item => item.id === previousJobId && item.phase === 'reuse');
+  const running = job?.status === 'queued' || job?.status === 'running';
+  const canRetry = !running && !run.reuseSuggestions?.length;
+  async function retry() {
+    if (startingRef.current || !canRetry) return;
+    startingRef.current = true; setStarting(true); setError('');
+    try {
+      const next = await testingPost<TestingAgentJob>(`/runs/${encodeURIComponent(run.id)}/reuse`, { model });
+      setRequestedJob({ runId: run.id, job: next });
+      await onRefresh();
+    } catch (cause) { setError(messageOf(cause)); }
+    finally { startingRef.current = false; setStarting(false); }
+  }
+  if (run.status !== 'passed') return null;
+  return <section className="t-reuse-review">
+    <span className="t-eyebrow">AUS DIESEM TEST LERNEN</span><h2>Welche Teile sollen wiederverwendbar werden?</h2>
+    <p>Die KI schlägt Bausteine aus dem erfolgreichen Ablauf vor. Prüfe Namen und veränderbare Eingaben, bevor du einen Vorschlag übernimmst.</p>
+    {running ? <Spinner label="Der Wiederverwendungsagent untersucht den erfolgreichen Ablauf" /> : job?.status === 'failed' ? <Notice tone="error">Die Wiederverwendungsanalyse ist fehlgeschlagen. Der erfolgreiche Testlauf bleibt erhalten.</Notice> : job?.status === 'cancelled' ? <Notice>Die Wiederverwendungsanalyse wurde abgebrochen. Du kannst sie erneut starten.</Notice> : null}
+    {job?.error && <JsonView value={job.error} label="Fehlerdetails der Wiederverwendungsanalyse anzeigen" />}
+    {error && <Notice tone="error">{error}</Notice>}
+    {!!run.reuseSuggestions?.length ? run.reuseSuggestions.map(suggestion => <ReuseCard key={suggestion.id} suggestion={suggestion} jobId={job?.id} onRefresh={onRefresh} />) : !running && !job?.error ? <p className="t-caption">Für diesen Lauf liegt noch kein Vorschlag zur Übernahme vor.</p> : null}
+    {canRetry && <div className="t-dialog-actions">
+      <label className="t-field">Modell für Wiederverwendung<select aria-label="Modell für Wiederverwendung" value={model} disabled={starting} onChange={event => setModel(event.target.value as TestingModel)}><option value="luna">Luna</option><option value="sol">Sol</option></select></label>
+      <button className="t-button primary small" style={{ alignSelf: 'end' }} disabled={starting} onClick={() => void retry()}>{starting ? <Spinner label="Wird gestartet" /> : <><Sparkles size={14} />Wiederverwendung prüfen</>}</button>
+    </div>}
+  </section>;
+}
+function ReuseCard({ suggestion, jobId, onRefresh }: { suggestion: TestingReuseSuggestion; jobId?: string; onRefresh: () => Promise<void> }) {
+  const [name, setName] = useState(suggestion.name);
+  const [parameters, setParameters] = useState(suggestion.parameters);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const decided = suggestion.status !== 'suggested';
+  async function decide(accept: boolean) { if (!jobId) { setError('Der zugehörige Agentenauftrag wurde nicht gefunden. Lade die Ausführungen erneut.'); return; } setBusy(true); setError(''); try { await testingPost(`/reuse/${encodeURIComponent(jobId)}/${accept ? 'accept' : 'dismiss'}`, { proposalIds: [suggestion.id], ...(accept ? { edits: [{ id: suggestion.id, name, parameters }] } : {}) }); await onRefresh(); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
+  return <div className={`t-reuse-card ${decided ? 'decided' : ''}`}><div className="t-section-heading"><span className="t-kind workflow">Vorgeschlagener Baustein</span><span>{statusLabels[suggestion.status]}</span></div><div className="t-field"><label htmlFor={`reuse-name-${suggestion.id}`}>Name des wiederverwendbaren Blocks</label><input id={`reuse-name-${suggestion.id}`} value={name} onChange={event => setName(event.target.value)} disabled={decided || busy} /></div><p>{suggestion.reason}</p><div className="t-caption">Enthält {suggestion.instanceIds.length} Schritte aus diesem Testfall.</div>{suggestion.parameters.length > 0 && <fieldset className="t-reuse-parameters"><legend>Diese Werte sollen beim Verwenden änderbar sein</legend>{suggestion.parameters.map(parameter => <label key={parameter.key}><input type="checkbox" disabled={decided || busy} checked={parameters.some(item => item.key === parameter.key)} onChange={event => setParameters(current => event.target.checked ? [...current, parameter] : current.filter(item => item.key !== parameter.key))} /><span>{parameter.label}<small>{parameter.instanceId} · {parameter.input}</small></span></label>)}</fieldset>}{error && <Notice tone="error">{error}</Notice>}{suggestion.definitionRef && <div className="t-reference"><strong>Veröffentlicht in der Blockbibliothek</strong><code>{suggestion.definitionRef.id} · Version {suggestion.definitionRef.version}</code></div>}{!decided && <div className="t-dialog-actions"><button className="t-button small" disabled={busy} onClick={() => void decide(false)}>Vorschlag verwerfen</button><button className="t-button primary small" disabled={busy || !name.trim()} onClick={() => void decide(true)}>{busy ? <Spinner label="Wird gespeichert" /> : <><Plus size={14} />Als Baustein übernehmen</>}</button></div>}</div>;
+}
+function DuplicateReview({ job, catalog, onResolved }: { job: TestingAgentJob; catalog: TestingCatalog; onResolved: (scenario: TestingScenario) => Promise<void> }) {
+  const result = job.result as { needsBusinessReview?: boolean; duplicateDecisions?: { proposed: { id: string; version: string }; chosen: { id: string; version: string } | null; reason: string; decision: string; compatible: boolean }[] } | undefined;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!result?.needsBusinessReview) return null;
+  const choices = result.duplicateDecisions?.filter(item => item.compatible && item.chosen && item.decision === 'reuse') ?? [];
+  async function resolve() { setBusy(true); setError(''); try { const next = await testingPost<{ scenario: TestingScenario }>(`/jobs/${encodeURIComponent(job.id)}/resolve-duplicates`, { choices: choices.map(item => ({ proposed: item.proposed, chosen: item.chosen })) }); await onResolved(next.scenario); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
+  return <section className="t-duplicate-review"><h3>Vorhandene Fähigkeiten bewusst wiederverwenden</h3><p>Die Prüfung hat Überschneidungen gefunden. Ein Ersatz ändert den fachlichen Ablauf und braucht deshalb erneut deine Freigabe.</p>{result.duplicateDecisions?.map(item => <div className="t-duplicate-candidate" key={testingVersionKey(item.proposed)}><strong>{catalog.definitions.find(definition => testingVersionKey(definition) === testingVersionKey(item.proposed))?.name ?? item.proposed.id}</strong><ArrowRight size={15} /><strong>{item.chosen ? catalog.definitions.find(definition => testingVersionKey(definition) === testingVersionKey(item.chosen!))?.name ?? item.chosen.id : 'Fachliche Entscheidung erforderlich'}</strong><p>{item.reason}</p><span>{item.compatible ? 'Eingaben und Ergebnisse sind kompatibel' : 'Die Definition muss fachlich überarbeitet werden'}</span></div>)}{error && <Notice tone="error">{error}</Notice>}{choices.length > 0 && <button className="t-button primary" onClick={() => void resolve()} disabled={busy}>{busy ? <Spinner label="Wird übernommen" /> : 'Vorhandenen Block übernehmen und neu prüfen'}</button>}</section>;
+}
+
+function AgentEvents({ job }: { job: TestingAgentJob }) {
+  const summaries = job.events.filter(event => event.kind === 'status' || event.kind === 'error' || event.kind === 'message' && event.message.length < 260 && !/^[\s]*[\[{]/.test(event.message));
+  const technicalEvents = job.events.filter(event => !summaries.includes(event));
+  return <><div className="t-agent-events" aria-live="polite">{summaries.map(event => <div key={event.id} className={event.kind}><time>{new Date(event.at).toLocaleTimeString('de-DE')}</time><span>{event.message}</span></div>)}</div>{technicalEvents.length > 0 && <details className="t-json"><summary>{technicalEvents.length} technische Agentenschritte und Rohdaten anzeigen</summary><div className="t-agent-events">{technicalEvents.map(event => <div key={event.id} className={event.kind}><time>{new Date(event.at).toLocaleTimeString('de-DE')}</time><span>{event.message}</span></div>)}</div></details>}</>;
+}

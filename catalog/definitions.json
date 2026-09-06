@@ -1,0 +1,1058 @@
+[
+  {
+    "id": "context.actor",
+    "version": 1,
+    "kind": "context",
+    "label": "As actor",
+    "description": "Run the enclosed actions as one named role. Order matters.",
+    "category": "Context",
+    "inputs": [
+      {
+        "key": "role",
+        "label": "Role",
+        "type": "Role",
+        "required": true,
+        "default": "Broker",
+        "options": [
+          {
+            "value": "Broker",
+            "label": "Broker"
+          },
+          {
+            "value": "Senior underwriter",
+            "label": "Senior underwriter"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "concept:actor-context"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "contextType": "actor"
+  },
+  {
+    "id": "context.location",
+    "version": 1,
+    "kind": "context",
+    "label": "For location",
+    "description": "Apply configuration to one named insured location before creating a draft.",
+    "category": "Context",
+    "inputs": [
+      {
+        "key": "location",
+        "label": "Location",
+        "type": "LocationName",
+        "required": true,
+        "default": "Warehouse",
+        "options": [
+          {
+            "value": "Factory",
+            "label": "Factory"
+          },
+          {
+            "value": "Warehouse",
+            "label": "Warehouse"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "concept:insured-location"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "contextType": "location"
+  },
+  {
+    "id": "property.create-standard",
+    "version": 1,
+    "kind": "action",
+    "label": "Create standard policy",
+    "description": "Set up a synthetic manufacturer and save a commercial property draft. Quoting and issuance are separate actions.",
+    "category": "Creation",
+    "inputs": [
+      {
+        "key": "template",
+        "label": "Policy template",
+        "type": "PolicyTemplateRef",
+        "required": true,
+        "default": "two-location-property@3"
+      },
+      {
+        "key": "customer",
+        "label": "Customer fixture",
+        "type": "CustomerFixtureRef",
+        "required": true,
+        "default": "synthetic-manufacturer@1"
+      }
+    ],
+    "outputs": [
+      {
+        "key": "policy",
+        "label": "Draft policy",
+        "type": "PolicyRef"
+      },
+      {
+        "key": "factory",
+        "label": "Factory",
+        "type": "LocationRef"
+      },
+      {
+        "key": "warehouse",
+        "label": "Warehouse",
+        "type": "LocationRef"
+      },
+      {
+        "key": "customer",
+        "label": "Customer",
+        "type": "CustomerFixtureRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "workflow:create-draft",
+      "concept:insured-location",
+      "rule:location-eligibility"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "acceptsChanges": true,
+    "allowedRoles": [
+      "Broker"
+    ],
+    "completion": "Draft saved, no quote requested",
+    "operation": "createDraft",
+    "implementationRef": "binding:createDraft@1"
+  },
+  {
+    "id": "location.set-country",
+    "version": 1,
+    "kind": "modifier",
+    "label": "Set location country",
+    "description": "Change risk-location country and use the matching synthetic address. Headquarters and issuing market stay unchanged.",
+    "category": "Configuration",
+    "inputs": [
+      {
+        "key": "country",
+        "label": "Country",
+        "type": "Country",
+        "required": true,
+        "default": "IT",
+        "options": [
+          {
+            "value": "DE",
+            "label": "Germany"
+          },
+          {
+            "value": "IT",
+            "label": "Italy"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "rule:location-eligibility"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing"
+  },
+  {
+    "id": "location.set-sum-insured",
+    "version": 1,
+    "kind": "modifier",
+    "label": "Set sum insured",
+    "description": "Set the declared total value at this insured location. Fire limit follows the declared value.",
+    "category": "Configuration",
+    "inputs": [
+      {
+        "key": "amount",
+        "label": "Sum insured",
+        "type": "Money",
+        "required": true,
+        "default": 1500000
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "concept:insured-location"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing"
+  },
+  {
+    "id": "location.add-flood",
+    "version": 1,
+    "kind": "modifier",
+    "label": "Add flood coverage",
+    "description": "Add or override the Flood limit at this location. Limits above EUR 500,000 require referral.",
+    "category": "Configuration",
+    "inputs": [
+      {
+        "key": "limit",
+        "label": "Flood limit",
+        "type": "Money",
+        "required": true,
+        "default": 1000000
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "rule:flood-referral"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing"
+  },
+  {
+    "id": "modifier.free-text",
+    "version": 1,
+    "kind": "free-text",
+    "label": "Describe a change",
+    "description": "Interpret supported words into explicit changes, then confirm the preview before running.",
+    "category": "Configuration",
+    "inputs": [
+      {
+        "key": "text",
+        "label": "Change request",
+        "type": "String",
+        "required": true,
+        "default": "This location should be in Italy instead of Germany"
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "workflow:interpret-change",
+      "rule:location-eligibility"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing"
+  },
+  {
+    "id": "property.request-quote",
+    "version": 1,
+    "kind": "action",
+    "label": "Request quote",
+    "description": "Price the exact draft policy and create its quote request.",
+    "category": "Underwriting",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "key": "quote",
+        "label": "Quote request",
+        "type": "QuoteRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "rule:flood-referral"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Broker"
+    ],
+    "completion": "Quoted or Referred",
+    "operation": "requestQuote",
+    "implementationRef": "binding:requestQuote@1"
+  },
+  {
+    "id": "quote.expect-status",
+    "version": 1,
+    "kind": "verification",
+    "label": "Expect quote status",
+    "description": "Verify the exact quote request and, when supplied, its referral reason.",
+    "category": "Verification",
+    "inputs": [
+      {
+        "key": "quote",
+        "label": "Quote request",
+        "type": "QuoteRef",
+        "required": true,
+        "default": {
+          "ref": "quote"
+        }
+      },
+      {
+        "key": "status",
+        "label": "Expected status",
+        "type": "String",
+        "required": true,
+        "default": "Referred",
+        "options": [
+          {
+            "value": "Referred",
+            "label": "Referred"
+          },
+          {
+            "value": "Quoted",
+            "label": "Quoted"
+          },
+          {
+            "value": "Approved",
+            "label": "Approved"
+          }
+        ]
+      },
+      {
+        "key": "reason",
+        "label": "Reason includes",
+        "type": "String",
+        "required": false,
+        "default": "Flood limit exceeds broker authority"
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "rule:flood-referral"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "operation": "expectQuote",
+    "implementationRef": "binding:expectQuote@1"
+  },
+  {
+    "id": "property.attach-survey",
+    "version": 1,
+    "kind": "action",
+    "label": "Attach risk survey",
+    "description": "Attach suitable synthetic evidence to the named affected location on the exact policy.",
+    "category": "Underwriting",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      },
+      {
+        "key": "location",
+        "label": "Insured location",
+        "type": "LocationRef",
+        "required": true,
+        "default": {
+          "ref": "warehouse"
+        }
+      },
+      {
+        "key": "document",
+        "label": "Survey fixture",
+        "type": "DocumentFixtureRef",
+        "required": true,
+        "default": "approved-synthetic-survey@1"
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "rule:flood-referral",
+      "fixture:risk-survey"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Senior underwriter"
+    ],
+    "operation": "attachSurvey",
+    "implementationRef": "binding:attachSurvey@1"
+  },
+  {
+    "id": "quote.approve",
+    "version": 1,
+    "kind": "action",
+    "label": "Approve referral",
+    "description": "Approve the exact quote after each referred location has suitable evidence.",
+    "category": "Underwriting",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      },
+      {
+        "key": "quote",
+        "label": "Quote request",
+        "type": "QuoteRef",
+        "required": true,
+        "default": {
+          "ref": "quote"
+        }
+      },
+      {
+        "key": "notes",
+        "label": "Approval notes",
+        "type": "String",
+        "required": true,
+        "default": "Risk survey reviewed. Referral approved."
+      }
+    ],
+    "outputs": [
+      {
+        "key": "approvedQuote",
+        "label": "Approved quote",
+        "type": "ApprovalRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "rule:flood-referral",
+      "workflow:approve-referral"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Senior underwriter"
+    ],
+    "operation": "approveQuote",
+    "implementationRef": "binding:approveQuote@1"
+  },
+  {
+    "id": "property.issue",
+    "version": 1,
+    "kind": "action",
+    "label": "Issue policy",
+    "description": "Issue the exact approved or quoted request and create its schedule.",
+    "category": "Issuance",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      },
+      {
+        "key": "quote",
+        "label": "Approved quote",
+        "type": "ApprovalRef",
+        "required": true,
+        "default": {
+          "ref": "approvedQuote"
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "key": "issuedPolicy",
+        "label": "Issued policy",
+        "type": "PolicyRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "workflow:issue-policy"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Broker"
+    ],
+    "completion": "Issued policy and schedule",
+    "operation": "issuePolicy",
+    "implementationRef": "binding:issuePolicy@1"
+  },
+  {
+    "id": "policy.expect-status",
+    "version": 1,
+    "kind": "verification",
+    "label": "Expect policy state",
+    "description": "Verify a saved policy state and version without requesting a quote.",
+    "category": "Verification",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      },
+      {
+        "key": "status",
+        "label": "Expected state",
+        "type": "String",
+        "required": true,
+        "default": "Draft",
+        "options": [
+          {
+            "value": "Draft",
+            "label": "Draft"
+          },
+          {
+            "value": "Issued",
+            "label": "Issued"
+          },
+          {
+            "value": "Referred",
+            "label": "Referred"
+          }
+        ]
+      },
+      {
+        "key": "version",
+        "label": "Policy version",
+        "type": "Number",
+        "required": true,
+        "default": 1
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "workflow:create-draft"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "operation": "expectPolicy",
+    "implementationRef": "binding:expectPolicy@1"
+  },
+  {
+    "id": "policy.verify-schedule",
+    "version": 1,
+    "kind": "verification",
+    "label": "Verify policy schedule",
+    "description": "Check issued state, both locations, Warehouse values, headquarters, market and policy version.",
+    "category": "Verification",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "issuedPolicy"
+        }
+      },
+      {
+        "key": "warehouseCountry",
+        "label": "Warehouse country",
+        "type": "Country",
+        "required": true,
+        "default": "IT",
+        "options": [
+          {
+            "value": "DE",
+            "label": "Germany"
+          },
+          {
+            "value": "IT",
+            "label": "Italy"
+          }
+        ]
+      },
+      {
+        "key": "warehouseFloodLimit",
+        "label": "Warehouse flood limit",
+        "type": "Money",
+        "required": true,
+        "default": 1000000
+      },
+      {
+        "key": "warehouseSumInsured",
+        "label": "Warehouse sum insured",
+        "type": "Money",
+        "required": true,
+        "default": 1500000
+      },
+      {
+        "key": "version",
+        "label": "Policy version",
+        "type": "Number",
+        "required": true,
+        "default": 1
+      },
+      {
+        "key": "headquartersCountry",
+        "label": "Headquarters country",
+        "type": "Country",
+        "required": true,
+        "default": "DE",
+        "options": [
+          {
+            "value": "DE",
+            "label": "Germany"
+          },
+          {
+            "value": "IT",
+            "label": "Italy"
+          }
+        ]
+      },
+      {
+        "key": "issuingMarket",
+        "label": "Issuing market",
+        "type": "Country",
+        "required": true,
+        "default": "DE",
+        "options": [
+          {
+            "value": "DE",
+            "label": "Germany"
+          },
+          {
+            "value": "IT",
+            "label": "Italy"
+          }
+        ]
+      },
+      {
+        "key": "locations",
+        "label": "Included locations",
+        "type": "Object",
+        "required": true,
+        "default": [
+          "Factory",
+          "Warehouse"
+        ]
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "workflow:issue-policy",
+      "concept:insured-location"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "operation": "expectSchedule",
+    "implementationRef": "binding:expectSchedule@1"
+  },
+  {
+    "id": "property.amend",
+    "version": 1,
+    "kind": "action",
+    "label": "Amend insured value",
+    "description": "Increase a named location value on an issued policy and save a dated new version.",
+    "category": "Amendments",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Issued policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "issuedPolicy"
+        }
+      },
+      {
+        "key": "location",
+        "label": "Insured location",
+        "type": "LocationRef",
+        "required": true,
+        "default": {
+          "ref": "warehouse"
+        }
+      },
+      {
+        "key": "sumInsured",
+        "label": "New sum insured",
+        "type": "Money",
+        "required": true,
+        "default": 2000000
+      },
+      {
+        "key": "effectiveDate",
+        "label": "Effective date",
+        "type": "Date",
+        "required": true,
+        "default": "$term-month-two"
+      },
+      {
+        "key": "reason",
+        "label": "Reason",
+        "type": "String",
+        "required": true,
+        "default": "Warehouse inventory increased after quarterly review."
+      }
+    ],
+    "outputs": [
+      {
+        "key": "amendedPolicy",
+        "label": "Amended policy",
+        "type": "PolicyRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "workflow:amend-policy"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Broker",
+      "Senior underwriter"
+    ],
+    "completion": "Issued policy version increased",
+    "operation": "amendPolicy",
+    "implementationRef": "binding:amendPolicy@1"
+  },
+  {
+    "id": "quote.attempt-broker-approval",
+    "version": 1,
+    "kind": "action",
+    "label": "Attempt approval as broker",
+    "description": "Exercise the forbidden approval action intentionally. This is a supported negative-test operation.",
+    "category": "Negative tests",
+    "inputs": [
+      {
+        "key": "policy",
+        "label": "Policy",
+        "type": "PolicyRef",
+        "required": true,
+        "default": {
+          "ref": "policy"
+        }
+      },
+      {
+        "key": "quote",
+        "label": "Quote request",
+        "type": "QuoteRef",
+        "required": true,
+        "default": {
+          "ref": "quote"
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "key": "attempt",
+        "label": "Approval attempt",
+        "type": "AttemptRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "rule:approval-authority"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "allowedRoles": [
+      "Broker"
+    ],
+    "operation": "attemptBrokerApproval",
+    "implementationRef": "binding:attemptBrokerApproval@1"
+  },
+  {
+    "id": "access.expect-denied",
+    "version": 1,
+    "kind": "verification",
+    "label": "Expect access denied",
+    "description": "Verify that the attempted operation was denied by the application.",
+    "category": "Negative tests",
+    "inputs": [
+      {
+        "key": "attempt",
+        "label": "Approval attempt",
+        "type": "AttemptRef",
+        "required": true,
+        "default": {
+          "ref": "attempt"
+        }
+      }
+    ],
+    "outputs": [],
+    "knowledgeRefs": [
+      "rule:approval-authority"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "operation": "expectAccessDenied",
+    "implementationRef": "binding:expectAccessDenied@1"
+  },
+  {
+    "id": "workflow.issue-referred",
+    "version": 1,
+    "kind": "workflow",
+    "label": "Issue referred property policy",
+    "description": "Create, refer, survey, approve and issue a two-location policy. Parameters change this use; the shared body stays pinned.",
+    "category": "Reusable workflows",
+    "inputs": [
+      {
+        "key": "country",
+        "label": "Warehouse country",
+        "type": "Country",
+        "required": true,
+        "default": "IT",
+        "options": [
+          {
+            "value": "DE",
+            "label": "Germany"
+          },
+          {
+            "value": "IT",
+            "label": "Italy"
+          }
+        ]
+      },
+      {
+        "key": "sumInsured",
+        "label": "Warehouse sum insured",
+        "type": "Money",
+        "required": true,
+        "default": 1500000
+      },
+      {
+        "key": "floodLimit",
+        "label": "Warehouse flood limit",
+        "type": "Money",
+        "required": true,
+        "default": 1000000,
+        "description": "Use a value above EUR 500,000 for this referral workflow."
+      },
+      {
+        "key": "survey",
+        "label": "Risk survey",
+        "type": "DocumentFixtureRef",
+        "required": true,
+        "default": "approved-synthetic-survey@1"
+      }
+    ],
+    "outputs": [
+      {
+        "key": "issuedPolicy",
+        "label": "Issued policy",
+        "type": "PolicyRef"
+      },
+      {
+        "key": "warehouse",
+        "label": "Warehouse",
+        "type": "LocationRef"
+      },
+      {
+        "key": "factory",
+        "label": "Factory",
+        "type": "LocationRef"
+      },
+      {
+        "key": "quote",
+        "label": "Quote request",
+        "type": "QuoteRef"
+      }
+    ],
+    "knowledgeRefs": [
+      "workflow:approve-referral",
+      "workflow:issue-policy",
+      "rule:flood-referral"
+    ],
+    "readiness": "ready",
+    "owner": "property-testing",
+    "body": [
+      {
+        "id": "broker-draft",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "draft",
+            "definition": {
+              "id": "property.create-standard",
+              "version": 1
+            },
+            "inputs": {
+              "template": "two-location-property@3",
+              "customer": "synthetic-manufacturer@1"
+            },
+            "outputs": {
+              "policy": "policy",
+              "factory": "factory",
+              "warehouse": "warehouse",
+              "customer": "customer"
+            },
+            "changes": [
+              {
+                "id": "warehouse-scope",
+                "definition": {
+                  "id": "context.location",
+                  "version": 1
+                },
+                "inputs": {
+                  "location": "Warehouse"
+                },
+                "changes": [
+                  {
+                    "id": "country",
+                    "definition": {
+                      "id": "location.set-country",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "country": {
+                        "param": "country"
+                      }
+                    }
+                  },
+                  {
+                    "id": "value",
+                    "definition": {
+                      "id": "location.set-sum-insured",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "amount": {
+                        "param": "sumInsured"
+                      }
+                    }
+                  },
+                  {
+                    "id": "flood",
+                    "definition": {
+                      "id": "location.add-flood",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "limit": {
+                        "param": "floodLimit"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "quote",
+            "definition": {
+              "id": "property.request-quote",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              }
+            },
+            "outputs": {
+              "quote": "quote"
+            }
+          },
+          {
+            "id": "referral-check",
+            "definition": {
+              "id": "quote.expect-status",
+              "version": 1
+            },
+            "inputs": {
+              "quote": {
+                "ref": "quote"
+              },
+              "status": "Referred",
+              "reason": "Flood limit exceeds broker authority"
+            }
+          }
+        ]
+      },
+      {
+        "id": "underwriter",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Senior underwriter"
+        },
+        "children": [
+          {
+            "id": "survey",
+            "definition": {
+              "id": "property.attach-survey",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "location": {
+                "ref": "warehouse"
+              },
+              "document": {
+                "param": "survey"
+              }
+            }
+          },
+          {
+            "id": "approval",
+            "definition": {
+              "id": "quote.approve",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "quote": {
+                "ref": "quote"
+              },
+              "notes": "Risk survey reviewed. Referral approved."
+            },
+            "outputs": {
+              "approvedQuote": "approvedQuote"
+            }
+          }
+        ]
+      },
+      {
+        "id": "broker-issue",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "issue",
+            "definition": {
+              "id": "property.issue",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "quote": {
+                "ref": "approvedQuote"
+              }
+            },
+            "outputs": {
+              "issuedPolicy": "issuedPolicy"
+            }
+          }
+        ]
+      }
+    ],
+    "exports": {
+      "issuedPolicy": {
+        "ref": "issuedPolicy"
+      },
+      "warehouse": {
+        "ref": "warehouse"
+      },
+      "factory": {
+        "ref": "factory"
+      },
+      "quote": {
+        "ref": "quote"
+      }
+    },
+    "completion": "Issued policy with evidence for its Warehouse referral"
+  }
+]

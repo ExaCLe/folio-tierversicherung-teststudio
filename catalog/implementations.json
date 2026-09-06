@@ -1,0 +1,156 @@
+[
+  {
+    "id": "binding:createDraft",
+    "revision": 1,
+    "operation": "createDraft",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "property.create-standard",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:requestQuote",
+    "revision": 1,
+    "operation": "requestQuote",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "property.request-quote",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:expectQuote",
+    "revision": 1,
+    "operation": "expectQuote",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "quote.expect-status",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:attachSurvey",
+    "revision": 1,
+    "operation": "attachSurvey",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "property.attach-survey",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:approveQuote",
+    "revision": 1,
+    "operation": "approveQuote",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "quote.approve",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:issuePolicy",
+    "revision": 1,
+    "operation": "issuePolicy",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "property.issue",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:expectPolicy",
+    "revision": 1,
+    "operation": "expectPolicy",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "policy.expect-status",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:expectSchedule",
+    "revision": 1,
+    "operation": "expectSchedule",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "policy.verify-schedule",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:amendPolicy",
+    "revision": 1,
+    "operation": "amendPolicy",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "property.amend",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:attemptBrokerApproval",
+    "revision": 1,
+    "operation": "attemptBrokerApproval",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "quote.attempt-broker-approval",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  },
+  {
+    "id": "binding:expectAccessDenied",
+    "revision": 1,
+    "operation": "expectAccessDenied",
+    "module": "e2e/helpers/insurance-driver.ts",
+    "export": "executeCompiledStep",
+    "supportedDefinitions": [
+      {
+        "id": "access.expect-denied",
+        "version": 1
+      }
+    ],
+    "status": "ready"
+  }
+]

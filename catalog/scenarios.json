@@ -1,0 +1,494 @@
+[
+  {
+    "id": "standard-draft",
+    "name": "Create a standard policy",
+    "description": "Start here. One business action drives the complete draft wizard with a synthetic customer and two insured locations.",
+    "revision": 1,
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "tags": [
+      "Starter",
+      "Draft"
+    ],
+    "blocks": [
+      {
+        "id": "standard-broker",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "standard-create",
+            "definition": {
+              "id": "property.create-standard",
+              "version": 1
+            },
+            "inputs": {
+              "template": "two-location-property@3",
+              "customer": "synthetic-manufacturer@1"
+            },
+            "outputs": {
+              "policy": "policy",
+              "factory": "factory",
+              "warehouse": "warehouse",
+              "customer": "customer"
+            },
+            "changes": []
+          },
+          {
+            "id": "standard-check",
+            "definition": {
+              "id": "policy.expect-status",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "status": "Draft",
+              "version": 1
+            }
+          }
+        ]
+      }
+    ],
+    "expectedOutcome": "A saved Draft policy, with no quote requested."
+  },
+  {
+    "id": "italy-referral",
+    "name": "An Italian warehouse",
+    "description": "Move only the Warehouse to Italy, add EUR 1m flood coverage, obtain a senior-underwriter approval and issue the policy.",
+    "revision": 1,
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "tags": [
+      "Guided example",
+      "Referral",
+      "Free text"
+    ],
+    "blocks": [
+      {
+        "id": "broker-draft",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "draft",
+            "definition": {
+              "id": "property.create-standard",
+              "version": 1
+            },
+            "inputs": {
+              "template": "two-location-property@3",
+              "customer": "synthetic-manufacturer@1"
+            },
+            "outputs": {
+              "policy": "policy",
+              "factory": "factory",
+              "warehouse": "warehouse",
+              "customer": "customer"
+            },
+            "changes": [
+              {
+                "id": "warehouse-scope",
+                "definition": {
+                  "id": "context.location",
+                  "version": 1
+                },
+                "inputs": {
+                  "location": "Warehouse"
+                },
+                "changes": [
+                  {
+                    "id": "warehouse-country-text",
+                    "definition": {
+                      "id": "modifier.free-text",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "text": "This location should be in Italy instead of Germany"
+                    }
+                  },
+                  {
+                    "id": "warehouse-value",
+                    "definition": {
+                      "id": "location.set-sum-insured",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "amount": 1500000
+                    }
+                  },
+                  {
+                    "id": "warehouse-flood",
+                    "definition": {
+                      "id": "location.add-flood",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "limit": 1000000
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "quote",
+            "definition": {
+              "id": "property.request-quote",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              }
+            },
+            "outputs": {
+              "quote": "quote"
+            }
+          },
+          {
+            "id": "referral-check",
+            "definition": {
+              "id": "quote.expect-status",
+              "version": 1
+            },
+            "inputs": {
+              "quote": {
+                "ref": "quote"
+              },
+              "status": "Referred",
+              "reason": "Flood limit exceeds broker authority"
+            }
+          }
+        ]
+      },
+      {
+        "id": "underwriter",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Senior underwriter"
+        },
+        "children": [
+          {
+            "id": "survey",
+            "definition": {
+              "id": "property.attach-survey",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "location": {
+                "ref": "warehouse"
+              },
+              "document": "approved-synthetic-survey@1"
+            }
+          },
+          {
+            "id": "approval",
+            "definition": {
+              "id": "quote.approve",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "quote": {
+                "ref": "quote"
+              },
+              "notes": "Risk survey reviewed. Referral approved."
+            },
+            "outputs": {
+              "approvedQuote": "approvedQuote"
+            }
+          }
+        ]
+      },
+      {
+        "id": "broker-issue",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "issue",
+            "definition": {
+              "id": "property.issue",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "quote": {
+                "ref": "approvedQuote"
+              }
+            },
+            "outputs": {
+              "issuedPolicy": "issuedPolicy"
+            }
+          },
+          {
+            "id": "schedule-check",
+            "definition": {
+              "id": "policy.verify-schedule",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "issuedPolicy"
+              },
+              "warehouseCountry": "IT",
+              "warehouseFloodLimit": 1000000,
+              "warehouseSumInsured": 1500000,
+              "version": 1,
+              "headquartersCountry": "DE",
+              "issuingMarket": "DE",
+              "locations": [
+                "Factory",
+                "Warehouse"
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "expectedOutcome": "An issued German-market policy with an Italian Warehouse and approved location-specific risk survey."
+  },
+  {
+    "id": "mid-term-amendment",
+    "name": "A mid-term change",
+    "description": "Reuse the issued-policy workflow, then raise Warehouse sum insured to EUR 2m and verify policy version 2.",
+    "revision": 1,
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "tags": [
+      "Reuse",
+      "Amendment"
+    ],
+    "blocks": [
+      {
+        "id": "issued-start",
+        "definition": {
+          "id": "workflow.issue-referred",
+          "version": 1
+        },
+        "inputs": {
+          "country": "IT",
+          "sumInsured": 1500000,
+          "floodLimit": 1000000,
+          "survey": "approved-synthetic-survey@1"
+        },
+        "outputs": {
+          "issuedPolicy": "issuedPolicy",
+          "warehouse": "warehouse",
+          "factory": "factory",
+          "quote": "quote"
+        }
+      },
+      {
+        "id": "amend-underwriter",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Senior underwriter"
+        },
+        "children": [
+          {
+            "id": "increase-inventory",
+            "definition": {
+              "id": "property.amend",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "issuedPolicy"
+              },
+              "location": {
+                "ref": "warehouse"
+              },
+              "sumInsured": 2000000,
+              "effectiveDate": "$term-month-two",
+              "reason": "Warehouse inventory increased after quarterly review."
+            },
+            "outputs": {
+              "amendedPolicy": "amendedPolicy"
+            }
+          },
+          {
+            "id": "amended-schedule",
+            "definition": {
+              "id": "policy.verify-schedule",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "amendedPolicy"
+              },
+              "warehouseCountry": "IT",
+              "warehouseFloodLimit": 1000000,
+              "warehouseSumInsured": 2000000,
+              "version": 2,
+              "headquartersCountry": "DE",
+              "issuingMarket": "DE",
+              "locations": [
+                "Factory",
+                "Warehouse"
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "expectedOutcome": "An independently created policy amended to version 2 with the original version retained."
+  },
+  {
+    "id": "broker-approval-denied",
+    "name": "The broker cannot approve",
+    "description": "An intentional negative test: request a referred quote, attempt approval as the Broker, and require the application to deny access.",
+    "revision": 1,
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "tags": [
+      "Negative test",
+      "Permissions"
+    ],
+    "blocks": [
+      {
+        "id": "negative-broker",
+        "definition": {
+          "id": "context.actor",
+          "version": 1
+        },
+        "inputs": {
+          "role": "Broker"
+        },
+        "children": [
+          {
+            "id": "draft",
+            "definition": {
+              "id": "property.create-standard",
+              "version": 1
+            },
+            "inputs": {
+              "template": "two-location-property@3",
+              "customer": "synthetic-manufacturer@1"
+            },
+            "outputs": {
+              "policy": "policy",
+              "factory": "factory",
+              "warehouse": "warehouse",
+              "customer": "customer"
+            },
+            "changes": [
+              {
+                "id": "warehouse-scope",
+                "definition": {
+                  "id": "context.location",
+                  "version": 1
+                },
+                "inputs": {
+                  "location": "Warehouse"
+                },
+                "changes": [
+                  {
+                    "id": "negative-flood",
+                    "definition": {
+                      "id": "location.add-flood",
+                      "version": 1
+                    },
+                    "inputs": {
+                      "limit": 1000000
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "quote",
+            "definition": {
+              "id": "property.request-quote",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              }
+            },
+            "outputs": {
+              "quote": "quote"
+            }
+          },
+          {
+            "id": "referral-check",
+            "definition": {
+              "id": "quote.expect-status",
+              "version": 1
+            },
+            "inputs": {
+              "quote": {
+                "ref": "quote"
+              },
+              "status": "Referred",
+              "reason": "Flood limit exceeds broker authority"
+            }
+          },
+          {
+            "id": "forbidden-approval",
+            "definition": {
+              "id": "quote.attempt-broker-approval",
+              "version": 1
+            },
+            "inputs": {
+              "policy": {
+                "ref": "policy"
+              },
+              "quote": {
+                "ref": "quote"
+              }
+            },
+            "outputs": {
+              "attempt": "attempt"
+            }
+          },
+          {
+            "id": "denial-check",
+            "definition": {
+              "id": "access.expect-denied",
+              "version": 1
+            },
+            "inputs": {
+              "attempt": {
+                "ref": "attempt"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expectedOutcome": "The approval attempt receives access denied and the quote remains Referred."
+  }
+]

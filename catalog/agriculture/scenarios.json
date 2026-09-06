@@ -1,0 +1,152 @@
+[
+  {
+    "id": "kuh-direktionsanfrage",
+    "title": "Kuh mit hoher Versicherungssumme",
+    "intent": "Ich möchte eine Lebensversicherung für eine Kuh über 15.000 Euro. Deshalb soll eine Direktionsanfrage entstehen.",
+    "revision": 1,
+    "blocks": [
+      {
+        "id": "kuhvorschlag",
+        "definition": {
+          "id": "ablauf.kuh-vorschlag",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "sumInsured": 15000
+        },
+        "outputs": {
+          "proposal": "vorschlag"
+        }
+      },
+      {
+        "id": "angebot",
+        "definition": {
+          "id": "angebot.berechnen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          }
+        }
+      },
+      {
+        "id": "einreichen",
+        "definition": {
+          "id": "antrag.einreichen",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          }
+        }
+      },
+      {
+        "id": "pruefung",
+        "definition": {
+          "id": "pruefung.vorschlagsstatus",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "proposalId": {
+            "ref": "vorschlag"
+          },
+          "expectedStatus": "Direktionsprüfung"
+        }
+      }
+    ],
+    "expectedOutcome": "Eine offene Direktionsanfrage entsteht. Es wird noch kein Vertrag abgeschlossen.",
+    "knowledgeRefs": [
+      "methode.zwei-freigaben"
+    ],
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "source": "seed"
+  },
+  {
+    "id": "kuh-police-drucken",
+    "title": "Police als Sachbearbeiter drucken",
+    "intent": "Ich brauche eine abgeschlossene Standard-Kuhlebensversicherung in Bayern. Als Sachbearbeiter möchte ich die Police noch einmal ausgeben und drucken.",
+    "revision": 1,
+    "blocks": [
+      {
+        "id": "standard",
+        "definition": {
+          "id": "ablauf.standard-kuhvertrag",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "state": "Bayern",
+          "farmStreet": "Dorfstraße 12",
+          "farmPostalCode": "87437",
+          "farmCity": "Kempten"
+        },
+        "outputs": {
+          "policy": "police"
+        }
+      },
+      {
+        "id": "sachbearbeitung",
+        "definition": {
+          "id": "rolle.als",
+          "version": "1.0.0"
+        },
+        "inputs": {
+          "role": "Sachbearbeiter"
+        },
+        "children": [
+          {
+            "id": "erneut",
+            "definition": {
+              "id": "police.neu-ausgeben",
+              "version": "1.0.0"
+            },
+            "inputs": {
+              "policyId": {
+                "ref": "police"
+              }
+            },
+            "outputs": {
+              "document": "neues-dokument"
+            }
+          },
+          {
+            "id": "drucken",
+            "definition": {
+              "id": "police.drucken",
+              "version": "1.0.0"
+            },
+            "inputs": {
+              "policyId": {
+                "ref": "police"
+              },
+              "documentId": {
+                "ref": "neues-dokument"
+              }
+            }
+          },
+          {
+            "id": "pruefung",
+            "definition": {
+              "id": "pruefung.policendruck",
+              "version": "1.0.0"
+            },
+            "inputs": {
+              "policyId": {
+                "ref": "police"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expectedOutcome": "Die Police hat eine zusätzliche Dokumentversion. Ein dokumentierter Druckauftrag gehört zu genau dieser Version.",
+    "knowledgeRefs": [
+      "methode.zwei-freigaben"
+    ],
+    "createdAt": "2026-09-06T10:00:00.000Z",
+    "updatedAt": "2026-09-06T10:00:00.000Z",
+    "source": "seed"
+  }
+]

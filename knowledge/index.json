@@ -1,0 +1,286 @@
+[
+  {
+    "id": "concept:insured-location",
+    "title": "Insured location",
+    "kind": "concept",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "A physical risk has its own country, address, sum insured and coverage limits.",
+    "links": [
+      {
+        "relation": "distinct-from",
+        "target": "concept:issuing-market"
+      },
+      {
+        "relation": "constrained-by",
+        "target": "rule:location-eligibility"
+      }
+    ],
+    "path": "knowledge/concept-insured-location.md"
+  },
+  {
+    "id": "concept:issuing-market",
+    "title": "Issuing market and headquarters",
+    "kind": "concept",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "The policy product market and the customer headquarters never follow a location override.",
+    "links": [
+      {
+        "relation": "related-to",
+        "target": "concept:insured-location"
+      }
+    ],
+    "path": "knowledge/concept-issuing-market.md"
+  },
+  {
+    "id": "concept:actor-context",
+    "title": "Actor context",
+    "kind": "concept",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "An actor container defines who performs its ordered actions.",
+    "links": [
+      {
+        "relation": "requires",
+        "target": "rule:approval-authority"
+      }
+    ],
+    "path": "knowledge/concept-actor-context.md"
+  },
+  {
+    "id": "rule:location-eligibility",
+    "title": "Location eligibility and address consistency",
+    "kind": "rule",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "The German product accepts German and Italian risks with consistent synthetic addresses.",
+    "links": [
+      {
+        "relation": "applies-to",
+        "target": "concept:insured-location"
+      },
+      {
+        "relation": "preserves",
+        "target": "concept:issuing-market"
+      }
+    ],
+    "path": "knowledge/rule-location-eligibility.md"
+  },
+  {
+    "id": "rule:flood-referral",
+    "title": "Flood referral",
+    "kind": "rule",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "A Flood limit strictly above EUR 500,000 requires review and a suitable survey for that location.",
+    "links": [
+      {
+        "relation": "applies-to",
+        "target": "concept:insured-location"
+      },
+      {
+        "relation": "requires-evidence",
+        "target": "fixture:risk-survey"
+      },
+      {
+        "relation": "requires-role",
+        "target": "rule:approval-authority"
+      },
+      {
+        "relation": "implemented-by",
+        "target": "block:quote.approve"
+      }
+    ],
+    "path": "knowledge/rule-flood-referral.md"
+  },
+  {
+    "id": "rule:approval-authority",
+    "title": "Approval authority",
+    "kind": "rule",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "Only Senior underwriter can approve a referral; the denial is itself testable.",
+    "links": [
+      {
+        "relation": "governs",
+        "target": "workflow:approve-referral"
+      },
+      {
+        "relation": "supports-negative-test",
+        "target": "block:quote.attempt-broker-approval"
+      }
+    ],
+    "path": "knowledge/rule-approval-authority.md"
+  },
+  {
+    "id": "workflow:create-draft",
+    "title": "Create a property draft",
+    "kind": "workflow",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "Create customer, choose product and term, configure risks and coverages, declare, review and save.",
+    "links": [
+      {
+        "relation": "uses-fixture",
+        "target": "fixture:standard-manufacturer"
+      },
+      {
+        "relation": "uses-rule",
+        "target": "rule:location-eligibility"
+      },
+      {
+        "relation": "mapped-to",
+        "target": "application:insurance-desk"
+      }
+    ],
+    "path": "knowledge/workflow-create-draft.md"
+  },
+  {
+    "id": "workflow:approve-referral",
+    "title": "Approve a referred quote",
+    "kind": "workflow",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "Attach location-specific surveys, review the current quote as Senior underwriter, then approve.",
+    "links": [
+      {
+        "relation": "constrained-by",
+        "target": "rule:flood-referral"
+      },
+      {
+        "relation": "requires",
+        "target": "rule:approval-authority"
+      },
+      {
+        "relation": "uses-evidence",
+        "target": "fixture:risk-survey"
+      }
+    ],
+    "path": "knowledge/workflow-approve-referral.md"
+  },
+  {
+    "id": "workflow:issue-policy",
+    "title": "Issue and verify a policy",
+    "kind": "workflow",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "The Broker issues an acceptable quote and checks the resulting policy schedule.",
+    "links": [
+      {
+        "relation": "follows",
+        "target": "workflow:approve-referral"
+      },
+      {
+        "relation": "verifies",
+        "target": "concept:insured-location"
+      }
+    ],
+    "path": "knowledge/workflow-issue-policy.md"
+  },
+  {
+    "id": "workflow:amend-policy",
+    "title": "Amend an issued policy",
+    "kind": "workflow",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "A dated sum-insured change creates a new policy version and reuses the issuance workflow.",
+    "links": [
+      {
+        "relation": "reuses",
+        "target": "workflow:issue-policy"
+      },
+      {
+        "relation": "constrained-by",
+        "target": "rule:flood-referral"
+      }
+    ],
+    "path": "knowledge/workflow-amend-policy.md"
+  },
+  {
+    "id": "workflow:interpret-change",
+    "title": "Interpret and confirm a change",
+    "kind": "workflow",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "The local parser turns supported phrases into reviewable, stored changes.",
+    "links": [
+      {
+        "relation": "resolves-with",
+        "target": "rule:location-eligibility"
+      },
+      {
+        "relation": "preserves",
+        "target": "concept:issuing-market"
+      }
+    ],
+    "path": "knowledge/workflow-interpret-change.md"
+  },
+  {
+    "id": "fixture:standard-manufacturer",
+    "title": "Synthetic manufacturer",
+    "kind": "fixture",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "Linden Manufacturing GmbH and two invented risk locations supply repeatable test data.",
+    "links": [
+      {
+        "relation": "prepares",
+        "target": "workflow:create-draft"
+      }
+    ],
+    "path": "knowledge/fixture-standard-manufacturer.md"
+  },
+  {
+    "id": "fixture:risk-survey",
+    "title": "Approved synthetic survey",
+    "kind": "fixture",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "A named, suitable synthetic risk survey is attached to one affected location.",
+    "links": [
+      {
+        "relation": "satisfies",
+        "target": "rule:flood-referral"
+      }
+    ],
+    "path": "knowledge/fixture-risk-survey.md"
+  },
+  {
+    "id": "application:insurance-desk",
+    "title": "Insurance desk mapping",
+    "kind": "application",
+    "owner": "property-domain-team",
+    "appliesTo": "meridian-commercial-property-v3",
+    "revision": "knowledge-1",
+    "summary": "Business blocks operate the actual React insurance wizard and policy screens with Playwright.",
+    "links": [
+      {
+        "relation": "implements",
+        "target": "workflow:create-draft"
+      },
+      {
+        "relation": "implements",
+        "target": "workflow:approve-referral"
+      },
+      {
+        "relation": "implements",
+        "target": "workflow:issue-policy"
+      }
+    ],
+    "path": "knowledge/application-insurance-desk.md"
+  }
+]

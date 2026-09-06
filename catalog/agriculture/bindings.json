@@ -1,0 +1,324 @@
+[
+  {
+    "id": "ui.createCustomer",
+    "revision": 1,
+    "operation": "createCustomer",
+    "name": "Portal: Kunden anlegen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "kunde.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "createCustomer",
+    "locators": [],
+    "inputKeys": [
+      "name",
+      "email",
+      "phone",
+      "street",
+      "postalCode",
+      "city"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.createFarm",
+    "revision": 1,
+    "operation": "createFarm",
+    "name": "Portal: Betrieb anlegen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "betrieb.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "createFarm",
+    "locators": [],
+    "inputKeys": [
+      "customerId",
+      "name",
+      "state",
+      "street",
+      "postalCode",
+      "city",
+      "farmType"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.createAnimal",
+    "revision": 1,
+    "operation": "createAnimal",
+    "name": "Portal: Tier oder Bestand anlegen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "tier.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "createAnimal",
+    "locators": [],
+    "inputKeys": [
+      "farmId",
+      "species",
+      "name",
+      "sumInsured",
+      "earTag",
+      "breed",
+      "birthDate",
+      "use",
+      "chipNumber",
+      "health",
+      "healthNotes",
+      "animalCount",
+      "housing",
+      "biosecurity"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.createProposal",
+    "revision": 1,
+    "operation": "createProposal",
+    "name": "Portal: Versicherungsvorschlag anlegen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "vorschlag.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "createProposal",
+    "locators": [],
+    "inputKeys": [
+      "customerId",
+      "farmId",
+      "animalIds",
+      "product",
+      "startDate",
+      "durationMonths"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.calculateOffer",
+    "revision": 1,
+    "operation": "calculateOffer",
+    "name": "Portal: Angebot berechnen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "angebot.berechnen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "calculateOffer",
+    "locators": [],
+    "inputKeys": [
+      "proposalId"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.submitProposal",
+    "revision": 1,
+    "operation": "submitProposal",
+    "name": "Portal: Antrag einreichen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "antrag.einreichen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "submitProposal",
+    "locators": [],
+    "inputKeys": [
+      "proposalId"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.decideReferral",
+    "revision": 1,
+    "operation": "decideReferral",
+    "name": "Portal: Direktionsanfrage entscheiden",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "direktion.entscheiden",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "decideReferral",
+    "locators": [],
+    "inputKeys": [
+      "proposalId",
+      "decision",
+      "reason"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.completeContract",
+    "revision": 1,
+    "operation": "completeContract",
+    "name": "Portal: Vertrag abschließen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "vertrag.abschliessen",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "completeContract",
+    "locators": [],
+    "inputKeys": [
+      "proposalId"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.reissuePolicy",
+    "revision": 1,
+    "operation": "reissuePolicy",
+    "name": "Portal: Police erneut ausgeben",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "police.neu-ausgeben",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "reissuePolicy",
+    "locators": [],
+    "inputKeys": [
+      "policyId",
+      "reason"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.printPolicy",
+    "revision": 1,
+    "operation": "printPolicy",
+    "name": "Portal: Police drucken",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "police.drucken",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "printPolicy",
+    "locators": [],
+    "inputKeys": [
+      "policyId",
+      "documentId"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.expectProposalStatus",
+    "revision": 1,
+    "operation": "expectProposalStatus",
+    "name": "Portal: Zustand des Vorschlags prüfen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "pruefung.vorschlagsstatus",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "expectProposalStatus",
+    "locators": [],
+    "inputKeys": [
+      "proposalId",
+      "expectedStatus"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  },
+  {
+    "id": "ui.expectPrint",
+    "revision": 1,
+    "operation": "expectPrint",
+    "name": "Portal: Policendruck prüfen",
+    "status": "missing",
+    "definitionRefs": [
+      {
+        "id": "pruefung.policendruck",
+        "version": "1.0.0"
+      }
+    ],
+    "knowledgeRefs": [
+      "technik.portal"
+    ],
+    "module": "server/testing/bindings.ts",
+    "export": "expectPrint",
+    "locators": [],
+    "inputKeys": [
+      "policyId"
+    ],
+    "changeReason": "Fachlicher Ausgangskatalog. Die technische Phase prüft und ergänzt die ausführbare Bindung.",
+    "createdAt": "2026-09-06T10:00:00.000Z"
+  }
+]

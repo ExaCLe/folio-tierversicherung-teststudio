@@ -1,0 +1,407 @@
+[
+  {
+    "id": "methode.zwei-freigaben",
+    "revision": 1,
+    "title": "Vom Wunsch zum geprüften Testfall",
+    "kind": "procedure",
+    "summary": "Der Mensch prüft zuerst die fachliche Bedeutung. Die technische Phase verdrahtet danach den freigegebenen Ablauf.",
+    "content": "",
+    "path": "knowledge/agriculture/methode.zwei-freigaben.md",
+    "definitionRefs": [],
+    "relatedKnowledge": [
+      "fach.kunde-betrieb",
+      "fach.tierarten",
+      "regel.direktionsanfrage",
+      "ablauf.policendruck"
+    ],
+    "requiredFields": [],
+    "preconditions": [],
+    "postconditions": [],
+    "origin": "seed"
+  },
+  {
+    "id": "fach.kunde-betrieb",
+    "revision": 1,
+    "title": "Kunde und Betrieb",
+    "kind": "concept",
+    "summary": "Ein Kunde kann mehrere Betriebe besitzen. Versicherte Tiere gehören genau einem Betrieb.",
+    "content": "",
+    "path": "knowledge/agriculture/fach.kunde-betrieb.md",
+    "definitionRefs": [
+      {
+        "id": "kunde.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "betrieb.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "fach.tierarten"
+    ],
+    "requiredFields": [
+      "Kunde.name",
+      "Kunde.email",
+      "Kunde.phone",
+      "Kunde.street",
+      "Kunde.postalCode",
+      "Kunde.city",
+      "Betrieb.customerId",
+      "Betrieb.name",
+      "Betrieb.state",
+      "Betrieb.street",
+      "Betrieb.postalCode",
+      "Betrieb.city",
+      "Betrieb.farmType"
+    ],
+    "preconditions": [],
+    "postconditions": [
+      "Betrieb gehört zum Kunden."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "fach.tierarten",
+    "revision": 1,
+    "title": "Einzeltier und Tierbestand",
+    "kind": "concept",
+    "summary": "Rind, Pferd und Hund werden einzeln erfasst. Schweine werden als Bestand geführt.",
+    "content": "",
+    "path": "knowledge/agriculture/fach.tierarten.md",
+    "definitionRefs": [
+      {
+        "id": "tier.anlegen",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "regel.direktionsanfrage"
+    ],
+    "requiredFields": [
+      "farmId",
+      "species",
+      "name",
+      "sumInsured"
+    ],
+    "preconditions": [
+      "Betrieb existiert."
+    ],
+    "postconditions": [
+      "Tier oder Bestand gehört zum Betrieb."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "regel.direktionsanfrage",
+    "revision": 1,
+    "title": "Wann eine Direktionsanfrage entsteht",
+    "kind": "rule",
+    "summary": "Hohe Versicherungssummen und bestimmte Gesundheits- oder Biosicherheitsangaben benötigen eine Direktionsentscheidung.",
+    "content": "",
+    "path": "knowledge/agriculture/regel.direktionsanfrage.md",
+    "definitionRefs": [
+      {
+        "id": "tier.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "antrag.einreichen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "direktion.entscheiden",
+        "version": "1.0.0"
+      },
+      {
+        "id": "pruefung.vorschlagsstatus",
+        "version": "1.0.0"
+      },
+      {
+        "id": "ablauf.standard-kuhvertrag",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "fach.tierarten",
+      "fach.rollen",
+      "ablauf.vorschlag"
+    ],
+    "requiredFields": [
+      "Versicherungssumme",
+      "Tierart",
+      "erwarteter Zustand"
+    ],
+    "preconditions": [
+      "Angebot wurde berechnet."
+    ],
+    "postconditions": [
+      "Eingereichter Vorschlag ist Freigegeben oder in Direktionsprüfung."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "fach.rollen",
+    "revision": 1,
+    "title": "Rollen im Vorgang",
+    "kind": "concept",
+    "summary": "Vermittler erfassen und schließen ab, Direktion entscheidet Anfragen, Sachbearbeiter geben Policen erneut aus und drucken.",
+    "content": "",
+    "path": "knowledge/agriculture/fach.rollen.md",
+    "definitionRefs": [
+      {
+        "id": "rolle.als",
+        "version": "1.0.0"
+      },
+      {
+        "id": "direktion.entscheiden",
+        "version": "1.0.0"
+      },
+      {
+        "id": "vertrag.abschliessen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "police.neu-ausgeben",
+        "version": "1.0.0"
+      },
+      {
+        "id": "police.drucken",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [],
+    "requiredFields": [],
+    "preconditions": [],
+    "postconditions": [],
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.vorschlag",
+    "revision": 1,
+    "title": "Vom Entwurf zum Antrag",
+    "kind": "procedure",
+    "summary": "Ein gespeicherter Vorschlag wird berechnet und anschließend eingereicht.",
+    "content": "",
+    "path": "knowledge/agriculture/ablauf.vorschlag.md",
+    "definitionRefs": [
+      {
+        "id": "vorschlag.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "angebot.berechnen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "pruefung.vorschlagsstatus",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "fach.kunde-betrieb",
+      "fach.tierarten"
+    ],
+    "requiredFields": [
+      "customerId",
+      "farmId",
+      "animalIds",
+      "product",
+      "startDate",
+      "durationMonths"
+    ],
+    "preconditions": [
+      "Kunde, Betrieb und Tiere gehören zusammen."
+    ],
+    "postconditions": [
+      "Ein konkreter Vorschlag mit eigenständiger ID ist vorhanden."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.kuh-vorschlag",
+    "revision": 1,
+    "title": "Kuhlebensversicherung vorbereiten",
+    "kind": "procedure",
+    "summary": "Vier elementare Blöcke erzeugen einen Kuh-Vorschlag im Zustand Entwurf.",
+    "content": "",
+    "path": "knowledge/agriculture/ablauf.kuh-vorschlag.md",
+    "definitionRefs": [
+      {
+        "id": "ablauf.kuh-vorschlag",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "ablauf.vorschlag",
+      "regel.direktionsanfrage"
+    ],
+    "requiredFields": [],
+    "preconditions": [
+      "Rolle Vermittler."
+    ],
+    "postconditions": [
+      "Kuh-Vorschlag im Zustand Entwurf."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.abschluss",
+    "revision": 1,
+    "title": "Vertrag abschließen",
+    "kind": "procedure",
+    "summary": "Der Abschluss eines freigegebenen Vorschlags erzeugt Vertrag, Police und Dokumentversion.",
+    "content": "",
+    "path": "knowledge/agriculture/ablauf.abschluss.md",
+    "definitionRefs": [
+      {
+        "id": "vertrag.abschliessen",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "fach.rollen",
+      "regel.direktionsanfrage"
+    ],
+    "requiredFields": [
+      "proposalId"
+    ],
+    "preconditions": [
+      "Vorschlag ist Freigegeben."
+    ],
+    "postconditions": [
+      "Vertrag, Police und Dokument sind vorhanden."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.standard-kuhvertrag",
+    "revision": 1,
+    "title": "Standard-Kuhvertrag als Voraussetzung",
+    "kind": "procedure",
+    "summary": "Ein Standardvertrag ist ein zusammengesetzter Baustein für Tests, die einen abgeschlossenen Vertrag voraussetzen.",
+    "content": "",
+    "path": "knowledge/agriculture/ablauf.standard-kuhvertrag.md",
+    "definitionRefs": [
+      {
+        "id": "ablauf.standard-kuhvertrag",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "ablauf.kuh-vorschlag",
+      "ablauf.abschluss"
+    ],
+    "requiredFields": [],
+    "preconditions": [
+      "Summe höchstens 10.000 EUR."
+    ],
+    "postconditions": [
+      "Abgeschlossener Vertrag mit Police."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "ablauf.policendruck",
+    "revision": 1,
+    "title": "Police erneut ausgeben und drucken",
+    "kind": "procedure",
+    "summary": "Sachbearbeiter erzeugen eine neue Dokumentversion und dokumentieren einen Druckauftrag für genau diese Version.",
+    "content": "",
+    "path": "knowledge/agriculture/ablauf.policendruck.md",
+    "definitionRefs": [
+      {
+        "id": "police.neu-ausgeben",
+        "version": "1.0.0"
+      },
+      {
+        "id": "police.drucken",
+        "version": "1.0.0"
+      },
+      {
+        "id": "pruefung.policendruck",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [
+      "ablauf.abschluss",
+      "fach.rollen"
+    ],
+    "requiredFields": [
+      "policyId",
+      "reason",
+      "documentId"
+    ],
+    "preconditions": [
+      "Vertrag ist abgeschlossen."
+    ],
+    "postconditions": [
+      "Neue Dokumentversion und dazugehöriger Druckauftrag existieren."
+    ],
+    "origin": "seed"
+  },
+  {
+    "id": "technik.portal",
+    "revision": 1,
+    "title": "Technische Anbindung des Portals",
+    "kind": "technical",
+    "summary": "UI-Labels und Routen gehören zu technischen Bindungen, fachliche Regeln bleiben davon unabhängig.",
+    "content": "",
+    "path": "knowledge/agriculture/technik.portal.md",
+    "definitionRefs": [
+      {
+        "id": "kunde.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "betrieb.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "tier.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "vorschlag.anlegen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "angebot.berechnen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "antrag.einreichen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "direktion.entscheiden",
+        "version": "1.0.0"
+      },
+      {
+        "id": "vertrag.abschliessen",
+        "version": "1.0.0"
+      },
+      {
+        "id": "police.neu-ausgeben",
+        "version": "1.0.0"
+      },
+      {
+        "id": "police.drucken",
+        "version": "1.0.0"
+      },
+      {
+        "id": "pruefung.vorschlagsstatus",
+        "version": "1.0.0"
+      },
+      {
+        "id": "pruefung.policendruck",
+        "version": "1.0.0"
+      }
+    ],
+    "relatedKnowledge": [],
+    "requiredFields": [],
+    "preconditions": [],
+    "postconditions": [],
+    "origin": "seed"
+  }
+]

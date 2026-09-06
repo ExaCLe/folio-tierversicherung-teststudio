@@ -1,0 +1,98 @@
+[
+  {
+    "id": "two-location-property",
+    "version": 3,
+    "label": "Two-location property",
+    "description": "A German manufacturer with a factory in Stuttgart and a warehouse in Hamburg. Meridian Commercial Property v3.",
+    "dateRule": "First day of the next UTC month; expires the day before its first anniversary.",
+    "configuration": {
+      "customer": {
+        "name": "Linden Manufacturing GmbH",
+        "registrationNumber": "DE-HRB-204812",
+        "headquartersCountry": "DE",
+        "address": {
+          "line1": "Industriestrasse 12",
+          "city": "Stuttgart",
+          "postcode": "70173"
+        },
+        "industry": "Precision manufacturing",
+        "contactName": "Anna Weber",
+        "email": "anna.weber@example.test"
+      },
+      "productVersion": 3,
+      "issuingMarket": "DE",
+      "currency": "EUR",
+      "inceptionDate": "$next-month-start",
+      "expiryDate": "$next-year-end",
+      "locations": [
+        {
+          "id": "factory",
+          "name": "Factory",
+          "type": "Factory",
+          "country": "DE",
+          "address": {
+            "line1": "Werkstrasse 18",
+            "city": "Stuttgart",
+            "postcode": "70327"
+          },
+          "construction": "Masonry",
+          "yearBuilt": 1998,
+          "areaSqm": 4200,
+          "sprinkler": true,
+          "floodZone": "Low",
+          "sumInsured": 3000000,
+          "coverages": [
+            {
+              "type": "Fire",
+              "limit": 3000000,
+              "deductible": 2500
+            },
+            {
+              "type": "Business interruption",
+              "limit": 750000,
+              "deductible": 5000
+            }
+          ]
+        },
+        {
+          "id": "warehouse",
+          "name": "Warehouse",
+          "type": "Warehouse",
+          "country": "DE",
+          "address": {
+            "line1": "Hafenstrasse 42",
+            "city": "Hamburg",
+            "postcode": "20457"
+          },
+          "construction": "Steel",
+          "yearBuilt": 2012,
+          "areaSqm": 1800,
+          "sprinkler": true,
+          "floodZone": "Moderate",
+          "sumInsured": 1500000,
+          "coverages": [
+            {
+              "type": "Fire",
+              "limit": 1500000,
+              "deductible": 2500
+            }
+          ]
+        }
+      ],
+      "lossHistory": [],
+      "billing": {
+        "frequency": "Annual",
+        "method": "Invoice"
+      },
+      "declarations": {
+        "informationAccurate": true,
+        "insuranceDeclined": false,
+        "additionalInformation": ""
+      }
+    },
+    "knowledgeRefs": [
+      "fixture:standard-manufacturer",
+      "rule:location-eligibility"
+    ]
+  }
+]
