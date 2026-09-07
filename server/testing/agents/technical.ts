@@ -18,6 +18,12 @@ export async function planTechnicalWithCodex(input: { id: string; model: Testing
       const issues: string[] = [];
       for (const item of plan.newBindings) {
         try {
+          const refs = item.binding?.definitionRefs;
+          if (Array.isArray(refs)) {
+            const composite = refs.find(ref => input.catalog.definitions.some(definition => definition.id === ref.id && definition.version === ref.version && (definition.kind === 'workflow' || definition.kind === 'context')));
+            if (composite) throw new Error(`Die Definition ${composite.id}@${composite.version} ist ein zusammengesetzter Workflow oder Rollenblock. Der Compiler führt dessen elementare Schritte aus; eine eigene UI-Bindung für den Container ist nicht zulässig. Entferne nur diese neue Container-Bindung aus dem Plan und verwende die vorhandenen Bindungsrevisionen ihrer elementaren Schritte wieder. Fachlichen Ablauf und Parameter nicht ändern.`);
+            if (!refs.some(ref => input.compiled.steps.some(step => step.definition.id === ref.id && step.definition.version === ref.version))) throw new Error('Die neue Bindung gehört zu keinem elementaren Schritt dieser Freigabe. Verwende als technische Prüfgegenstände ausschließlich freigegeben.json.steps[].definition.');
+          }
           const binding = validateTestingBinding(item.binding, input.catalog);
           const existing = input.catalog.bindings.filter(value => value.id === binding.id && value.status === 'ready').sort((a, b) => b.revision - a.revision)[0];
           if (!existing) continue;

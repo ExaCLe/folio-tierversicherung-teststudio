@@ -33,11 +33,17 @@ Der Mensch kann die Blöcke verschieben, verschachteln und ihre typisierten Wert
 
 Nach der Freigabe starten zwei unabhängige CLI-Aufrufe parallel. Auch technische Planung, Dublettenprüfung und Wiederverwendung besitzen jeweils höchstens einen echten Korrekturversuch anhand eines konkreten Schema- oder Referenzfehlers. Prüfgegenstände und erlaubte Parameternamen werden im jeweiligen Ausgabeschema auf den freigegebenen Ablauf begrenzt. Der technische Agent prüft UI-Bindungen. Der Dublettenagent vergleicht Bedeutung, Schema, Vorbedingungen, Ergebnisse und Kompositionen mit dem vorhandenen Katalog.
 
+Das Dublettenschema erlaubt für `proposed` nur die exakten Paare aus Definitions-ID und Version der freigegebenen Prüfgegenstände. Mehrere Paare stehen in getrennten `anyOf`-Alternativen; die ID einer Definition darf nicht mit der Version einer anderen kombiniert werden. Dynamische Schemas werden als unabhängige JSON-Wertbäume aufgebaut. Eine Einschränkung von `proposed.version` verändert deshalb weder `proposed.id` noch `chosen`, `explanation`, `reason` oder `unresolved`. Die Anwendung prüft anschließend, ob jeder Prüfgegenstand genau einmal beurteilt wurde und ein gewählter Vergleichsblock tatsächlich in der genannten Katalogversion existiert.
+
 Der technische Agent erhält die freigegebene Momentaufnahme, vorhandene Bindungen und einen sicheren Index der aktuellen TypeScript-Dateien unter `src/portal`. Er kann bestehende Bindungsrevisionen wählen oder neue deklarative Rezepte erzeugen. Der Executor kennt allgemeine UI-Aktionen wie Eingabe, Auswahl, Klick und Prüfung. Er enthält keinen Schalter auf bekannte fachliche Block-IDs.
+
+Technische Bindungen gehören zu den elementaren Aktionen und Assertions aus `freigegeben.json.steps`. Zusammengesetzte Workflows und Rollenkontexte werden vom Compiler in diese Schritte aufgelöst. Sie brauchen kein eigenes UI-Rezept. Eine neu vorgeschlagene Bindung für einen solchen Container wird vor der Übernahme abgelehnt; seine fachlichen Parameter und enthaltenen Schritte bleiben erhalten.
 
 Die Anwendung validiert jedes neue Rezept vor der Übernahme. Es darf nur lokale `/portal`-Routen öffnen und bekannte Locatorarten nutzen. Speicheraktionen erfassen die reale HTTP-Antwort ihres UI-Klicks. Damit werden konkrete Kunden-, Betriebs-, Tier-, Vorschlags-, Vertrags- und Dokument-IDs verknüpft. Parent-IDs können zusätzlich gegen die Antwort geprüft werden. Ein gesetztes Fachfeld muss im tatsächlich ausgeführten Rezept gesetzt oder geprüft werden; andernfalls schlägt der kleinste Block sichtbar fehl.
 
 Eine Assertion kann über `proof` ihr bestandenes boolesches Ergebnis und den tatsächlich gelesenen UI-Text ausgeben. Diese Ergebniswerte entstehen erst nach erfolgreicher Browserprüfung.
+
+`expectEnabled` prüft, dass das gewählte Bedienelement sichtbar und aktiviert ist. `expectDisabled` prüft, dass es sichtbar und gesperrt ist. Beide Aktionen verwenden einen `locatorKey` der Bindung und können nach erfolgreicher Prüfung `proof` ausgeben. Eine reine `expectVisible`-Prüfung belegt keine Berechtigung: Ein Formular kann für eine Rolle sichtbar sein, obwohl seine Eingaben gesperrt sind. Rollenprüfungen müssen daher den erwarteten Bedienzustand prüfen. Bei einem Speicherklick müssen zusätzlich die fachlichen Voraussetzungen erfüllt sein, etwa eine eingegebene Begründung; ein wegen fehlender Pflichtangaben gesperrter Button belegt keine fehlende Rollenberechtigung.
 
 Ein automatisch geöffnetes Formular ist ein expliziter UI-Zustand. `unlessVisible` darf einen reinen Öffnungsklick nur überspringen, wenn das benannte Formularfeld tatsächlich sichtbar ist. Es überspringt keine fachliche Speicheraktion und schluckt keine fehlgeschlagenen Selektoren. Der Wert ist ein `key` aus den `locators` derselben Bindung. Die Bedingung ist bei `fill`, `select`, `check`, Assertions und jedem Klick mit `capture` ungültig. Fehlermeldungen nennen Bindung, Revision, `recipe`-Index, Aktionsart und den konkreten Grund. Die einzige Korrekturrunde erhält die Fehler aller neuen Bindungen zusammen sowie die vorherige vollständige Antwort. Im Kontext stehen zusätzlich `rezept-validierung.ts` und `rezept-ausfuehrung.ts` mit den tatsächlichen Regeln; bereits vorhandene Bindungen liefern vollständige Beispiele. Ein weiterhin ungültiger Plan wird weder übernommen noch ausgeführt.
 
@@ -69,6 +75,8 @@ Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindpr
 `npm run dev:stable` hält den Backendprozess während einer Vorführung stabil. Ein laufender Agenten- oder Browserauftrag sollte vor einer bewussten Backendänderung beendet werden. Der Frontendcode aktualisiert sich weiterhin über Vite.
 
 ## Prüfen
+
+`server/testing/agents/duplicate-schema.test.ts` prüft die unabhängigen ID-/Versionsbeschränkungen, unveränderte freie Begründungsfelder und die Isolation mehrerer Schemaaufrufe. Die Tests verwenden fiktive Definitionen.
 
 `server/testing/agents/pipeline.test.ts` prüft den Prozessvertrag mit einer ausdrücklich als Testfixture benannten lokalen CLI. Das sind keine Belege für Modellqualität oder echten KI-Erfolg. Es prüft Argumente, globale Parallelität, Abbruch, veraltete Antworten, technische Eingabeabdeckung und eine Szenarioänderung während der Agentenarbeit.
 

@@ -93,6 +93,8 @@ export async function executeTestingStep(page: Page, step: TestingCompiledStep, 
     else if (action.op === 'select') await locator.selectOption(Array.isArray(value) ? value.map(String) : String(value));
     else if (action.op === 'check') await locator.setChecked(Boolean(value));
     else if (action.op === 'expectVisible') await expect(locator).toBeVisible();
+    else if (action.op === 'expectEnabled') { await expect(locator).toBeVisible(); await expect(locator).toBeEnabled(); }
+    else if (action.op === 'expectDisabled') { await expect(locator).toBeVisible(); await expect(locator).toBeDisabled(); }
     else if (action.op === 'expectText') await expect(locator).toHaveText(String(value));
     else if (action.op === 'click') {
       if (!action.capture) await locator.click();
@@ -115,7 +117,7 @@ export async function executeTestingStep(page: Page, step: TestingCompiledStep, 
       }
     } else throw new Error(`Nicht unterstützte Rezeptaktion ${action.op}.`);
     if (action.proof) {
-      if (!['expectText', 'expectVisible'].includes(action.op)) throw new Error('Ein Prüfergebnis darf nur nach einer echten Assertion gespeichert werden.');
+      if (!['expectText', 'expectVisible', 'expectEnabled', 'expectDisabled'].includes(action.op)) throw new Error('Ein Prüfergebnis darf nur nach einer echten Assertion gespeichert werden.');
       for (const [kind, key] of Object.entries(action.proof)) {
         const observed = kind === 'matched' ? true : (await locator.textContent())?.trim() ?? '';
         outputValues[key] = observed;

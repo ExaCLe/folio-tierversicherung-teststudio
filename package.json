@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --host 127.0.0.1 --port 5173",
     "start": "node --import tsx server/index.ts",
-    "test": "node --import tsx --test server/insurance/domain.test.ts server/studio/engine.test.ts server/agriculture/domain.test.ts server/testing/model.test.ts server/testing/references.test.ts server/testing/value-changes.test.ts server/testing/agents/pipeline.test.ts server/testing/integration.test.ts",
+    "test": "node --import tsx --test server/insurance/domain.test.ts server/studio/engine.test.ts server/agriculture/domain.test.ts server/testing/model.test.ts server/testing/references.test.ts server/testing/value-changes.test.ts server/testing/agents/pipeline.test.ts server/testing/agents/duplicate-schema.test.ts server/testing/integration.test.ts",
     "test:e2e": "playwright test",
     "check": "npm test && npm run build && npm run test:e2e"
   },

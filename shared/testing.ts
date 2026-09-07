@@ -59,7 +59,7 @@ export interface TestingLocator {
   role?: string; exact?: boolean;
 }
 export interface TestingUIRecipeAction {
-  op: 'goto' | 'fill' | 'select' | 'click' | 'check' | 'expectText' | 'expectVisible' | 'captureResponse';
+  op: 'goto' | 'fill' | 'select' | 'click' | 'check' | 'expectText' | 'expectVisible' | 'expectEnabled' | 'expectDisabled' | 'captureResponse';
   locatorKey?: string; value?: TestingValue;
   /** Nach einer bestandenen UI-Prüfung erfasste Ergebniswerte, keine erfundene Antwort. */
   proof?: { matched?: string; actual?: string };

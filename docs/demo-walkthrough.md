@@ -35,9 +35,9 @@ Die Kundenanschrift bleibt in Uelzen. Ein Betriebsstandort ist eine eigene Angab
 
 Speichere Tier und Vorschlag, berechne das Angebot und reiche den Antrag ein. Jetzt muss „Direktionsprüfung“ erscheinen. Die Direktionsanfrage besitzt eine eigene Nummer und nennt die überschrittene Annahmegrenze. Bei genau 10.000 EUR entsteht wegen der Summe noch keine Anfrage.
 
-1. Versuche zunächst, als Vermittler eine Entscheidung zu speichern. Die Entscheidung ist für diese Rolle gesperrt.
+1. Prüfe zunächst als Vermittler die sichtbaren Felder „Entscheidung“ und „Begründung der Entscheidung“. Beide müssen gesperrt sein. Allein ihre Sichtbarkeit würde noch keine Bedienberechtigung belegen.
 2. Wähle die Benutzerrolle „Direktion“.
-3. Wähle „Freigeben“ und ergänze eine nachvollziehbare „Begründung der Entscheidung“, etwa „Wertnachweis für das Zuchttier geprüft“.
+3. Prüfe, dass die beiden Felder jetzt bedienbar sind. Wähle „Freigeben“ und ergänze eine nachvollziehbare „Begründung der Entscheidung“, etwa „Wertnachweis für das Zuchttier geprüft“.
 4. Klicke auf „Entscheidung speichern“. Der Vorschlag ist nun „Freigegeben“.
 5. Wechsle zurück zum Vermittler und klicke auf „Vertrag abschließen“.
 
@@ -134,6 +134,8 @@ Die Ausnahme gilt für diese Verwendung im Testfall. Sie veröffentlicht keine n
 ## 8. Technik und echten Browserlauf prüfen
 
 Nach fachlicher Freigabe erscheint „Technik & Probelauf“. Die technische Phase prüft die vorhandenen Bindungen, fehlende Umsetzung und mögliche doppelte Bausteine. Anschließend kann der Browser die freigegebene Folge tatsächlich im Portal ausführen.
+
+Zusammengesetzte Bausteine führen ihre enthaltenen elementaren Schritte aus. Die technische Planung benötigt für den umschließenden Baustein kein zusätzliches UI-Rezept. Prüft der Test Rollenberechtigungen, müssen seine Assertions bedienbare beziehungsweise gesperrte Felder nachweisen. Die generischen Rezeptaktionen `expectEnabled` und `expectDisabled` prüfen jeweils auch die Sichtbarkeit. `expectVisible` allein reicht für diese fachliche Aussage nicht aus.
 
 1. Klicke auf „Technik & Probelauf“ und prüfe den angezeigten Agentenfortschritt.
 2. Beachte technische Lücken oder nicht unterstützte Anforderungen. Ein fachlich gültiger Entwurf ist dadurch noch kein bestandener Test.

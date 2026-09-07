@@ -164,6 +164,42 @@ test('Eine weiterhin ungültige technische Korrektur endet nach zwei Antworten o
   assert.equal(JSON.stringify(getTestingCatalog().bindings), beforeBindings);
   assert.equal(repository.listTestingRuns().length, 0);
 });
+test('Aktiviert und deaktiviert sind ausdrückliche UI-Assertions mit geschützten Nachweisen', () => {
+  const catalog = getTestingCatalog();
+  const base = catalog.definitions.find(item => item.id === 'pruefung.vorschlagsstatus')!;
+  const definition = { ...base, id: 'qa.bedienbarkeit', semanticKey: 'qa.expectAvailability', operation: 'expectAvailability', bindingId: 'ui.qaAvailability',
+    inputs: [{ key: 'proposalId', label: 'Vorschlag', type: 'proposal-ref' as const, required: true }, { key: 'expectedAllowed', label: 'Erwartete Berechtigung', type: 'boolean' as const, required: true }],
+    outputs: [{ key: 'matched', label: 'Berechtigung geprüft', type: 'boolean' as const }] };
+  const augmented = { ...catalog, definitions: [...catalog.definitions, definition] };
+  const binding = { id: definition.bindingId, revision: 1, operation: definition.operation, name: 'Bedienbarkeit prüfen', status: 'ready', definitionRefs: [{ id: definition.id, version: definition.version }], knowledgeRefs: definition.knowledgeRefs,
+    module: 'e2e/helpers/agriculture-driver.ts', export: 'executeTestingStep', createdAt: '2026-01-01T00:00:00.000Z', changeReason: 'Synthetischer Vertragstest', inputKeys: ['proposalId', 'expectedAllowed'],
+    locators: [{ key: 'decision', method: 'label', value: 'Entscheidung', exact: true }], recipe: [{ op: 'goto', value: '/portal/vorschlaege/{{proposalId}}' },
+      { op: 'expectEnabled', locatorKey: 'decision', when: { input: 'expectedAllowed', equals: true }, proof: { matched: 'matched' } },
+      { op: 'expectDisabled', locatorKey: 'decision', when: { input: 'expectedAllowed', equals: false }, proof: { matched: 'matched' } }] };
+  assert.deepEqual(validateTestingBinding(binding, augmented).recipe, binding.recipe);
+  for (const index of [1, 2]) { const invalid = structuredClone(binding); Object.assign(invalid.recipe[index], { unlessVisible: 'decision' }); assert.throws(() => validateTestingBinding(invalid, augmented), /unlessVisible.*[\s\S]*unzulässig/); }
+  const invalidProof = structuredClone(binding); invalidProof.recipe[1].proof = { matched: 'nichtDeklariert' };
+  assert.throws(() => validateTestingBinding(invalidProof, augmented), /boolesches Ergebnis/);
+});
+
+test('Technischer Plan verdrahtet elementare Schritte und ersetzt keinen vorhandenen Workflow durch ein Vollrezept', async () => {
+  const catalog = getTestingCatalog();
+  const compiled = compileTestingScenario(repository.getTestingScenario('kuh-direktionsanfrage'), catalog);
+  const workflow = compiled.definitions.find(definition => definition.kind === 'workflow')!;
+  const starter = createStarterBindings(catalog).find(item => item.operation === 'createCustomer')!;
+  const unrelated = createStarterBindings(catalog).find(item => item.operation === 'completeContract')!;
+  const containerBinding = { ...starter, id: 'ui.qaContainer', operation: workflow.operation ?? workflow.semanticKey, definitionRefs: [{ id: workflow.id, version: workflow.version }] };
+  const plan = (bindings: typeof starter[]) => ({ explanation: 'Synthetischer Plan, kein KI-Lauf.', reuseBindings: [], newBindings: bindings.map(binding => ({ bindingJson: JSON.stringify(binding), reason: 'Vertragstest' })), unsupported: [] });
+  const corrected = plan([starter]);
+  const result = await planTechnicalWithCodex({ id: 'elementare-pruefgegenstaende', model: 'luna', catalog, compiled,
+    files: { 'freigegeben.json': JSON.stringify(compiled), 'technischer-testplan.json': JSON.stringify({ initial: plan([containerBinding, unrelated]), correction: corrected }) } });
+  assert.deepEqual(result.value, corrected);
+  const diagnostic = await readFile(resolve(temporary, 'agents/elementare-pruefgegenstaende-korrektur/validierungsfehler.txt'), 'utf8');
+  assert.match(diagnostic, /zusammengesetzter Workflow oder Rollenblock/);
+  assert.match(diagnostic, /keinem elementaren Schritt/);
+  assert.match(diagnostic, /freigegeben.json.steps/);
+  assert.equal(repository.listTestingRuns().length, 0);
+});
 test('Neue manuelle Fachdefinition ohne operation und bindingId bleibt über semanticKey exakt verdrahtbar', () => {
   const catalog = getTestingCatalog();
   const base = catalog.definitions.find(item => item.id === 'kunde.anlegen')!;

@@ -33,8 +33,11 @@ export const DUPLICATES_SCHEMA = object({ explanation: string, decisions: array(
   chosen: nullable(ref), reason: string, compatible: boolean })), unresolved: strings });
 export const REUSE_SCHEMA = object({ explanation: string, suggestions: array(object({ name: string, reason: string, instanceIds: array(identifier), parentPath: nullable(string),
   parameters: array(object({ key: identifier, label: string, instanceId: identifier, input: { ...identifier, description: "Exakter inputs[].key der ausgewählten Blockdefinition, z.B. state. Niemals ein Wert wie Bayern oder ein Blockpfad." } })) })) });
+// JSON Schema is a value tree. structuredClone preserves shared object identity
+// between reused fragments, so refining one field could constrain other fields.
+function cloneSchemaTree(schema: Schema): Schema { return JSON.parse(JSON.stringify(schema)); }
 export function reuseSchemaFor(compiled: TestingCompiledScenario) {
-  const schema = structuredClone(REUSE_SCHEMA);
+  const schema = cloneSchemaTree(REUSE_SCHEMA);
   const parameters = schema.properties.suggestions.items.properties.parameters;
   const keys = [...new Set(compiled.definitions.flatMap(definition => definition.inputs.map(input => input.key)))];
   if (keys.length) parameters.items.properties.input.enum = keys;
@@ -42,10 +45,15 @@ export function reuseSchemaFor(compiled: TestingCompiledScenario) {
   return schema;
 }
 export function duplicateSchemaFor(compiled: TestingCompiledScenario) {
-  const schema = structuredClone(DUPLICATES_SCHEMA), candidates = compiled.definitions.filter(item => item.origin !== 'seed');
+  const schema = cloneSchemaTree(DUPLICATES_SCHEMA), candidates = compiled.definitions.filter(item => item.origin !== 'seed');
   if (candidates.length) {
-    schema.properties.decisions.items.properties.proposed.properties.id.enum = [...new Set(candidates.map(item => item.id))];
-    schema.properties.decisions.items.properties.proposed.properties.version.enum = [...new Set(candidates.map(item => item.version))];
+    const references = candidates.map(item => object({
+      id: { type: 'string', enum: [item.id], description: 'Exakte Definitions-ID des Prüfgegenstands, nicht seine Versionsnummer.' },
+      version: { type: 'string', enum: [item.version], description: 'Zur Definitions-ID gehörende freigegebene Version.' },
+    }));
+    // Keep each ID paired with its actual version, rather than permitting a
+    // cross-product of IDs and versions from unrelated review subjects.
+    schema.properties.decisions.items.properties.proposed = references.length === 1 ? references[0] : { anyOf: references };
   } else schema.properties.decisions.maxItems = 0;
   return schema;
 }

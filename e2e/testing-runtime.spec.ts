@@ -36,6 +36,51 @@ test('Automatisch öffnendes Formular wartet auf Ladeende statt einen noch gespe
   await expect(page.getByLabel('Betriebsname')).toHaveValue('Ladezustand geprüft');
 });
 
+test('Berechtigungsrezepte prüfen Bedienbarkeit und lehnen beide falschen Erwartungen ab', async ({ page }) => {
+  test.setTimeout(45_000);
+  await page.setContent('<label>Benutzerrolle<select aria-label="Benutzerrolle"><option>Direktion</option></select></label><label>Entscheidung<select aria-label="Entscheidung" disabled><option>Freigeben</option></select></label>');
+  const binding: TestingTechnicalBinding = { id: 'ui.bedienbarkeit', revision: 1, operation: 'bedienbarkeit', name: 'Bedienbarkeit', status: 'ready', definitionRefs: [], knowledgeRefs: [], module: 'e2e/helpers/agriculture-driver.ts', export: 'executeTestingStep', inputKeys: ['allowed'], changeReason: 'Regression für echte Bedienbarkeit.', createdAt: new Date().toISOString(),
+    locators: [{ key: 'decision', method: 'label', value: 'Entscheidung' }], recipe: [
+      { op: 'expectEnabled', locatorKey: 'decision', when: { input: 'allowed', equals: true }, proof: { matched: 'matched' } },
+      { op: 'expectDisabled', locatorKey: 'decision', when: { input: 'allowed', equals: false }, proof: { matched: 'matched' } },
+    ] };
+  const step = { id: 'authorization', instanceId: 'authorization', path: 'authorization', ancestors: [], definition: { id: 'authorization', version: '1.0.0' }, label: 'Berechtigung', kind: 'assertion' as const, operation: 'bedienbarkeit', actor: 'Direktion', inputs: { allowed: false }, outputs: { matched: 'authorization::matched' }, knowledgeRefs: [] };
+  const success = createTestingExecutionState('bedienbarkeit');
+  await executeTestingStep(page, step, binding, success);
+  expect(Object.values(success.outputs)).toContain(true);
+  const wrongEnabled = createTestingExecutionState('falsch-enabled');
+  await expect(executeTestingStep(page, { ...step, inputs: { allowed: true } }, binding, wrongEnabled)).rejects.toThrow(/toBeEnabled/);
+  expect(wrongEnabled.outputs).toEqual({});
+  await page.getByLabel('Entscheidung').evaluate(element => { (element as HTMLSelectElement).disabled = false; });
+  await executeTestingStep(page, { ...step, inputs: { allowed: true } }, binding, createTestingExecutionState('enabled'));
+  const wrongDisabled = createTestingExecutionState('falsch-disabled');
+  await expect(executeTestingStep(page, step, binding, wrongDisabled)).rejects.toThrow(/toBeDisabled/);
+  expect(wrongDisabled.outputs).toEqual({});
+});
+
+test('Direktionsberechtigung prüft die tatsächliche Bedienbarkeit in allen drei Portalrollen', async ({ request }) => {
+  const suffix = randomUUID();
+  const definition: TestingBlockDefinition = { id: `pruefung.berechtigung.${suffix}`, version: '1.0.0', name: 'Bedienbare Direktionsentscheidung prüfen', description: 'Prüft das Entscheidungseingabefeld für jede Rolle.', kind: 'assertion', category: 'Prüfungen', semanticKey: `authorization.${suffix}`,
+    inputs: [{ key: 'proposalId', label: 'Vorschlag', type: 'proposal-ref', required: true }, { key: 'expectedAllowed', label: 'Berechtigt', type: 'boolean', required: true }], outputs: [], knowledgeRefs: ['regel.direktionsanfrage', 'fach.rollen'], preconditions: ['Eine offene Direktionsanfrage besteht.'], postconditions: ['Die Bedienbarkeit entspricht der Rolle.'], status: 'draft', origin: 'human', createdAt: new Date().toISOString() };
+  await json(request, 'post', '/api/testing/definitions', { definition });
+  const binding: TestingTechnicalBinding = { id: `ui.berechtigung.${suffix}`, revision: 1, operation: definition.semanticKey, name: 'Direktionsentscheidung bedienen', status: 'ready', definitionRefs: [{ id: definition.id, version: definition.version }], knowledgeRefs: ['fach.rollen'], module: 'e2e/helpers/agriculture-driver.ts', export: 'executeTestingStep', inputKeys: ['proposalId', 'expectedAllowed'], changeReason: 'Prüft aktivierte beziehungsweise deaktivierte Entscheidungseingabe.', createdAt: new Date().toISOString(),
+    locators: [{ key: 'decision', method: 'label', value: 'Entscheidung', exact: true }], recipe: [{ op: 'goto', value: '/portal/vorschlaege/{{proposalId}}' }, { op: 'expectEnabled', locatorKey: 'decision', when: { input: 'expectedAllowed', equals: true } }, { op: 'expectDisabled', locatorKey: 'decision', when: { input: 'expectedAllowed', equals: false } }] };
+  await json(request, 'post', '/api/testing/bindings', { binding });
+  const scenario = await variation(request, 'kuh-direktionsanfrage', item => {
+    for (const [index, role] of ['Vermittler', 'Sachbearbeiter', 'Direktion'].entries()) item.blocks.push({ id: `rolle-${index}`, definition: { id: 'rolle.als', version: '1.0.0' }, inputs: { role }, children: [{ id: 'berechtigung', definition: { id: definition.id, version: definition.version }, inputs: { proposalId: { ref: 'vorschlag' }, expectedAllowed: role === 'Direktion' } }] });
+  });
+  const compiled = await approve(request, scenario);
+  const result = await run(request, scenario);
+  expect(result.status, result.error).toBe('passed');
+  expect(result.compiled.fingerprint).toBe(compiled.fingerprint);
+  expect(result.steps.slice(-3).map(step => step.status)).toEqual(['passed', 'passed', 'passed']);
+  expect(result.compiled.steps.slice(-3).map(step => step.actor)).toEqual(['Vermittler', 'Sachbearbeiter', 'Direktion']);
+  const detail = await json<ProposalDetail>(request, 'get', `/api/agriculture/proposals/${output(result, 'proposal')}`);
+  expect(detail.proposal.status).toBe('Direktionsprüfung');
+  expect(detail.referral?.status).toBe('Offen');
+  expect(detail.contract).toBeNull();
+});
+
 test('Kuh mit hoher Summe erreicht echte Direktionsanfrage und endet ohne Vertrag', async ({ request }) => {
   const scenario = await variation(request, 'kuh-direktionsanfrage'); await approve(request, scenario);
   const result = await run(request, scenario);
