@@ -82,6 +82,17 @@ test('Dublettenprüfung berücksichtigt Vorgang, Schema und fachliche Standardwe
   const changed=clone(same);changed.inputs[0].default='Maria Müller';assert.equal(findTestingDuplicates(changed,c).decision,'extend');
   const unrelated={...clone(same),semanticKey:'anderer.vorgang',operation:'otherOperation',description:'Eine völlig andere fachliche Nachbedingung.',preconditions:[],postconditions:[]};assert.equal(findTestingDuplicates(unrelated,c).candidates.some(candidate=>candidate.decision==='reuse'),false);
 });
+test('Andere Versionen derselben Komponente sind keine Dubletten, andere Komponenten bleiben vergleichbar',()=>{
+  const c=catalog(),original=clone(def(c,'kunde.anlegen'));
+  const next={...clone(original),version:'2.0.0'};
+  const versionsOnly={...c,definitions:[original,next]};
+  const report=findTestingDuplicates(next,versionsOnly);
+  assert.deepEqual(report.candidates,[]);assert.equal(report.decision,'new');assert.equal(report.chosen,undefined);
+  const other={...clone(original),id:'kunde.alternative'};
+  const comparison=findTestingDuplicates(next,{...versionsOnly,definitions:[original,next,other]});
+  assert.deepEqual(comparison.candidates.map(item=>item.definition),[{id:other.id,version:other.version}]);
+  assert.equal(comparison.decision,'reuse');assert.deepEqual(comparison.chosen,{id:other.id,version:other.version});
+});
 test('Leere options bei Text ist keine Auswahlbeschränkung; unbekannte Typen werden gespeichert nicht akzeptiert',()=>{
   const c=catalog();def(c,'kunde.anlegen').inputs[0].options=[];assert.equal(compileTestingScenario({...seeds()[0],blocks:[inst('kunde','kunde.anlegen')]},c).valid,true);
   const bad=clone(def(c,'kunde.anlegen'));bad.inputs[0].type='erfunden' as never;assert.throws(()=>repository.assertTestingDefinition(bad),/bekannten Werttyp/);

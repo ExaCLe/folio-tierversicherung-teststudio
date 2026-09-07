@@ -9,9 +9,9 @@ import { BUSINESS_SCHEMA, decodeBusinessDraft } from './schemas';
 /** A failed schema or compiler check is fed back to the real model once. No local
  * template changes the model's business proposal. Both attempts stay on disk. */
 export async function planBusinessWithCodex(input: { id: string; model: TestingModel; request: string; catalog: TestingCatalog; scenario?: TestingScenario;
-  instanceId?: string; signal?: AbortSignal; onEvent?: (event: TestingAgentEvent) => void }) {
+  instanceId?: string; files?: Record<string,string>; signal?: AbortSignal; onEvent?: (event: TestingAgentEvent) => void }) {
   const prompt = businessPrompt(input.request, input.scenario ? { scenarioId: input.scenario.id, instanceId: input.instanceId! } : undefined);
-  const files = agentContext(input.catalog, undefined, input.scenario);
+  const files = {...agentContext(input.catalog, undefined, input.scenario),...input.files};
   let previous: unknown, diagnostic = '';
   const attempts: { id: string; contextHash: string; valid: boolean; errors: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {

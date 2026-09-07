@@ -36,6 +36,7 @@ export function validateDuplicateReview(raw: unknown, compiled: TestingCompiledS
     if (decision.chosen) {
       const chosenKey = `${decision.chosen.id}@${decision.chosen.version}`;
       if (chosenKey === key) issues.push(`${location}: Der Vergleichsblock ist der Prüfgegenstand selbst. Selbstvergleiche sind keine Dubletten. Vergleiche mit den anderen Kandidaten aus vergleichskandidaten.json. Falls keine passende ANDERE Definition existiert, liefere decision:"new", chosen:null mit fachlicher Begründung, auch wenn die eigene Version bereits im Katalog steht.`);
+      else if (decision.chosen.id === decision.proposed.id) issues.push(`${location}: ${chosenKey} ist eine andere Version desselben Bausteins, keine Dublette. Behalte die freigegebene Version; einen Versionswechsel entscheidet der Mensch ausdrücklich im Editor. Prüfe hier nur andere Baustein-IDs.`);
       else if (!duplicateComparisonCandidates(decision.proposed, catalog).some(item => item.id === decision.chosen!.id && item.version === decision.chosen!.version)) issues.push(`${location}: Der Vergleichsblock ${chosenKey} ist nicht vorhanden. Wähle nur ein vollständiges ID-Versionspaar aus vergleichskandidaten.json.`);
     }
   }

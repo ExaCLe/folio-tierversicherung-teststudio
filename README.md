@@ -25,6 +25,8 @@ Beim ersten API-Start legt die Anwendung `.local/folio.json` mit fiktiven Beispi
 
 Portalbearbeitung und die Testbefehle funktionieren ohne KI-Anmeldung. Für die Agentenfunktionen ist die [Einrichtung von Codex oder Claude Code](#lokale-ki-anbindung) nötig. Zusätzliche Agentenserver werden nicht gestartet; die API ruft die lokale CLI auf.
 
+Für eine Anwendungserkundung startet die API vorübergehend eine eigene lokale Portalinstanz und Chromium. Diese Umgebung verwendet separate Testdaten und wird anschließend beendet. Dafür ist kein weiterer manueller Startbefehl nötig.
+
 Der [deutsche Demoguide](docs/demo-walkthrough.md) führt durch Portalbearbeitung, Scratch-Blöcke, fachliche Freigabe und Browsernachweise.
 
 ## Eine vorhandene Installation aktualisieren
@@ -107,6 +109,10 @@ Ein Druckauftrag enthält die konkrete Dokumentkennung und deren SHA-256. Frühe
 
 ## Im Teststudio arbeiten
 
+„Testfall erstellen“ führt durch einen zusammenhängenden Arbeitsbereich: Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Agentenaufträge erscheinen dort direkt mit ihrem aktuellen Arbeitsschritt. Unter „Alle Testfälle“ findest du auch begonnene Entwürfe und kannst sie an derselben Stelle fortsetzen. Bibliothek, Wissen und historische Nachweise sind über „Bibliothek & Wissen“ erreichbar.
+
+Die KI wertet zuerst vorhandenes Wissen aus. Bei Lücken kann sie das Portal in einer separaten lokalen Umgebung mit eigenen Testdaten erkunden. Beobachtungen aus dieser Erkundung und offene Fragen fließen in den fachlichen Entwurf ein. Beim manuellen Definieren eines Blocks lässt sich fehlendes Wissen ebenfalls neu ergänzen.
+
 Das Studio verwendet `scratch-blocks` mit dem Scratch-Renderer. Verbundene Blöcke beschreiben die ausführbare Reihenfolge. Frei abgelegte Blöcke und ihre Bildschirmpositionen werden als Layout gespeichert. Sie ändern die fachliche Reihenfolge nicht.
 
 Eine Definition beschreibt die fachliche Bedeutung und die Eingaben eines Blocks. Eine Instanz verwendet diese Definition in einem Testfall. Eine separate technische Bindung legt die konkreten Browseraktionen fest. Wiederverwendbare Abläufe bestehen aus bestehenden Blöcken und können Parameter nach außen anbieten, etwa Versicherungssumme oder Bundesland.
@@ -119,13 +125,13 @@ Wenn eine Blockdefinition korrigiert wurde, zeigt der Inspector die verwendete B
 
 Bei einem korrigierten Eingabefeld prüft das Studio dessen aktuelle Definition gegen das tatsächlich ausgewählte Ergebnis. Eine alte gespeicherte Typangabe allein macht eine passende Auswahl nicht ungültig. Ist weiterhin ein Vertrag ausgewählt, obwohl nun ein Versicherungsvorschlag benötigt wird, bleibt der Hinweis bestehen, bis die passende Quelle gewählt wurde.
 
-Scheitert der KI-Vergleich mit vorhandenen Bausteinen, erklärt die Auftragsansicht, welcher Arbeitsschritt nicht abgeschlossen wurde. Interne Fehlermeldungen stehen unter den technischen Details. Über „Testfall öffnen und fortsetzen“ gelangst du zurück zum betroffenen Ablauf. Dort kannst du den Auftrag erneut starten. Ein Fehler in der KI-Antwort verlangt keine Änderung deiner fachlichen Blockdefinitionen.
+Scheitert ein Arbeitsschritt, bleibt der Testfall erhalten. Der Arbeitsbereich zeigt die nächste mögliche Aktion; interne Protokolle stehen unter den Details. Ein beendeter KI-Aufruf ist noch kein bestandener Test. Erfolg zeigt die Oberfläche erst für einen passenden bestandenen Browserlauf. Andere Versionen desselben Blocks werden bei der Versionspflege behandelt und nicht als eigenständige Dubletten angeboten.
 
-Die [Blockmethode](docs/block-method.md) erklärt die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
+Der [Arbeitsbereich](docs/test-workspace.md) erklärt die Reihenfolge und Zustände. Die [Blockmethode](docs/block-method.md) erläutert die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
 
 ## Einen bestehenden Ablauf mit KI ändern
 
-1. Unter „Testfälle“ den gewünschten Testfall öffnen. Das funktioniert auch nach einer abgeschlossenen technischen Umsetzung.
+1. Unter „Alle Testfälle“ den gewünschten Testfall öffnen. Das funktioniert auch nach einer abgeschlossenen technischen Umsetzung.
 2. Im Feld „Anweisung für den gesamten Ablauf“ beispielsweise schreiben: „Füge nach der Antragseinreichung eine Prüfung ein, dass ein Vermittler die Direktionsentscheidung nicht bearbeiten darf. Behalte alle anderen Schritte bei.“
 3. „Änderungsvorschlag erstellen“ wählen. Bei ungespeicherten Änderungen speichert „Speichern und Vorschlag erstellen“ zuerst den bearbeiteten Stand.
 4. Den vorgeschlagenen Ablauf und die Änderungen prüfen. Erst die Übernahme ändert den gespeicherten Testfall. Ein Vorschlag kann auch verworfen werden.

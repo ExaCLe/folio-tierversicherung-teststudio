@@ -2,7 +2,7 @@
 
 Diese Anleitung führt durch die aktuelle deutsche Anwendung. Das [blaue Portal](http://127.0.0.1:5173/portal) und das [grüne Teststudio](http://127.0.0.1:5173/testing) haben getrennte Oberflächen. Öffne sie am besten in zwei Browser-Tabs. Die Startbefehle und Voraussetzungen stehen in der [README](../README.md#schnellstart).
 
-Das Portal kann ohne Modellaufruf bedient werden. Für die KI-Aufträge im Studio muss die lokale Codex-CLI angemeldet sein und die Modellverbindung erreichen. Details stehen in der [Codex-Anbindung](codex-anbindung.md).
+Das Portal kann ohne Modellaufruf bedient werden. Für die KI-Aufträge im Studio muss die ausgewählte lokale Codex- oder Claude-CLI angemeldet sein und die Modellverbindung erreichen. Details stehen in der [Codex-Anbindung](codex-anbindung.md).
 
 ## 1. Eine Standardkuh im Portal versichern
 
@@ -68,106 +68,64 @@ Ein vorhandener Kunde kann im ersten Erfassungsschritt ausgewählt werden. Im n�
 
 Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebensversicherung. Die Annahmegrenzen und besonderen Prüfgründe stehen im Portal unter „Tarifhinweise“ und im [Portalvertrag](agriculture-api.md).
 
-## 5. Eine fachliche Anforderung im Teststudio beschreiben
+## 5. Einen Testfall beginnen und wiederfinden
 
-Öffne das Teststudio und wähle den Navigationstab „Neuer Testfall“. Beschreibe unter „Deine Anforderung“ zum Beispiel:
+Öffne im Teststudio „Testfall erstellen“ und beschreibe unter „Deine Anforderung“ zum Beispiel:
 
 > Ich möchte eine Tierlebensversicherung für die Kuh Berta auf einem Betrieb in Bayern. Die Versicherungssumme beträgt 15.000 Euro. Prüfe, dass nach dem Einreichen eine offene Direktionsanfrage besteht. Der Vertrag soll noch nicht abgeschlossen werden.
 
-1. Wähle „Luna“ oder „Sol“.
-2. Klicke auf „Fachlichen Entwurf erstellen“.
-3. Öffne den angezeigten Agentenauftrag, um Modell, Fortschritt, Begründung und mögliche offene Fragen zu prüfen.
-4. Nach einem erfolgreichen Auftrag öffnet „Entwurf ansehen“ den fachlichen Ablauf.
+Wähle das Modell und starte den Entwurf. Der Auftrag erscheint direkt im Arbeitsbereich. Der Testfall ist bereits gespeichert und unter „Alle Testfälle“ auffindbar, auch wenn noch kein fertiger Blockablauf vorliegt. Ein Klick auf den Testfall öffnet wieder denselben Arbeitsbereich.
 
-Ein KI-Fehler bleibt sichtbar und erzeugt keinen vorgetäuschten erfolgreichen Entwurf. Ein bereits gespeicherter Testfall kann auch ohne neuen fachlichen KI-Auftrag untersucht werden. Der eigene Navigationstab „Testfälle“ zeigt alle vorhandenen Abläufe. Unter „Gespeicherte Testfälle“ sind „Kuh mit hoher Versicherungssumme“ und „Police als Sachbearbeiter drucken“ vorbereitet. Mit „Testfälle durchsuchen“ findest du einen Fall über seinen Namen oder seine Anforderung; ein Klick auf die Karte öffnet den Editor. Die Karte zeigt die Revision, vorhandene lokale Änderungen und gegebenenfalls den letzten Lauf.
+Der Fortschritt unterscheidet Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Ein einzelnes KI-Ergebnis bedeutet noch nicht, dass der gesamte Auftrag abgeschlossen ist. Laufende Teilaufträge und offene Entscheidungen bleiben sichtbar.
 
-In der Übersicht „Testfälle“ findest du unter „Bisherige Agentenaufträge“ auch frühere Aufträge. Der Dialog nennt den zugehörigen Testfall und die Auftragsrevision. „Entwurf ansehen“ öffnet diesen Testfall. Liegt inzwischen eine neuere gespeicherte Revision vor, wird der Unterschied angezeigt. Eigene ungespeicherte Änderungen bleiben im geöffneten Entwurf erhalten.
+## 6. Wissen und Anwendung erkunden
 
-Die Leiste „Aktueller Testfall“ beziehungsweise „Zuletzt bearbeitet“ nennt Titel und Revision. Über „Testfall weiterbearbeiten“ kehrst du aus der Blockbibliothek, den Ausführungen oder einer anderen Studioseite zum Editor zurück. Der Pfeil „Zur Testfallübersicht“ im Editor führt zurück zur Sammlung. „Testfälle“ und „Neuer Testfall“ haben eigene Adressen; auch die Zurück- und Vorwärtstasten des Browsers stellen die entsprechende Ansicht und den zur Adresse gehörenden Testfall wieder her. Ungespeicherte Änderungen werden beim Wechsel und beim erneuten Laden im selben Browser-Tab wiederhergestellt. „Speichern“ sichert sie dauerhaft; „Verwerfen“ stellt den gespeicherten Stand wieder her.
+Die KI prüft zuerst die vorhandenen Wissensdokumente und Bausteine. Bei einer Wissenslücke kann sie die aktuelle Portaloberfläche in einer separaten lokalen Testumgebung bedienen. Dabei bleiben deine gespeicherten Versicherungsfälle unverändert.
 
-## 6. Die Scratch-Blöcke fachlich prüfen
+Die Erkundung liefert Beobachtungen und gegebenenfalls neues Wissen für den Entwurf. Eine Beobachtung beschreibt beispielsweise, welche Felder das Formular zeigt. Sie beweist nicht automatisch, dass eine fachliche Versicherungsregel vollständig verstanden wurde. Offene Fragen müssen weiterhin geklärt werden.
 
-Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein automatischer Vertragsabschluss würde seine Anforderung verändern. Der zweite Test bereitet dagegen einen vollständigen Standardvertrag vor und wechselt für Ausgabe und Druck zum Sachbearbeiter.
+## 7. Den Scratch-Ablauf prüfen
+
+Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein automatischer Vertragsabschluss würde seine Anforderung verändern. Für einen Test der Policenausgabe wäre dagegen zunächst ein vollständiger Standardvertrag erforderlich.
 
 1. Wähle einen Scratch-Block aus oder öffne die tastaturbedienbare „Ablaufliste“.
-2. Prüfe rechts unter „Werte“ die konkreten Eingaben. Achte besonders auf Versicherungssumme, Betriebsadresse, Tierart und Rollen. Der ausgewählte Block bleibt beim Bearbeiten eines Feldes und beim Wechsel zwischen den Detailtabs ausgewählt; du kannst seine Angaben nacheinander prüfen, ohne ihn erneut anzuklicken.
-3. Öffne „Wissen“, um die verknüpften Regeln und fachlichen Quellen zu lesen.
-4. Prüfe bei einem zusammengesetzten Block die enthaltenen Schritte. Werte einer Verwendung dürfen vom gemeinsamen Baustein abweichen.
-5. Prüfe die verbundenen Schritte der Startkette. Wenn du Blöcke aus der Scratch-Werkzeugleiste ziehst, verbinde sie mit dieser Kette. Lose abgelegte Blöcke gehören nicht zum ausführbaren Ablauf. Die Bildschirmposition allein legt keine Reihenfolge fest.
-6. Speichere vorgenommene Änderungen und wähle anschließend „Fachlich freigeben“, wenn der Ablauf zur Anforderung passt.
+2. Prüfe im Inspector die Werte, vor allem Versicherungssumme, Betriebsadresse, Tierart und Rollen.
+3. Öffne bei Bedarf die verknüpften Wissensgrundlagen und die enthaltenen Schritte eines zusammengesetzten Blocks.
+4. Ergänze fehlende Blöcke oder lasse die KI den gesamten Ablauf anhand einer neuen Anweisung überarbeiten.
+5. Speichere deine Änderungen und gib den fachlichen Stand ausdrücklich frei.
 
-Unter „Abweichungen vom Standard“ werden die Standardwerte der verwendeten Bibliotheksversion mit den wirksamen lokalen Werten dieses Tests verglichen. Der Vergleich berücksichtigt auch Parameter und lokale Overrides, etwa eine abweichende Versicherungssumme innerhalb eines zusammengesetzten Bausteins.
+„Abweichungen vom Standard“ zeigt die wirksamen Änderungen gegenüber der verwendeten Blockversion. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
 
-„Geänderte Schritte aufklappen“ öffnet die betroffenen Schritte im zusammengesetzten Block. Mit „Geänderten Schritt zeigen“ springst du zu einer einzelnen Abweichung. Auch die normale Auswahl eines Schritts öffnet den Zielblock und seine umschließenden Bausteine, damit er sichtbar wird. Diese Aktionen ändern nur Auswahl und Darstellung; sie erzeugen keine neue fachliche Änderung.
+Lose Scratch-Stapel gehören nicht zum ausführbaren Ablauf. Verbinde benötigte Schritte mit der Startkette. Das Layout selbst legt keine fachliche Reihenfolge fest.
 
-Eine fachliche Änderung macht die frühere Freigabe ungültig. Der aktualisierte Stand braucht eine neue Prüfung. Die Freigabe bezieht sich auf den konkreten fachlichen Stand und seine Wissensgrundlagen.
+### Einen fehlenden Block ergänzen
 
-### Vorhandene und eigene Blöcke ergänzen
+Über „Vorhandenen Block hinzufügen“ suchst du nach einer bekannten Fähigkeit. „Neuen Block definieren und hinzufügen“ erlaubt eine neue fachliche Beschreibung mit typisierten Eingaben. Fehlt die Wissensgrundlage, kannst du sie beim Definieren selbst ergänzen. Du musst keinen unpassenden bestehenden Eintrag auswählen.
 
-Direkt unter der Scratch-Arbeitsfläche und der Ablaufliste stehen zwei Aktionen:
+Eine neue Fähigkeit kann zunächst ohne technische Bindung beschrieben werden. Die technische Phase muss anschließend klären, ob und wie sie im Portal ausgeführt werden kann. Ein fehlendes Produktmerkmal darf nicht durch einen erfundenen erfolgreichen Test ersetzt werden.
 
-1. Wähle die „Einfügestelle“. Standardmäßig wird am Ende des Ablaufs ergänzt. Wenn ein zusammengesetzter Block ausgewählt ist, kannst du stattdessen innerhalb dieses Blocks ergänzen.
-2. „Vorhandenen Block hinzufügen“ öffnet die Suche. Suche nach Namen, fachlicher Bedeutung oder Kategorie und wähle den gewünschten Block samt Version. Er wird unmittelbar an der gewählten Stelle in den Ablauf eingefügt und ausgewählt.
-3. Wenn die Fähigkeit fehlt, öffne „Neuen Block definieren und hinzufügen“. Dafür muss noch kein Block im Testfall vorhanden sein. Beschreibe Name, fachliche Bedeutung und Blockart.
-4. Der „Fachliche Schlüssel“ wird aus dem Namen vorgeschlagen. Er dient der internen Zuordnung und kann bei Bedarf angepasst werden. Du musst dafür keinen eigenen technischen Bezeichner erfinden.
-5. Über „Eingabe ergänzen“ legst du typisierte Felder an, zum Beispiel einen „Geldbetrag“, eine „Zahl“ oder eine „Auswahl“. Ergänze passende Bezeichnungen, gegebenenfalls Pflichtangaben und Standardwerte.
-6. „Definieren und zum Ablauf hinzufügen“ speichert die Definition in der Bibliothek und fügt eine Verwendung an der gewählten Stelle ein. Prüfe deren Werte und speichere den Testfall.
+### Eine bestehende Verwendung ändern
 
-Fehlt die technische Bindung, zeigen Dialog und Editor dies an. Du kannst die Fähigkeit fachlich beschreiben und prüfen, bevor sie technisch ausgeführt werden kann.
+Die verwendete Blockversion und ihre lokalen Werte sind getrennt. Eine andere Versicherungssumme oder ein Betrieb in Bayern können lokale Abweichungen sein. Die Veröffentlichung einer neuen Bibliotheksversion aktualisiert nicht still alle Testfälle.
 
-### Ergebnisse früherer Schritte erkennen
+Eine KI-Änderung ist ein Vorschlag. Prüfe die Unterschiede, bevor du sie übernimmst. Jede fachliche Änderung benötigt eine erneute Freigabe; ältere Nachweise bleiben ihrem damaligen Stand zugeordnet.
 
-Verwendet ein Block einen zuvor angelegten Kunden, Betrieb, ein Tier oder ein anderes Ergebnis, zeigen die Blockdetails die Ergebnisart, den Namen und den erzeugenden Schritt. „Quelle im Ablauf zeigen“ springt zu diesem Schritt. In der Ablaufliste wird die betreffende Zeile ausgewählt; die Scratch-Ansicht zeigt den Quellblock auch dann, wenn sein Baustein zuvor eingeklappt war.
+## 8. Technik und Browserlauf
 
-Über die Auswahl im Referenzfeld kannst du ein anderes passendes Ergebnis aus einem früheren Schritt wählen. Noch fehlende, erst später erzeugte oder in diesem Ablaufbereich nicht verfügbare Ergebnisse werden ausdrücklich angezeigt. „Technischen Verweis anzeigen“ öffnet bei Bedarf die gespeicherte Kennung. Der erzeugende Block nennt unter „Ergebnisse dieses Schritts“ seine Ausgaben.
+Nach der fachlichen Freigabe startest du die technische Vorbereitung und den Probelauf im selben Arbeitsbereich. Der Fortschritt zeigt getrennt, ob die technische Umsetzung noch läuft, der Vergleich mit anderen Bausteinen eine Entscheidung verlangt oder der Browser bereits testet.
 
-## 7. Eine lokale Ausnahme formulieren
+Bei einem Wiederverwendungsvorschlag prüfst du den vorgeschlagenen anderen Baustein, seine Übereinstimmungen und Unterschiede. Eine andere Version desselben Blocks wird nicht als eigenständige Dublette behandelt. Eine erforderliche Erweiterung ist eine fachliche Aufgabe und noch kein bestandener Browserlauf.
 
-Wähle einen zusammengesetzten Block, beispielsweise die Vorbereitung eines Kuhvorschlags. Unter „Eine Ausnahme beschreiben“ kannst du eingeben:
+Der Browserlauf führt die freigegebene Folge tatsächlich im Portal aus. Er erzeugt fiktive Versicherungsobjekte und hält die getestete Revision, verwendete Bindungen und Schrittnachweise fest. Öffne bei Bedarf den fehlgeschlagenen Schritt oder die Screenshots. Ein früherer grüner Lauf belegt keine später geänderte Fassung.
 
-> Der Betrieb soll in Bayern liegen. Verwende Bauernhof Sonnleitner, Dorfstraße 12, 87437 Kempten. Die Anschrift des Kunden soll unverändert bleiben.
+Erst das Ergebnis eines passenden Browserlaufs zeigt „bestanden“ oder „fehlgeschlagen“. Protokolle und interne technische Daten stehen unter den Details. Scheitert ein KI-Arbeitsschritt, bleibt der Testfall erhalten und kann im Arbeitsbereich fortgesetzt werden.
 
-Klicke auf „Änderung vorschlagen“. Prüfe in der Gegenüberstellung, welche Felder der Agent ändern möchte. „Änderungen in Entwurf übernehmen“ übernimmt den Vorschlag in den bearbeitbaren Entwurf. Erst danach speicherst und prüfst du ihn erneut. „Verwerfen“ lässt den vorherigen fachlichen Stand bestehen.
+## 9. Wiederverwenden und nachpflegen
 
-Die Ausnahme gilt für diese Verwendung im Testfall. Sie veröffentlicht keine neue gemeinsame Blockdefinition. Wiederkehrende Unterschiede können später als Parameter eines gemeinsamen Bausteins beschrieben werden.
+Nach einem bestandenen Lauf können Vorschläge für wiederverwendbare Teilabläufe entstehen. Sie sind ein optionaler nächster Schritt. Eine fehlgeschlagene Wiederverwendungsanalyse ändert das Browserergebnis nicht.
 
-## 8. Technik und echten Browserlauf prüfen
+Prüfe Namen, enthaltene Schritte und veränderbare Eingaben eines Vorschlags. „Als Baustein übernehmen“ veröffentlicht den gewählten Ablauf in der Blockbibliothek. Interne Verknüpfungen zwischen den Schritten bleiben innerhalb des Bausteins erhalten.
 
-Nach fachlicher Freigabe erscheint „Technik & Probelauf“. Die technische Phase prüft die vorhandenen Bindungen, fehlende Umsetzung und mögliche doppelte Bausteine. Anschließend kann der Browser die freigegebene Folge tatsächlich im Portal ausführen.
+Unter „Bibliothek & Wissen“ findest du außerdem Abhängigkeiten und historische Ausführungen. Eine geänderte Portal-Schaltfläche lässt sich dadurch ihrer technischen Bindung und den betroffenen Testfällen zuordnen. Historische Läufe behalten ihre ursprünglichen Nachweise.
 
-Zusammengesetzte Bausteine führen ihre enthaltenen elementaren Schritte aus. Die technische Planung benötigt für den umschließenden Baustein kein zusätzliches UI-Rezept. Prüft der Test Rollenberechtigungen, müssen seine Assertions bedienbare beziehungsweise gesperrte Felder nachweisen. Die generischen Rezeptaktionen `expectEnabled` und `expectDisabled` prüfen jeweils auch die Sichtbarkeit. `expectVisible` allein reicht für diese fachliche Aussage nicht aus.
-
-1. Klicke auf „Technik & Probelauf“ und prüfe den angezeigten Agentenfortschritt.
-2. Beachte technische Lücken oder nicht unterstützte Anforderungen. Ein fachlich gültiger Entwurf ist dadurch noch kein bestandener Test.
-3. Öffne nach der Ausführung „Ausführungen“ und wähle den Lauf.
-4. Prüfe jeden Schrittnachweis, Screenshot und die zugehörigen Objektkennungen.
-5. Öffne den erzeugten Portalvorgang und kontrolliere das fachliche Ergebnis. Beim Direktionsbeispiel ist das eine offene Anfrage; beim Policenbeispiel eine neue Dokumentversion mit passendem Druckauftrag.
-6. Prüfe das Laufmanifest und bei Bedarf den Playwright-Trace. Sie dokumentieren die ausgeführte Revision und die verwendeten Bindungen.
-
-Die Laufansicht nennt den Testfall und die tatsächlich ausgeführte Revision. „Testfall öffnen“ führt zum bearbeitbaren Testfall; „Testfall weiterbearbeiten“ in der oberen Leiste führt zum zuletzt bearbeiteten Entwurf zurück. Die Laufnachweise bleiben bei ihrer historischen Revision.
-
-Wenn freigegebener Ablauf und passende Technik bereits vorliegen, erlaubt „Mit vorhandener Technik ausführen“ einen weiteren Browserlauf. Jeder Lauf erstellt eigene fiktive Portalobjekte und behält seine Nachweise.
-
-### Einen technischen Vertragsfehler einordnen
-
-Ein sichtbares Formular kann bereits automatisch geöffnet sein. Nur der reine Öffnungsklick darf dann entfallen. Ausfüllen, Speichern und der Nachweis aus der Speicherantwort müssen trotzdem stattfinden. Ein Fehler zu `unlessVisible` bedeutet, dass die technische Antwort diese Trennung verletzt oder ein unbekanntes Formularfeld benennt.
-
-Neue Fehlermeldungen nennen die betroffene Bindung mit Revision, den genauen Eintrag wie `recipe[3]` und die entsprechende Aktionsnummer. `recipe[3]` ist die vierte Aktion. Der Bericht erklärt, ob die Bedingung an der falschen Aktionsart hängt, ihr Locator-Schlüssel fehlt oder der Klick einen verbindlichen Antwortnachweis `capture` enthält.
-
-Die technische Korrekturrunde erhält alle gefundenen Fehler der neuen Bindungen zusammen. Sie darf einen optionalen Öffnungsklick vom Speicherklick trennen, aber keine Speicheraktion oder Ergebniserfassung entfernen. Bleibt ihre Antwort ungültig, endet der Auftrag ohne Übernahme dieses Plans. Öffne den fehlgeschlagenen Agentenauftrag und prüfe die genannte Bindung. Nach einer Korrektur der technischen Vorgaben kannst du für den weiterhin freigegebenen Fachstand „Technik & Probelauf“ erneut starten. Ein gültiger Plan ist erst nach dem anschließenden echten Browserlauf als funktionierender Test belegt.
-
-Nach einem erfolgreichen Lauf können Vorschläge für wiederverwendbare Teilabläufe entstehen. Falls noch keine Vorschläge vorliegen oder die Analyse fehlgeschlagen ist:
-
-1. Öffne den bestandenen Lauf unter „Ausführungen“ und gehe zu „Welche Teile sollen wiederverwendbar werden?“.
-2. Wähle unter „Modell für Wiederverwendung“ Luna oder Sol und klicke auf „Wiederverwendung prüfen“. Der Fortschritt erscheint direkt in diesem Bereich. Die Analyse verwendet den vorhandenen erfolgreichen Lauf; sie führt den Versicherungstest nicht erneut aus und erzeugt keine neuen Versicherungsobjekte.
-3. Prüfe bei jedem Vorschlag die enthaltenen Schritte und den fachlichen Zweck. Bearbeite „Name des wiederverwendbaren Blocks“ und wähle über die Checkboxen, welche Eingaben später veränderbar sein sollen. Eine interne Verknüpfung, etwa vom gerade angelegten Kunden zu seinem Betrieb, soll innerhalb des Bausteins erhalten bleiben.
-4. Mit „Als Baustein übernehmen“ erscheint der geprüfte Ablauf in der Blockbibliothek. Die Karte nennt die gespeicherte Definition und ihre Version. „Vorschlag verwerfen“ lehnt einen anderen Vorschlag ab.
-5. Lade die Seite erneut und prüfe die Entscheidungen sowie den neuen Eintrag in der Blockbibliothek. Der ursprüngliche Testfall, seine Freigabe und seine Browsernachweise bleiben erhalten.
-
-Die [Blockmethode](block-method.md) beschreibt die fachliche Entscheidung; das [Speichermodell](storage-model.md) erklärt Versionen und Beziehungen.
-
-## 9. Abhängigkeiten und Nachweise verfolgen
-
-Unter „Abhängigkeiten“ lässt sich von einer technischen Bindung zu ihren Aktionsblöcken, umschließenden Abläufen und betroffenen Testfällen wechseln. Eine geänderte Portal-Schaltfläche kann so an der passenden Bindung korrigiert werden. Historische Ausführungen behalten die damals verwendete Revision.
-
-Neue Browsernachweise liegen unter `.local/testing/runs/`, Agentenaufträge unter `.local/testing/agents/`. Die aktuelle [Teststudio-API](testing-api.md) dokumentiert die gespeicherten Zustände und Nachweise. Diese Demo verwendet ausschließlich fiktive Tierversicherungen.
+Die [Beschreibung des Arbeitsbereichs](test-workspace.md) erklärt die Zustände. Die [Blockmethode](block-method.md) und das [Speichermodell](storage-model.md) erklären Wiederverwendung und Versionen. Agentenartefakte unter `.local/testing/agents/` sowie Browsernachweise unter `.local/testing/runs/` bleiben lokal und gehören nicht ins öffentliche Repository.

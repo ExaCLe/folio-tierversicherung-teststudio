@@ -80,3 +80,12 @@ test('Ein vorhandener Prüfgegenstand ohne andere Kandidaten bleibt eine eigenst
   assert.throws(()=>validateDuplicateReview({explanation:'',decisions:[],unresolved:[]},scenario,alone),/fehlt in der unabhängigen/);
   assert.match(duplicatePrompt(),/Ist pruefgegenstaende.json leer/);assert.match(duplicatePrompt(),/nur die Kandidatenliste.*dennoch eine Entscheidung new/);
 });
+
+test('Andere Versionen derselben Baustein-ID werden nicht als fachliche Dublette angeboten',()=>{
+  const older={...subject,version:'0.9.0'},c={...catalog,definitions:[...catalog.definitions,older]},scenario=compiled(subject),schema=duplicateSchemaFor(scenario,c);
+  const versionSwap={...decision(),decision:'reuse',chosen:{id:older.id,version:older.version},compatible:true};
+  assert(!accepts(schema.properties.decisions.items,versionSwap));
+  assert.throws(()=>validateDuplicateReview({explanation:'',decisions:[versionSwap],unresolved:[]},scenario,c),/andere Version desselben Bausteins, keine Dublette/);
+  const context=JSON.parse(duplicateReviewContext(scenario,c)['vergleichskandidaten.json'])[0];
+  assert.deepEqual(context.versions.map((item:any)=>item.version),['0.9.0']);assert(context.candidates.every((item:any)=>item.id!==subject.id));
+});

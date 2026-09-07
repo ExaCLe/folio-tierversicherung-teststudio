@@ -192,7 +192,7 @@ export function findTestingDuplicates(proposed:TestingBlockDefinition,catalog:Te
   const normalize=(value:string)=>value.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
   const words=(value:string)=>new Set(normalize(value).split(' ').filter(w=>w.length>3));
   const proposedMeaning=words(`${proposed.semanticKey} ${proposed.description} ${proposed.preconditions.join(' ')} ${proposed.postconditions.join(' ')}`);
-  const candidates=catalog.definitions.filter(d=>testingVersionKey(d)!==testingVersionKey(proposed)).map(existing=>{
+  const candidates=catalog.definitions.filter(d=>d.id!==proposed.id).map(existing=>{
     const matching:string[]=[];const differences:string[]=[];let score=0;
     const sameSemantic=existing.semanticKey===proposed.semanticKey; const sameSchema=stableTestingStringify(schemaSignature(existing))===stableTestingStringify(schemaSignature(proposed));
     const sameBody=stableTestingStringify(compositionSignature(existing,catalog))===stableTestingStringify(compositionSignature(proposed,catalog));

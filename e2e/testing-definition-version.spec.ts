@@ -1,3 +1,4 @@
+import { openDetails, workspaceNavigation } from './helpers/testing-workspace';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
@@ -11,20 +12,21 @@ async function fixture(request: APIRequestContext) {
   const response = await request.put(`/api/testing/scenarios/${scenario.id}`, { data: { ...scenario, expectedRevision: 0 } });
   expect(response.ok()).toBeTruthy(); return { scenario: await response.json(), definition };
 }
-async function open(page: Page, id: string) { await page.goto(`/testing/editor/${id}`); await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click(); await page.locator('.t-outline [data-block-path="pruefung"]').click(); }
+async function open(page: Page, id: string) { await page.goto(`/testing/editor/${id}`); await expect(page.getByLabel('Name des Testfalls', { exact: true })).toBeVisible(); await openDetails(page, '.t-editor-step'); await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click(); await page.locator('.t-outline [data-block-path="pruefung"]').click(); }
 async function correctDialog(page: Page) { const dialog = page.getByRole('dialog', { name: 'Eine neue Blockversion definieren', exact: true }); await dialog.getByLabel('Datentyp der Eingabe 1', { exact: true }).selectOption('proposal-ref'); await dialog.getByRole('button', { name: 'Definition speichern', exact: true }).click(); await expect(dialog).not.toBeVisible(); }
 
 test('Eine Bibliothekskorrektur wird sichtbar angeboten und gezielt in die Verwendung übernommen', async ({ page, request }, testInfo) => {
   const { scenario, definition } = await fixture(request);
   await open(page, scenario.id);
   await page.locator('#testing-value-target').selectOption('vertrag');
-  await page.getByRole('link', { name: 'Blockbibliothek', exact: true }).click();
+  await workspaceNavigation(page, 'Blockbibliothek');
   await page.getByLabel('Blockbibliothek durchsuchen').fill(definition.name);
   await page.locator('.t-definition-card').click();
   await page.getByRole('button', { name: 'Neue Version bearbeiten', exact: true }).click();
   await correctDialog(page);
-  await page.getByRole('link', { name: 'Testfall weiterbearbeiten', exact: true }).click();
+  await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
   await expect(page.locator('.t-inspector')).toContainText('Version 1.0.0');
+  await openDetails(page, '.t-definition-version');
   await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.0');
   await page.getByLabel('Verwendete Blockversion', { exact: true }).selectOption('1.0.1');
   const picker = page.locator('#testing-value-target');
@@ -36,6 +38,7 @@ test('Eine Bibliothekskorrektur wird sichtbar angeboten und gezielt in die Verwe
   await page.reload();
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
   await page.locator('.t-outline [data-block-path="pruefung"]').click();
+  await openDetails(page, '.t-definition-version');
   await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.1');
   await expect(picker).toHaveValue('vorschlag');
   const compiled = await (await request.get(`/api/testing/scenarios/${scenario.id}/compile`)).json();
@@ -53,6 +56,7 @@ test('Eine Korrektur im Inspector aktualisiert nur die ausdrücklich bearbeitete
   await open(page, scenario.id);
   await page.getByRole('button', { name: 'Blockdefinition bearbeiten', exact: true }).click();
   await correctDialog(page);
+  await openDetails(page, '.t-definition-version');
   await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.1');
   await page.locator('#testing-value-target').selectOption('vorschlag');
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();

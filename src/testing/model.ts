@@ -2,7 +2,7 @@ import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, Test
 import { createTestingInstance, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
 
 export const kindLabels = { action: 'Aktion', assertion: 'Prüfung', workflow: 'Baustein', context: 'Rolle & Gruppe' };
-export const phaseLabels = { business: 'Fachlicher Entwurf', technical: 'Technische Umsetzung', duplicates: 'Dublettenprüfung', reuse: 'Wiederverwendung' };
+export const phaseLabels = { business: 'Fachlicher Entwurf', exploration: 'Erkundung', technical: 'Technische Umsetzung', duplicates: 'Dublettenprüfung', reuse: 'Wiederverwendung' };
 export const statusLabels: Record<string, string> = { queued: 'Eingereiht', running: 'Läuft', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', cancelled: 'Abgebrochen', passed: 'Bestanden', skipped: 'Übersprungen', suggested: 'Vorgeschlagen', accepted: 'Übernommen', dismissed: 'Verworfen', ready: 'Ausführbar', draft: 'Entwurf', approved: 'Freigegeben', missing: 'Nicht verdrahtet' };
 export const typeLabels: Record<TestingValueType, string> = { text: 'Text', number: 'Zahl', money: 'Geldbetrag', boolean: 'Ja / Nein', date: 'Datum', choice: 'Auswahl', object: 'Wertepaare', list: 'Liste', 'customer-ref': 'Kunde', 'farm-ref': 'Betrieb', 'animal-ref': 'Tier', 'proposal-ref': 'Vorschlag', 'referral-ref': 'Direktionsanfrage', 'policy-ref': 'Police', 'contract-ref': 'Vertrag', 'document-ref': 'Dokument' };
 

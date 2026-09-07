@@ -57,6 +57,9 @@ export function saveTestingScenario(input:TestingScenario,expectedRevision?:numb
   if(previous)db.upsert<ScenarioRevision>('testingScenarioRevisions',{id:`${previous.id}@${previous.revision}`,scenario:previous});
   db.upsert('testingScenarios',saved);db.upsert<ScenarioRevision>('testingScenarioRevisions',{id:`${saved.id}@${saved.revision}`,scenario:saved});return clone(saved);
 }
+export function createTestingRequestDraft(intent:string,model:TestingModel):TestingScenario {
+  return saveTestingScenario({id:`testfall-${randomUUID()}`,title:intent.trim().split('\n')[0].slice(0,100)||'Neuer Testfall',intent,revision:1,blocks:[],expectedOutcome:'',knowledgeRefs:[],source:'agent',model,createdAt:now(),updatedAt:now()},0);
+}
 export function getTestingApproval(scenarioId:string):TestingApproval|undefined {
   return db.read<TestingApproval>('testingApprovals').filter(a=>a.scenarioId===scenarioId).sort((a,b)=>b.approvedAt.localeCompare(a.approvedAt))[0];
 }
@@ -66,15 +69,21 @@ export function approveTestingScenario(id:string,revision:number,actor='Fachlich
   if(!compiled.valid)throw new TestingModelError(`Der Entwurf hat noch fachliche Fehler: ${compiled.issues.filter(i=>i.severity==='error').map(i=>i.message).join(' ')}`,400,'BUSINESS_INVALID');
   const approval:TestingApproval={id:`freigabe-${randomUUID()}`,scenarioId:id,scenarioRevision:revision,fingerprint:testingFingerprint(scenario,catalog),actor,approvedAt:now(),...(comment?{comment}:{})};db.upsert('testingApprovals',approval);return approval;
 }
-export function saveTestingDefinition(definition:TestingBlockDefinition):TestingBlockDefinition {
-  assertTestingDefinition(definition);const catalog=getTestingCatalog();const existing=catalog.definitions.find(d=>testingVersionKey(d)===testingVersionKey(definition));
+export function saveTestingDefinition(definition:TestingBlockDefinition,newKnowledge:TestingKnowledgeDocument[]=[]):TestingBlockDefinition {
+  assertTestingDefinition(definition);if(!Array.isArray(newKnowledge))throw new TestingModelError('Neue Wissensbelege müssen als Liste übergeben werden.');
+  const catalog=getTestingCatalog(),existing=catalog.definitions.find(d=>testingVersionKey(d)===testingVersionKey(definition));
   if(existing&&stableTestingStringify(existing)!==stableTestingStringify(definition))throw new TestingModelError('Diese Definitionsversion ist unveränderlich. Veröffentliche eine neue semantische Version.',409,'DEFINITION_IMMUTABLE');
-  const linked=definition.knowledgeRefs.map(id=>catalog.knowledge.filter(doc=>doc.id===id).sort((a,b)=>b.revision-a.revision)[0]);
-  if(linked.some(doc=>!doc))throw new TestingModelError('Eine neue Definition verweist auf ein fehlendes Wissensdokument. Ergänze zuerst den fachlichen Wissensbeleg.');
-  const saved=persistVersion('testingDefinitions',definition,testingVersionKey);
-  for(const doc of linked)if(!doc.definitionRefs.some(ref=>testingVersionKey(ref)===testingVersionKey(definition)))saveTestingKnowledge({...doc,revision:doc.revision+1,definitionRefs:[...doc.definitionRefs,{id:definition.id,version:definition.version}]});
-  return saved;
+  const knowledge=new Map(catalog.knowledge.map(document=>[`${document.id}@${document.revision}`,document]));
+  for(const document of newKnowledge){assertKnowledge(document);const key=`${document.id}@${document.revision}`,previous=knowledge.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(document))throw new TestingModelError('Diese Wissensrevision ist unveränderlich.',409,'KNOWLEDGE_IMMUTABLE');knowledge.set(key,document);}
+  for(const document of newKnowledge){if(document.definitionRefs.some(ref=>testingVersionKey(ref)!==testingVersionKey(definition)&&!catalog.definitions.some(item=>testingVersionKey(item)===testingVersionKey(ref))))throw new TestingModelError('Ein neuer Wissensbeleg verweist auf eine fehlende Blockversion.');if(document.relatedKnowledge.some(id=>![...knowledge.values()].some(item=>item.id===id)))throw new TestingModelError('Ein neuer Wissensbeleg verweist auf fehlendes weiteres Wissen.');}
+  const additions=[...newKnowledge];
+  for(const id of definition.knowledgeRefs){const doc=[...knowledge.values()].filter(item=>item.id===id).sort((a,b)=>b.revision-a.revision)[0];if(!doc)throw new TestingModelError('Eine neue Definition verweist auf ein fehlendes Wissensdokument. Ergänze zuerst den fachlichen Wissensbeleg.');if(!doc.definitionRefs.some(ref=>testingVersionKey(ref)===testingVersionKey(definition))){const linked={...doc,revision:doc.revision+1,definitionRefs:[...doc.definitionRefs,{id:definition.id,version:definition.version}]};knowledge.set(`${linked.id}@${linked.revision}`,linked);additions.push(linked);}}
+  const collections:Record<string,unknown[]>=existsSync(dataFile)?JSON.parse(readFileSync(dataFile,'utf8')):{};
+  const merge=<T>(name:string,rows:T[],key:(row:T)=>string)=>{collections[name]=[...new Map([...(collections[name]??[]) as T[],...rows].map(row=>[key(row),clone(row)])).values()];};
+  merge('testingDefinitions',[definition],testingVersionKey);merge('testingKnowledge',additions,document=>`${document.id}@${document.revision}`);
+  writeTestingCollections(collections);return clone(definition);
 }
+function writeTestingCollections(collections:Record<string,unknown[]>) {mkdirSync(dirname(dataFile),{recursive:true});const temporary=`${dataFile}.${process.pid}.${randomUUID()}.tmp`;writeFileSync(temporary,`${JSON.stringify(collections,null,2)}\n`,{encoding:'utf8',mode:0o600});renameSync(temporary,dataFile);}
 export function saveTestingKnowledge(document:TestingKnowledgeDocument):TestingKnowledgeDocument {
   assertKnowledge(document);
   const existing=getTestingCatalog().knowledge.find(d=>d.id===document.id&&d.revision===document.revision);
@@ -117,6 +126,13 @@ export function applyTestingScenarioEdit(id:string,draft:TestingBusinessDraft,mo
   if(!preview.compiled.valid)throw new TestingModelError(`Der Änderungsvorschlag hat fachliche Fehler: ${preview.compiled.issues.filter(issue=>issue.severity==='error').map(issue=>issue.message).join(' ')}`);
   return persistTestingBusinessDraft(existing.intent,draft,model,existing);
 }
+/** First drafts may contain business issues for human correction; they are never approved. */
+export function completeTestingRequestDraft(id:string,draft:TestingBusinessDraft,model:TestingModel,expectedRevision:number,fingerprint:string):TestingScenario {
+  const existing=getTestingScenario(id),catalog=getTestingCatalog();
+  if(existing.revision!==expectedRevision||testingFingerprint(existing,catalog)!==fingerprint)throw new TestingModelError('Die Anforderung wurde während der Planung geändert. Der Entwurf wurde nicht übernommen.',409,'AGENT_REVISION_STALE');
+  if(existing.blocks.length)throw new TestingModelError('Ein vorhandener Ablauf darf nur über einen geprüften Änderungsvorschlag ersetzt werden.',409);
+  return persistTestingBusinessDraft(existing.intent,draft,model,existing);
+}
 export function createTestingScenarioFromDraft(intent:string,draft:TestingBusinessDraft,model:TestingModel):TestingScenario {
   return persistTestingBusinessDraft(intent,draft,model);
 }
@@ -135,7 +151,7 @@ function persistTestingBusinessDraft(intent:string,draft:TestingBusinessDraft,mo
   if(existing)merge('testingScenarioRevisions',[{id:`${existing.id}@${existing.revision}`,scenario:existing}],r=>r.id);
   merge('testingScenarios',[scenario],s=>s.id);merge('testingScenarioRevisions',[{id:`${scenario.id}@${scenario.revision}`,scenario}],r=>r.id);
   // One synchronous atomic replacement commits the entire adoption, preserving every other collection.
-  mkdirSync(dirname(dataFile),{recursive:true});const temporary=`${dataFile}.${process.pid}.${randomUUID()}.tmp`;writeFileSync(temporary,`${JSON.stringify(collections,null,2)}\n`,{encoding:'utf8',mode:0o600});renameSync(temporary,dataFile);
+  writeTestingCollections(collections);
   return clone(scenario);
 }
 function values(value:TestingValue,visit:(value:TestingValue)=>void) {visit(value);if(Array.isArray(value))value.forEach(v=>values(v,visit));else if(value&&typeof value==='object'&&!isTestingReference(value))Object.values(value).forEach(v=>values(v,visit));}

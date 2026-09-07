@@ -65,11 +65,23 @@ Bei einem Schema- oder Compilerfehler erhält dasselbe Modell einmal die vorheri
 
 Der Mensch kann die Blöcke verschieben, verschachteln und ihre typisierten Werte ändern. Die Freigabe speichert die Szenariorevision und einen Fingerprint aus Ablauf, verwendeten fachlichen Definitionen und Wissen. Eine Änderung der Summe oder eines enthaltenen Schritts macht die Freigabe veraltet. Eine rein technische Locatorreparatur verändert diese fachliche Freigabe dagegen nicht.
 
+## Wissen prüfen und die Anwendung erkunden
+
+Ein neuer fachlicher Auftrag beginnt mit der Prüfung des vorhandenen Wissens und Blockkatalogs. Reicht dieses Wissen aus, kann die KI direkt einen Entwurf erstellen. Bei Lücken steht ihr eine kontrollierte Anwendungserkundung zur Verfügung.
+
+Die CLI liefert dafür strukturierte Browseraktionen. Die Anwendung führt sie mit Playwright gegen eine separate lokale Portalinstanz aus und gibt die beobachtete Oberfläche an die nächste Modellrunde zurück. Der Browser verwendet eine eigene Datenbank mit synthetischen Ausgangsdaten. Die Erkundung greift nicht auf den laufenden Versicherungsbestand zu. Die CLI erhält dadurch keinen allgemeinen Shell- oder Browserzugriff.
+
+Die Erkundung ist begrenzt und abbrechbar. Aktionen und Beobachtungen dienen als Belege für neues Wissen. Wenn die Anwendung eine Fähigkeit nicht zeigt oder eine Frage offen bleibt, muss dies im Ergebnis sichtbar bleiben. Eine UI-Beobachtung ist keine automatisch bestätigte fachliche Regel.
+
+Die aktuelle Browserbeobachtung und der benötigte Wissenskontext werden als abgegrenzte Daten direkt an die Modellanfrage übergeben. Dateien bleiben zusätzlich als Nachweis erhalten. Der nächste Browserzugriff hängt dadurch nicht von einem Dateilesewerkzeug des jeweiligen CLI-Modells ab.
+
+Der Testfall existiert bereits vor der ersten Modellantwort als gespeicherter Entwurf. Aufträge und Teilaufträge gehören zu diesem Testfall. Ergebnisse dürfen eine inzwischen geänderte Fassung nicht überschreiben. Ein abgebrochener erster Auftrag kann mit demselben Testfall fortgesetzt werden.
+
 ## Technik, Dubletten und Probelauf
 
 Nach der Freigabe starten zwei unabhängige CLI-Aufrufe parallel. Auch technische Planung, Dublettenprüfung und Wiederverwendung besitzen jeweils höchstens einen echten Korrekturversuch anhand eines konkreten Schema- oder Referenzfehlers. Prüfgegenstände und erlaubte Parameternamen werden im jeweiligen Ausgabeschema auf den freigegebenen Ablauf begrenzt. Der technische Agent prüft UI-Bindungen. Der Dublettenagent vergleicht Bedeutung, Schema, Vorbedingungen, Ergebnisse und Kompositionen mit dem vorhandenen Katalog.
 
-Das Dublettenschema bindet jede Entscheidung an das exakte Paar aus Definitions-ID und Version ihres Prüfgegenstands. Für `reuse` und `extend` darf `chosen` nur eine andere vorhandene Katalogversion nennen. Der Agent erhält die erlaubten Vergleichskandidaten je Prüfgegenstand separat. Die Entscheidung `new` mit `chosen: null` bedeutet, dass keine passende andere Definition gefunden wurde. Sie ist auch für einen bereits gespeicherten eigenen Block möglich. Die Herkunft eines Blocks als menschliche oder agentische Definition sagt nicht aus, dass er gerade erst angelegt wurde.
+Das Dublettenschema bindet jede Entscheidung an das exakte Paar aus Definitions-ID und Version ihres Prüfgegenstands. Für `reuse` und `extend` darf `chosen` nur die vorhandene Version eines anderen Blocks nennen. Alle Versionen mit derselben Definitions-ID sind als Vergleichskandidaten ausgeschlossen; ihre Auswahl gehört zur expliziten Versionspflege. Der Agent erhält die erlaubten Vergleichskandidaten je Prüfgegenstand separat. Die Entscheidung `new` mit `chosen: null` bedeutet, dass keine passende andere Definition gefunden wurde. Sie ist auch für einen bereits gespeicherten eigenen Block möglich. Die Herkunft eines Blocks als menschliche oder agentische Definition sagt nicht aus, dass er gerade erst angelegt wurde.
 
 Dynamische Schemas werden als unabhängige JSON-Wertbäume aufgebaut. Begründungen und Erläuterungen bleiben freie Texte. Die Anwendung prüft zusätzlich, ob jeder Prüfgegenstand genau einmal beurteilt wurde. Bei mehreren ungültigen Entscheidungen erhält die Korrekturrunde alle festgestellten Fehler zusammen. Ein Selbstvergleich wird weder als gültiger Dublettenfund akzeptiert noch automatisch in eine andere fachliche Entscheidung umgeschrieben.
 
@@ -122,6 +134,10 @@ Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindpr
 `e2e/testing-runtime.spec.ts` prüft echte Browserläufe mit getrennten Testdaten, eine neu definierte freie Assertion sowie einen absichtlich veralteten Button und die zentrale Reparatur. Echte Luna-/Sol-Aufrufe werden separat im lokalen System durchgeführt; ihre Prompts, Modelle, Schemas und Ergebnisse bleiben als Agentenartefakte erhalten.
 
 `server/testing/agents/providers.test.ts` prüft beide CLI-Adapter mit ausdrücklich künstlichen Prozessantworten, gespeicherte Modellprofile, Argumente, Fehlerergebnisse und unveränderliche Auftragskonfigurationen. `server/testing/agents/flow-edit.test.ts` prüft Vorschau, verschachtelte Änderungen, Verwerfen, Übernahme und veraltete Revisionen. Die Browserprüfungen der KI-Oberfläche verwenden vorbereitete Agentenantworten; sie behaupten keinen echten Modelllauf.
+
+`server/testing/agents/exploration.test.ts` verwendet eine künstliche CLI, die den Kontext ausschließlich aus der Modellanfrage liest, und einen echten isolierten Portalbrowser. Die Tests prüfen Beobachtungen, Kundenanlage, Rollenwechsel, ungültige Belege, Kontextgrenzen und Abbruch. `business-lifecycle.test.ts` prüft die sofortige Speicherung, Wiederaufnahme, Revisionsschutz und die Trennung zwischen Browserergebnis und optionaler Analyse. `e2e/testing-workspace.spec.ts` prüft den geführten Arbeitsbereich mit vorbereiteten Agentenantworten und echten lokalen Speicheraktionen.
+
+Am 7. September 2026 wurde die Erkundung zusätzlich mit einem echten Luna-Aufruf und einem vollständig leeren synthetischen Katalog geprüft. Das Modell navigierte selbst zum Neukundenformular und belegte die Feldbezeichnung „Name des Kunden“ mit vier Browserbeobachtungen. Es erzeugte einen Wissensbeleg ohne offene Fragen und speicherte keine Portalobjekte. Dieser Nachweis gilt für die konkrete Erkundungsaufgabe, nicht für beliebige fachliche Anforderungen. Die lokalen Protokolle und Screenshots werden nicht veröffentlicht.
 
 Bei der lokalen Abnahme am 7. September 2026 wurde Claude Code zusätzlich mit einem künstlichen Prompt für `{ "ok": true }` und ohne Kontextdateien aufgerufen. Die CLI akzeptierte die Argumente, meldete aber „Not logged in“. Eine erfolgreiche strukturierte Modellantwort von Claude ist damit auf diesem Rechner noch nicht nachgewiesen. Die Anwendung zeigt diesen Anmeldefehler an. Eine Anmeldung in der eigenen Claude CLI ist vor dem ersten Auftrag erforderlich.
 

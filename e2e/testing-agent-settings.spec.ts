@@ -1,6 +1,8 @@
+import { openDetails, workspaceNavigation, editWorkflow } from './helpers/testing-workspace';
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import type { TestingAgentJob, TestingScenario } from '../shared/testing';
+import { deriveTestingLifecycle } from '../server/testing/lifecycle';
 
 const browserErrors = new WeakMap<Page, string[]>();
 test.beforeEach(({ page }) => { const errors: string[] = []; browserErrors.set(page, errors); page.on('pageerror', error => errors.push(error.message)); });
@@ -16,7 +18,15 @@ async function proposalRoutes(page: Page, request: APIRequestContext, scenario: 
   let released = !hold;
   let job: TestingAgentJob | undefined;
   let applyCount = 0; let requestedModel: string | undefined;
-  await page.route('**/api/testing/bootstrap', async route => { const response = await route.fetch(); const data = await response.json(); await route.fulfill({ json: { ...data, jobs: job ? [job, ...data.jobs] : data.jobs } }); });
+  await page.route('**/api/testing/bootstrap', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    const currentJob = job && (released ? job : { ...job, status: 'running' as const, result: { scope: 'scenario', applied: false } });
+    const jobs = currentJob ? [currentJob, ...data.jobs] : data.jobs;
+    const saved = data.scenarios.find((item: TestingScenario) => item.id === scenario.id);
+    const approval = [...data.approvals].filter((item: any) => item.scenarioId === scenario.id).sort((a: any, b: any) => b.approvedAt.localeCompare(a.approvedAt))[0];
+    const lifecycles = currentJob && saved ? [deriveTestingLifecycle(saved, data.catalog, jobs, data.runs, approval), ...data.lifecycles.filter((item: any) => item.scenarioId !== scenario.id)] : data.lifecycles;
+    await route.fulfill({ json: { ...data, jobs, lifecycles } });
+  });
   await page.route(`**/api/testing/scenarios/${scenario.id}/interpret-revision`, async route => {
     const body = route.request().postDataJSON(); requestedModel = body.model;
     const saved = await (await request.get(`/api/testing/scenarios/${scenario.id}`)).json();
@@ -43,7 +53,7 @@ async function proposalRoutes(page: Page, request: APIRequestContext, scenario: 
       const response = await request.put(`/api/testing/scenarios/${scenario.id}`, { data: { ...(job!.result as any).scenario, expectedRevision: job!.scenarioRevision } });
       expect(response.ok()).toBeTruthy(); const saved = await response.json();
       const compiled = await (await request.get(`/api/testing/scenarios/${scenario.id}/compile`)).json();
-      job!.result = { ...(job!.result as object), applied: true };
+      job!.result = { ...(job!.result as object), scenario: saved, applied: true };
       await route.fulfill({ json: { scenario: saved, compiled, requiresApproval: true } });
     } else if (route.request().url().endsWith('/dismiss-revision')) { job!.result = { ...(job!.result as object), reviewStatus: 'dismissed' }; await route.fulfill({ json: job }); } else await route.fulfill({ json: released ? job : { ...job, status: 'running', result: { scope: 'scenario', applied: false } } });
   });
@@ -54,19 +64,20 @@ test('Globale Anweisung speichert lokale Arbeit, zeigt Strukturänderungen und �
   const scenario = await fixture(request); const routes = await proposalRoutes(page, request, scenario, false, true);
   await page.goto(`/testing/editor/${scenario.id}`);
   await page.getByLabel('Name des Testfalls', { exact: true }).fill('Eigener aktueller Titel');
+  await editWorkflow(page);
   await page.getByLabel('Anweisung für den gesamten Ablauf').fill('Füge am Ende eine weitere Statusprüfung ein.');
   await page.getByRole('button', { name: 'Speichern und Vorschlag erstellen', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Ablaufänderung prüfen', exact: true });
+  const dialog = page.getByRole('region', { name: 'Ablaufänderung prüfen', exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('Block hinzugefügt');
   await expect(dialog).toContainText('Neue Definition: Direktionsstatus nochmals prüfen');
   await expect(dialog).toContainText('Neues Fachwissen: Neue Kontrollregel');
   await expect(dialog.locator('.t-override-diff')).toContainText('Direktionsprüfung');
   expect((await (await request.get(`/api/testing/scenarios/${scenario.id}`)).json()).blocks).toEqual(scenario.blocks);
-  await dialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
-  await page.getByRole('link', { name: 'Wissensbasis', exact: true }).click();
-  await page.getByRole('link', { name: 'Testfall weiterbearbeiten', exact: true }).click();
-  await page.getByRole('button', { name: 'Ablaufänderung prüfen', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Später prüfen', exact: true }).click();
+  await workspaceNavigation(page, 'Wissensbasis');
+  await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
+  await page.getByRole('button', { name: 'Änderungsvorschlag prüfen', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Ablaufänderung übernehmen und speichern' })).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath('globaler-aenderungsvorschlag.png'), fullPage: true });
   await dialog.getByRole('button', { name: 'Ablaufänderung übernehmen und speichern' }).click();
@@ -81,22 +92,23 @@ test('Globale Anweisung speichert lokale Arbeit, zeigt Strukturänderungen und �
 test('Eigene Änderungen und neue gespeicherte Revision blockieren einen alten globalen Vorschlag', async ({ page, request }) => {
   const scenario = await fixture(request); const routes = await proposalRoutes(page, request, scenario);
   await page.goto(`/testing/editor/${scenario.id}`);
+  await editWorkflow(page);
   await page.getByLabel('Anweisung für den gesamten Ablauf').fill('Ergänze eine Statusprüfung.');
   await page.getByRole('button', { name: 'Änderungsvorschlag erstellen', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Ablaufänderung prüfen', exact: true });
-  await expect(dialog).toBeVisible(); await dialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  const dialog = page.getByRole('region', { name: 'Ablaufänderung prüfen', exact: true });
+  await expect(dialog).toBeVisible(); await dialog.getByRole('button', { name: 'Später prüfen', exact: true }).click();
   await page.getByLabel('Name des Testfalls', { exact: true }).fill('Eigene spätere Änderung');
-  await page.getByRole('button', { name: 'Ablaufänderung prüfen', exact: true }).click();
+  await page.getByRole('button', { name: 'Änderungsvorschlag prüfen', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Ablaufänderung übernehmen und speichern' })).toBeDisabled();
   await expect(dialog).toContainText('ungespeicherte Änderungen');
-  await dialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Später prüfen', exact: true }).click();
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
-  await page.getByRole('button', { name: 'Ablaufänderung prüfen', exact: true }).click();
+  await page.getByRole('button', { name: 'Änderungsvorschlag prüfen', exact: true }).click();
   await expect(dialog).toContainText('früheren Testfallrevision');
   await expect(dialog.getByRole('button', { name: 'Ablaufänderung übernehmen und speichern' })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Verwerfen', exact: true }).click();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Ablaufänderung prüfen', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Änderungsvorschlag prüfen', exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue('Eigene spätere Änderung');
   expect(routes.applyCount()).toBe(0);
 });
@@ -119,7 +131,7 @@ test('Einstellungen speichern eigene Claude-Modelle und Argumente und erhalten s
     await page.screenshot({ path: testInfo.outputPath('einstellungen-modelle.png'), fullPage: true });
     const saved = await (await request.get('/api/testing/settings')).json();
     expect(saved.models.at(-1)).toMatchObject({ label: 'Prüfmodell Claude', provider: 'claude', slug: 'sonnet', extraArgs: ['--effort', 'high'] });
-    await page.getByRole('link', { name: 'Neuer Testfall', exact: true }).click();
+    await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
     await expect(page.getByLabel('Modell für den Entwurf').getByRole('option', { name: 'Prüfmodell Claude · Claude Code', exact: true })).toHaveCount(1);
     await expect(page.getByLabel('Modell für den Entwurf')).toHaveValue(saved.models.at(-1).id);
     const scenario = await fixture(request); const routes = await proposalRoutes(page, request, scenario);
@@ -129,10 +141,12 @@ test('Einstellungen speichern eigene Claude-Modelle und Argumente und erhalten s
     await page.goto('/testing/runs');
     await expect(page.getByLabel('Modell für Wiederverwendung', { exact: true })).toHaveValue(saved.models.at(-1).id);
     await page.goto(`/testing/editor/${scenario.id}`);
+    await openDetails(page, '.t-workspace-context');
     await expect(page.getByLabel('Modell für KI-Aufträge')).toHaveValue(saved.models.at(-1).id);
+    await editWorkflow(page);
     await page.getByLabel('Anweisung für den gesamten Ablauf').fill('Ergänze eine Statusprüfung.');
     await page.getByRole('button', { name: 'Änderungsvorschlag erstellen', exact: true }).click();
-    await expect(page.getByRole('dialog', { name: 'Ablaufänderung prüfen', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Ablaufänderung prüfen', exact: true })).toBeVisible();
     expect(routes.requestedModel()).toBe(saved.models.at(-1).id);
   } finally {
     const current = await (await request.get('/api/testing/settings')).json();
@@ -144,12 +158,13 @@ test('Einstellungen speichern eigene Claude-Modelle und Argumente und erhalten s
 test('Ein laufender globaler Auftrag überschreibt keine neueren lokalen Änderungen', async ({ page, request }) => {
   const scenario = await fixture(request); const routes = await proposalRoutes(page, request, scenario, true);
   await page.goto(`/testing/editor/${scenario.id}`);
+  await editWorkflow(page);
   await page.getByLabel('Anweisung für den gesamten Ablauf').fill('Ergänze eine weitere Statusprüfung.');
   await page.getByRole('button', { name: 'Änderungsvorschlag erstellen', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Im Hintergrund weiterarbeiten', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByLabel('Name des Testfalls', { exact: true }).fill('Während des KI-Auftrags weiterbearbeitet');
   routes.release();
-  const dialog = page.getByRole('dialog', { name: 'Ablaufänderung prüfen', exact: true });
+  const dialog = page.getByRole('region', { name: 'Ablaufänderung prüfen', exact: true });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('ungespeicherte Änderungen');
   await expect(dialog.getByRole('button', { name: 'Ablaufänderung übernehmen und speichern', exact: true })).toBeDisabled();

@@ -1,4 +1,6 @@
+import { openDetails, workspaceNavigation, editWorkflow } from './helpers/testing-workspace';
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { deriveTestingLifecycle } from '../server/testing/lifecycle';
 import { randomUUID } from 'node:crypto';
 import type { TestingAgentJob, TestingCatalog, TestingScenario } from '../shared/testing';
 
@@ -23,6 +25,8 @@ async function expectEditor(page: Page, value: TestingScenario) {
 async function openOutline(page: Page, value: TestingScenario) {
   await page.goto(`/testing/editor/${value.id}`);
   await expectEditor(page, value);
+  if (!value.blocks.length) await page.getByRole('button', { name: 'Ablauf selbst erstellen', exact: true }).click();
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
 }
@@ -51,18 +55,18 @@ test('Ein abgeschlossener Auftrag öffnet nach Wegnavigation und Neuladen seinen
   const current = await response.json() as TestingScenario;
   // Explicit navigation fixture, never a model execution or a claim of AI success.
   const job: TestingAgentJob = { id: `synthetic-completed-${randomUUID()}`, phase: 'business', status: 'completed', model: 'luna', prompt: 'Synthetischer abgeschlossener Auftrag ausschließlich für die Navigationsprüfung.', scenarioId: original.id, scenarioRevision: original.revision, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), events: [], result: { scenario: original } };
-  await page.route('**/api/testing/bootstrap', async route => { const upstream = await route.fetch(); const data = await upstream.json(); await route.fulfill({ json: { ...data, jobs: [job, ...data.jobs] } }); });
+  await page.route('**/api/testing/bootstrap', async route => { const upstream = await route.fetch(); const data = await upstream.json(); await route.fulfill({ json: { ...data, jobs: [job, ...data.jobs], lifecycles: data.scenarios.map((scenario: TestingScenario) => deriveTestingLifecycle(scenario, data.catalog, [job, ...data.jobs], data.runs, data.approvals.find((approval: any) => approval.scenarioId === scenario.id && approval.scenarioRevision === scenario.revision))) } }); });
   await page.goto('/testing');
+  await openDetails(page, '.t-overview-history');
   await page.getByRole('region', { name: 'Bisherige Agentenaufträge', exact: true }).getByRole('button').filter({ hasText: original.title }).click();
-  await page.getByRole('button', { name: 'Entwurf ansehen', exact: true }).click();
   await expectEditor(page, current);
-  await page.getByRole('link', { name: 'Wissensbasis', exact: true }).click();
-  await page.getByRole('link', { name: 'Testfall weiterbearbeiten', exact: true }).click();
+  await workspaceNavigation(page, 'Wissensbasis');
+  await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
   await expectEditor(page, current);
-  await page.getByRole('link', { name: 'Testfälle', exact: true }).click();
+  await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
   await page.reload();
+  await openDetails(page, '.t-overview-history');
   await page.getByRole('region', { name: 'Bisherige Agentenaufträge', exact: true }).getByRole('button').filter({ hasText: original.title }).click();
-  await page.getByRole('button', { name: 'Entwurf ansehen', exact: true }).click();
   await expectEditor(page, current);
   expect((await readScenario(request, current.id)).revision).toBe(current.revision);
   await page.screenshot({ path: testInfo.outputPath('auftrag-aktueller-entwurf.png'), fullPage: true });
@@ -72,7 +76,7 @@ test('Direktlink, Browser zurück und vorwärts wechseln Testfälle und erhalten
   const a = await fixture(request), b = await fixture(request);
   await openOutline(page, a);
   await page.getByLabel(/Versicherungssumme in EUR/).fill('17.654,32');
-  await page.getByRole('link', { name: 'Testfälle', exact: true }).click();
+  await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
   await page.locator('.t-saved-test').filter({ hasText: b.title }).click();
   await expectEditor(page, b);
   expect((await readScenario(request, a.id)).revision).toBe(a.revision);
@@ -117,6 +121,7 @@ test('Eine völlig neue Fähigkeit wird unter einem leeren Ablauf definiert, dir
     await dialog.getByLabel(`Bezeichnung der Eingabe ${index + 1}`, { exact: true }).fill(input.label);
     await dialog.getByLabel(`Datentyp der Eingabe ${index + 1}`, { exact: true }).selectOption(input.type);
   }
+  await openDetails(page, '.t-definition-knowledge > details');
   await dialog.getByRole('checkbox').last().check();
   await dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -209,7 +214,8 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
   const money = page.getByLabel(/Versicherungssumme in EUR/);
   await selectScratchBlock();
   await expect(inspector.locator('h3')).toHaveText('Kuhlebensversicherung vorbereiten');
-  await inspector.locator('.t-description').click();
+  await openDetails(page, '.t-inspector-meaning');
+  await inspector.locator('.t-inspector-meaning p').click();
   await expect(money).toBeVisible();
   await selectScratchBlock();
   await money.click();
@@ -218,7 +224,7 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
   await money.blur();
   await expect(money).toHaveValue('18.765,43');
   await selectScratchBlock();
-  await page.locator('.t-editor-title > div > span').click();
+  await page.locator('.t-editor-title > span').click();
   await expectEditor(page, current);
   await expect(money).toHaveValue('18.765,43');
   for (const tab of ['Wissen', 'Technik', 'Werte']) {
@@ -252,10 +258,10 @@ test('Ein eigener Übersichtstab zeigt alle gespeicherten Testfälle und führt 
   const all = await (await request.get('/api/testing/scenarios')).json() as TestingScenario[];
   await page.goto('/testing/new');
   await expect(page.getByLabel('Deine Anforderung', { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: 'Testfälle', exact: true }).click();
+  await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
   await expect(page).toHaveURL(/\/testing\/scenarios$/);
-  await expect(page.getByRole('heading', { name: 'Testfälle', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Testfälle', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('heading', { name: 'Alle Testfälle', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Alle Testfälle', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByLabel('Deine Anforderung', { exact: true })).toHaveCount(0);
   const collection = page.getByRole('region', { name: 'Gespeicherte Testfälle', exact: true });
   expect(await collection.locator('.t-saved-test').count()).toBeGreaterThanOrEqual(all.length);
@@ -265,9 +271,9 @@ test('Ein eigener Übersichtstab zeigt alle gespeicherten Testfälle und führt 
   await expect(collection.locator('.t-saved-test')).toContainText(`Revision ${current.revision}`);
   await collection.locator('.t-saved-test').click();
   await expectEditor(page, current);
-  await page.getByRole('button', { name: 'Zur Testfallübersicht', exact: true }).click();
+  await workspaceNavigation(page, 'Alle Testfälle');
   await expect(page).toHaveURL(/\/testing\/scenarios$/);
-  await expect(page.getByRole('heading', { name: 'Testfälle', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Alle Testfälle', exact: true })).toBeVisible();
   await page.reload();
   await expect(collection.locator('.t-saved-test').filter({ hasText: current.title })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('gespeicherte-testfaelle-eigener-tab.png'), fullPage: true });
@@ -275,10 +281,11 @@ test('Ein eigener Übersichtstab zeigt alle gespeicherten Testfälle und führt 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath('gespeicherte-testfaelle-mobil.png'), fullPage: true });
   await page.getByRole('button', { name: 'Navigation öffnen', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'Testfälle', exact: true })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Neuer Testfall', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Alle Testfälle', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Testfall erstellen', exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('teststudio-navigation-mobil.png'), fullPage: true });
-  await page.getByRole('link', { name: 'Neuer Testfall', exact: true }).click();
+  await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
+  await page.getByRole('button', { name: 'Testfall erstellen', exact: true }).click();
   await expect(page).toHaveURL(/\/testing\/new$/);
   await expect(page.getByLabel('Deine Anforderung', { exact: true })).toBeVisible();
 });
@@ -296,6 +303,7 @@ test('Abweichungen zeigen wirksame Workflowwerte und klappen geänderte Schritte
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   const deviations = page.getByRole('region', { name: 'Abweichungen vom Standard', exact: true });
   await expect(deviations).toBeVisible();
+  await openDetails(page, '.t-value-changes > details');
   const farm = deviations.locator('.t-value-change').filter({ hasText: 'Schritt 1.2' }).filter({ hasText: 'Bundesland' });
   await expect(farm.locator('del')).toHaveText('Niedersachsen');
   await expect(farm.locator('ins')).toHaveText('Bayern');
@@ -321,6 +329,7 @@ test('Abweichungen zeigen wirksame Workflowwerte und klappen geänderte Schritte
   await expect(tier).toBeVisible();
   await expect(tier).toContainText('16.000,5 EUR');
   await page.screenshot({ path: testInfo.outputPath('workflow-abweichungen-aufgeklappt.png'), fullPage: true });
+  await openDetails(page, '.t-value-changes > details');
   await farm.getByRole('button', { name: 'Geänderten Schritt zeigen · Schritt 1.2', exact: true }).click();
   await expect(page.locator('.t-inspector h3')).toHaveText('Betrieb anlegen');
   await expect(page.getByLabel(/Bundesland/)).toHaveValue('Bayern');
@@ -387,16 +396,18 @@ for (const phase of ['duplicates', 'technical'] as const) test(`Ein fehlgeschlag
   expect((await request.post(`/api/testing/scenarios/${original.id}/approve`, { data: { revision: original.revision } })).ok()).toBeTruthy();
   // Historical error fixture with invented identifiers; no model call or imported customer data.
   const rawError = `${phase === 'technical' ? 'Die unabhängige Dublettenprüfung ist fehlgeschlagen: ' : ''}Dublettenprüfung: Auch die KI-Korrektur verletzt den Vertrag: Der Vergleichsblock für qa.berechtigung@1.0.0 muss eine andere vorhandene Definition sein.`;
-  const job: TestingAgentJob = { id: `synthetic-failed-${randomUUID()}`, phase, status: 'failed', model: 'luna', prompt: 'Synthetischer fehlerhafter Bausteinvergleich.', scenarioId: original.id, scenarioRevision: original.revision, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: rawError, events: [{ id: randomUUID(), at: new Date().toISOString(), kind: 'error', message: rawError }] };
-  await page.route('**/api/testing/bootstrap', async route => { const upstream = await route.fetch(); const data = await upstream.json(); await route.fulfill({ json: { ...data, jobs: [job, ...data.jobs] } }); });
+  let job: TestingAgentJob = { id: `synthetic-failed-${randomUUID()}`, phase, status: 'failed', model: 'luna', prompt: 'Synthetischer fehlerhafter Bausteinvergleich.', scenarioId: original.id, scenarioRevision: original.revision, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: rawError, events: [{ id: randomUUID(), at: new Date().toISOString(), kind: 'error', message: rawError }] };
+  await page.route('**/api/testing/bootstrap', async route => { const upstream = await route.fetch(); const data = await upstream.json(); await route.fulfill({ json: { ...data, jobs: [job, ...data.jobs], lifecycles: data.scenarios.map((scenario: TestingScenario) => deriveTestingLifecycle(scenario, data.catalog, [job, ...data.jobs], data.runs, data.approvals.find((approval: any) => approval.scenarioId === scenario.id && approval.scenarioRevision === scenario.revision))) } }); });
   const submitted: unknown[] = [];
-  await page.route('**/api/testing/jobs/technical', async route => { submitted.push(route.request().postDataJSON()); await route.fulfill({ status: 202, json: { ...job, id: `synthetic-retry-${randomUUID()}`, phase: 'technical', status: 'completed', error: undefined, events: [], result: { needsBusinessReview: true, duplicateDecisions: [{ proposed: original.blocks[0].definition, chosen: { id: 'direktion.entscheiden', version: '1.0.0' }, decision: 'extend', compatible: false, reason: 'Der vorhandene Block muss fachlich erweitert werden.' }] } } }); });
+  await page.route('**/api/testing/jobs/synthetic-retry-*', route => route.fulfill({ json: job }));
+  await page.route('**/api/testing/jobs/technical', async route => { submitted.push(route.request().postDataJSON()); job = { ...job, id: `synthetic-retry-${randomUUID()}`, phase: 'technical', status: 'completed', scenarioRevision: route.request().postDataJSON().revision, error: undefined, events: [], result: { needsBusinessReview: true, duplicateDecisions: [{ proposed: original.blocks[0].definition, chosen: { id: 'direktion.entscheiden', version: '1.0.0' }, decision: 'extend', compatible: false, reason: 'Der vorhandene Block muss fachlich erweitert werden.' }] } }; await route.fulfill({ status: 202, json: { ...job, status: 'running' } }); });
   await openOutline(page, original);
   await page.getByLabel(/Versicherungssumme in EUR/).fill('17.654,32');
-  await page.getByRole('link', { name: 'Testfälle', exact: true }).click();
+  await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
   await page.reload();
+  await openDetails(page, '.t-overview-history');
   await page.getByRole('region', { name: 'Bisherige Agentenaufträge', exact: true }).getByRole('button').filter({ hasText: original.title }).click();
-  const dialog = page.getByRole('dialog');
+  const dialog = page.locator('.t-inline-activity');
   await expect(dialog.getByRole('alert')).toContainText('Die KI hat keinen gültigen Vergleich geliefert');
   await expect(dialog.getByRole('alert')).toContainText('Dieses Ergebnis wurde nicht übernommen');
   await expect(dialog.getByText(rawError, { exact: true })).not.toBeVisible();
@@ -404,16 +415,16 @@ for (const phase of ['duplicates', 'technical'] as const) test(`Ein fehlgeschlag
   await expect(dialog.locator('pre').filter({ hasText: rawError })).toBeVisible();
   await dialog.getByText('Technische Fehlerdetails anzeigen', { exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('bausteinvergleich-verstaendlicher-fehler.png') });
-  await dialog.getByRole('button', { name: 'Testfall öffnen und fortsetzen', exact: true }).click();
   await expectEditor(page, original);
   await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
   await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
   expect(submitted).toEqual([]);
   const current = await save(page, request, original.id);
-  await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await expect(page.getByRole('button', { name: /^(Technik & Probelauf|Mit vorhandener Technik ausführen)$/ })).toBeEnabled();
+  await openDetails(page, '.t-workspace-context');
   await page.getByLabel('Modell für KI-Aufträge', { exact: true }).selectOption('sol');
-  await page.getByRole('button', { name: 'Technik & Probelauf', exact: true }).click();
+  await page.getByRole('button', { name: /^(Technik & Probelauf|Technik neu vorbereiten)$/ }).click();
   expect(submitted).toEqual([{ scenarioId: original.id, revision: current.revision, model: 'sol' }]);
   await expect(page.getByRole('heading', { name: 'Vorhandene Fähigkeiten bewusst wiederverwenden', exact: true })).toBeVisible();
   await expect(page.locator('.t-agent-failure')).toHaveCount(0);

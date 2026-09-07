@@ -12,6 +12,7 @@ import { createStarterBindings } from './bindings/seed';
 import { validateTestingBinding } from './bindings/validation';
 import { AGENT_ARTIFACTS_ROOT, codexConfiguration } from './agents/cli';
 import { applyScenarioEditJob, dismissScenarioEditJob, startScenarioEditJob, cancelTestingJob, getTestingJob, initializeTestingPipeline, listTestingJobs, startBusinessJob, startDirectRun, startReuseJob, startTechnicalJob } from './agents/orchestrator';
+import { deriveTestingLifecycle } from './lifecycle';
 import { TESTING_RUN_ROOT } from './runner';
 import { getTestingAgentSettings, resolveAgentConfiguration, saveTestingAgentSettings } from './agents/settings';
 
@@ -39,8 +40,11 @@ export function createTestingRouter(): Router {
   initializeTestingPipeline();
   for (const binding of createStarterBindings(getTestingCatalog())) saveTestingBinding(binding);
   const router = Router();
-  router.get('/bootstrap', guard((_req, res) => res.json({ catalog: getTestingCatalog(), scenarios: listTestingScenarios(), jobs: listTestingJobs(), runs: listTestingRuns(),
-    approvals: db.read<TestingApproval>('testingApprovals'), layouts: db.read<TestingScenarioLayout>('testingLayouts'), cli: codexConfiguration(), settings: getTestingAgentSettings() })));
+  router.get('/bootstrap', guard((_req, res) => {
+    const catalog=getTestingCatalog(),scenarios=listTestingScenarios(),jobs=listTestingJobs(),runs=listTestingRuns(),approvals=db.read<TestingApproval>('testingApprovals');
+    const latestApprovals=new Map([...approvals].sort((a,b)=>a.approvedAt.localeCompare(b.approvedAt)).map(approval=>[approval.scenarioId,approval]));
+    return res.json({catalog,scenarios,jobs,runs,lifecycles:scenarios.map(scenario=>deriveTestingLifecycle(scenario,catalog,jobs,runs,latestApprovals.get(scenario.id))),approvals,layouts:db.read<TestingScenarioLayout>('testingLayouts'),cli:codexConfiguration(),settings:getTestingAgentSettings()});
+  }));
   router.get('/settings', guard((_req, res) => res.json(getTestingAgentSettings())));
   router.put('/settings', guard((req, res) => res.json(saveTestingAgentSettings(body(req)))));
   router.get('/catalog', guard((_req, res) => res.json(getTestingCatalog())));
@@ -51,6 +55,8 @@ export function createTestingRouter(): Router {
     const scenario = { ...rest, id: req.params.id } as TestingScenario;
     res.json(saveTestingScenario(scenario, input.expectedRevision ?? expectedRevision ?? scenario.revision));
   }));
+  router.get('/scenarios/:id/lifecycle',guard((req,res)=>res.json(deriveTestingLifecycle(getTestingScenario(req.params.id),getTestingCatalog(),listTestingJobs(),listTestingRuns(),getTestingApproval(req.params.id)))));
+  router.post('/scenarios/:id/plan',guard((req,res)=>{const input=body(req),scenario=getTestingScenario(req.params.id);res.status(202).json(startBusinessJob({scenarioId:scenario.id,revision:revision(input.revision),request:scenario.intent,model:model(input.model)}));}));
   router.get('/scenarios/:id/compile', guard((req, res) => res.json(compileTestingScenario(getTestingScenario(req.params.id), getTestingCatalog(), getTestingApproval(req.params.id)))));
   router.post('/scenarios/:id/approve', guard((req, res) => res.json(approveTestingScenario(req.params.id, revision(body(req).revision), 'Fachliche Prüfung durch den Menschen', body(req).comment))));
   router.get('/scenarios/:id/layout', guard((req, res) => { getTestingScenario(req.params.id); res.json(getTestingLayout(req.params.id)); }));
@@ -58,7 +64,7 @@ export function createTestingRouter(): Router {
   router.post('/scenarios/:id/interpret-override', guard((req, res) => { const input = body(req); res.status(202).json(startBusinessJob({ scenarioId: req.params.id, revision: revision(input.revision), instanceId: z.string().parse(input.instanceId), request: input.text, model: model(input.model) })); }));
   router.post('/scenarios/:id/interpret-revision', guard((req, res) => { const input = body(req); res.status(202).json(startScenarioEditJob({ scenarioId: req.params.id, revision: revision(input.revision), text: input.text, model: model(input.model) })); }));
   router.post('/scenarios/:id/run', guard((req, res) => { const input = body(req); res.status(202).json(startDirectRun({ scenarioId: req.params.id, revision: revision(input.revision), ...(input.model ? { model: model(input.model) } : {}) })); }));
-  router.post('/definitions', guard((req, res) => res.status(201).json(saveTestingDefinition(body(req).definition))));
+  router.post('/definitions', guard((req, res) => res.status(201).json(saveTestingDefinition(body(req).definition,body(req).newKnowledge??[]))));
   router.post('/knowledge', guard((req, res) => res.status(201).json(saveTestingKnowledge(body(req).document))));
   router.post('/bindings', guard((req, res) => res.status(201).json(saveTestingBinding(validateTestingBinding(body(req).binding, getTestingCatalog())))));
   router.get('/bindings/:id/impact', guard((req, res) => res.json(getTestingImpact(req.params.id))));

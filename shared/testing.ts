@@ -134,13 +134,21 @@ export interface TestingImpact {
   historicalRuns: { runId: string; scenarioId: string; bindingRevision: number; status: string }[];
   suggestedScenarioIds: string[];
 }
-export type TestingAgentPhase = 'business' | 'technical' | 'duplicates' | 'reuse';
+export type TestingAgentPhase = 'business' | 'exploration' | 'technical' | 'duplicates' | 'reuse';
+export type TestingAgentStage = 'knowledge' | 'exploring' | 'planning' | 'duplicates' | 'wiring' | 'running' | 'reuse';
+export interface TestingScenarioLifecycle {
+  scenarioId:string; scenarioRevision:number; fingerprint:string;
+  phase:'request'|'exploration'|'review'|'technical'|'result'; status:'idle'|'running'|'attention'|'ready'|'failed'|'cancelled';
+  currentJobId?:string; childJobIds:string[]; runId?:string; runStatus?:'queued'|'running'|'passed'|'failed'; analysisRunning?:boolean; analysisAttention?:boolean; stage?:TestingAgentStage;
+  nextAction:'plan'|'wait'|'approve'|'review'|'technical'|'run'|'retry-business'|'retry-technical'|'inspect-run'; message:string;
+}
 export interface TestingAgentEvent { id: string; at: string; kind: 'status' | 'message' | 'tool' | 'error'; message: string }
 export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   prompt: string; scenarioId?: string; scenarioRevision?: number; fingerprint?: string;
   startedAt: string; finishedAt?: string; events: TestingAgentEvent[]; error?: string;
   result?: unknown; artifactDirectory?: string; agentConfig?: TestingAgentConfiguration;
+  parentJobId?:string; childJobIds?:string[]; stage?:TestingAgentStage; runId?:string;
 }
 export interface TestingStepResult {
   id: string; instanceId: string; path: string; label: string; status: 'running' | 'passed' | 'failed' | 'skipped';

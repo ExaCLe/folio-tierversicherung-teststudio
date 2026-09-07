@@ -12,7 +12,7 @@ Dieser Vertrag beschreibt das fachliche Modell hinter `/api/testing`. Die HTTP-R
 | `saveTestingScenario(scenario, expectedRevision)` | Speichert eine neue Revision. Ein neuer Testfall verwendet `expectedRevision: 0`. Veraltete Schreibversuche ergeben 409. |
 | `approveTestingScenario(id, revision, actor, comment?)` | Validiert den fachlichen Entwurf und speichert seinen Fingerprint. Fehlende technische Bindungen verhindern die Fachfreigabe noch nicht. |
 | `getTestingApproval(id)` | Liefert die neueste gespeicherte Freigabe. Der Compiler prüft ihre Gültigkeit. |
-| `saveTestingDefinition(definition)` | Speichert eine unveränderliche semantische Version und pflegt Wissensrückverweise. |
+| `saveTestingDefinition(definition, newKnowledge?)` | Speichert Definition, neue Wissensbelege und Rückverweise gemeinsam atomar. Ungültige Verknüpfungen oder Versionskonflikte verhindern die gesamte Übernahme. |
 | `saveTestingKnowledge(document)` | Speichert eine unveränderliche Wissensrevision. |
 | `saveTestingBinding(binding)` | Speichert eine unveränderliche technische Revision. |
 | `getTestingLayout(id)` / `saveTestingLayout(layout)` | Lesen und Schreiben des fachlich unabhängigen Editorzustands. |
@@ -27,6 +27,8 @@ Fehler des Repositorys besitzen `status`, `code` und einen deutschen `message`-T
 `previewTestingBusinessDraft(intent, draft, model, catalog?)` prüft den Entwurf gegen einen übergebenen Katalog. Ein tatsächlich leerer Katalog ist zulässig. Das Ergebnis enthält den vorbereiteten Testfall, den ergänzten Katalog, das Kompilat und Dublettenberichte.
 
 `createTestingScenarioFromDraft(intent, draft, model)` prüft neue Fachdefinitionen und Wissensdokumente auf gültige Referenzen und Versionskonflikte und übernimmt alle Datensätze in einem atomaren Schreibvorgang. Ein unvollständiger Fachablauf kann als Entwurf gespeichert werden. Seine Fachfreigabe ist erst nach Behebung der fachlichen Fehler möglich.
+
+Der geführte Erstellungsauftrag legt bereits vor dem ersten Modellaufruf einen leeren Testfall mit der Anforderung an. Die erste Antwort ergänzt diesen Testfall unter derselben ID. Eine erneute Planung eines noch leeren Entwurfs verwendet dessen aktuelle Revision; konkurrierende Aufträge und veraltete Ergebnisse werden abgewiesen. Ein fachlich unvollständiger, strukturell gültiger Erstentwurf bleibt zur menschlichen Korrektur bearbeitbar.
 
 Ein Eingabeschema verwendet bekannte Werttypen. Auswahlfelder benötigen Auswahlwerte. Objektfelder können wiederum typisierte `fields` enthalten. `requiredWhen` und `applicableWhen` beschreiben tierartabhängige Pflichtfelder und erlaubte Angaben. Unbekannte Felder werden nicht still verworfen.
 
@@ -110,10 +112,13 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 
 | Route | Eingabe und Ergebnis |
 | --- | --- |
-| `GET /bootstrap` | `{catalog,scenarios,jobs,runs,approvals,layouts,cli,settings}` |
+| `GET /bootstrap` | `{catalog,scenarios,jobs,runs,lifecycles,approvals,layouts,cli,settings}` |
 | `GET /settings` | Lokale Modellprofile, Providerargumente, Standardmodell und Einstellungsrevision |
 | `PUT /settings` | Vollständige Einstellungen mit erwarteter `revision`; speichert die nächste Revision, veraltet ergibt 409 |
-| `POST /jobs/business` | `{request,model}` → Agentenauftrag, HTTP 202 |
+| `POST /jobs/business` | `{request,model}` → Agentenauftrag mit sofort gespeichertem Testfall, HTTP 202 |
+| `POST /scenarios/:id/plan` | `{revision,model}` → Wissen prüfen und noch leeren Entwurf unter derselben ID erneut planen |
+| `GET /scenarios/:id/lifecycle` | Aus gespeicherten Fakten abgeleiteter Arbeitsstand mit aktueller Phase, nächster Aktion, Auftragsbeziehungen und passendem Lauf |
+| `POST /definitions` | `{definition,newKnowledge?}` → Definition samt neuen Wissensbelegen und Rückverweisen atomar speichern |
 | `PUT /scenarios/:id` | `{scenario,expectedRevision}` → gespeicherte neue Szenariorevision |
 | `POST /scenarios/:id/approve` | `{revision,comment?}` → Freigabe genau dieser fachlichen Fassung |
 | `POST /scenarios/:id/interpret-override` | `{revision,instanceId,text,model}` → Agentenauftrag mit lokalem Diff; noch nicht gespeichert |
@@ -129,5 +134,7 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 | `POST /reuse/:id/dismiss` | `{proposalIds:[id]}` → Vorschlag verwerfen |
 
 `model` ist die gespeicherte Profil-ID aus `GET /settings`. `luna` und `sol` sind vorkonfigurierte Profile. Eigene Profile enthalten `id`, `label`, `provider` mit `codex` oder `claude`, `slug` und `extraArgs`. Die Einstellungen enthalten außerdem `defaultModel` und für beide Provider `executable` und `extraArgs`. Beim Speichern dürfen Argumente als Text oder Argumentliste angegeben werden; die Antwort enthält normalisierte Listen. Jeder neue Agentenauftrag hält seine aufgelöste Konfiguration in `agentConfig` fest. Der technische Probelauf verwendet genau die vom Agenten ausgewählten Bindungsrevisionen. Ein zwischenzeitlich veränderter fachlicher Stand kann nicht mit einem alten Agentenergebnis überschrieben werden. Eine Annahme nach erfolgreichem Lauf prüft dessen Revision und Fingerprint erneut.
+
+Aufträge können `parentJobId`, `childJobIds`, `stage` und `runId` tragen. `completed` bedeutet, dass der Auftrag beendet ist, nicht dass ein Test bestanden wurde. Der Lifecycle berücksichtigt fachliche Blocker, laufende Teilaufträge sowie die passende Revision und den Fingerprint eines Browserlaufs. Ein späterer direkter Lauf kann einen älteren abgeschlossenen Auftrag ablösen. Eine gescheiterte optionale Wiederverwendungsanalyse verändert einen bereits belegten Browsererfolg nicht. Ältere gespeicherte Aufträge ohne zusätzliche Beziehungsfelder bleiben lesbar.
 
 `GET /jobs/:id/attempts` listet den ursprünglichen und gegebenenfalls den einmaligen Korrekturversuch. Prompt, Manifest, Schema und Rohantwort sind über `/jobs/:id/attempts/:attempt/artifacts/:filename` zugänglich. Beide Antworten bleiben getrennt erhalten. Die bestehende direkte Route `/jobs/:id/artifacts/:filename` verweist auf den ersten Versuch.
