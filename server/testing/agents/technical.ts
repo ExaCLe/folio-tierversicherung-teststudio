@@ -10,21 +10,25 @@ export async function planTechnicalWithCodex(input: { id: string; model: Testing
   let previous: unknown, diagnostic = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = await invokeCodex({ id: attempt ? `${input.id}-korrektur` : input.id, model: input.model, schema: TECHNICAL_SCHEMA,
-      prompt: `${technicalPrompt(input.repairBindingId)}${attempt ? `\n\nDie vorherige Antwort wurde NICHT übernommen. vorherige-antwort.json und validierungsfehler.txt enthalten Ergebnis und genaue Fehler. Korrigiere deine Antwort gemäß diesem Bericht: ${JSON.stringify(diagnostic)}. Verwende exakt den operation-Wert aus freigegeben.json.steps für jede definitionRef. Fehlt definition.operation, gilt unverändert definition.semanticKey. Bereits funktionierende Bindungen ohne belegten Defekt unverändert wiederverwenden. Gib den vollständigen korrigierten technischen Plan zurück.` : ''}`,
+      prompt: `${technicalPrompt(input.repairBindingId)}${attempt ? `\n\nDie vorherige Antwort wurde NICHT übernommen. vorherige-antwort.json und validierungsfehler.txt enthalten Ergebnis und genaue Fehler. Korrigiere deine Antwort gemäß diesem Bericht: ${JSON.stringify(diagnostic)}. Verwende exakt den operation-Wert aus freigegeben.json.steps für jede definitionRef. Fehlt definition.operation, gilt unverändert definition.semanticKey. Bereits funktionierende Bindungen ohne belegten Defekt unverändert wiederverwenden. Der Bericht benennt Bindung und recipe-Index; behebe alle gemeldeten Aktionen. Bei unlessVisible trenne optionales Formularöffnen strikt vom immer auszuführenden Ausfüllen und Speichern mit capture. Entferne keine fachliche Aktion, Antwortprüfung oder Ergebniserfassung, um die Validierung zu umgehen. Gib den vollständigen korrigierten technischen Plan zurück.` : ''}`,
       files: { ...input.files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
     previous = result.value;
     try {
       const plan = decodeTechnicalPlan(result.value);
+      const issues: string[] = [];
       for (const item of plan.newBindings) {
-        const binding = validateTestingBinding(item.binding, input.catalog);
-        const existing = input.catalog.bindings.filter(value => value.id === binding.id && value.status === 'ready').sort((a, b) => b.revision - a.revision)[0];
-        if (!existing) continue;
-        const changed = stableTestingStringify({ locators: existing.locators, recipe: existing.recipe, inputKeys: existing.inputKeys }) !== stableTestingStringify({ locators: binding.locators, recipe: binding.recipe, inputKeys: binding.inputKeys });
-        const failedStep = input.failedRun?.steps.find(step => step.status === 'failed');
-        const failedBinding = input.failedRun?.compiled.steps.find(step => step.path === failedStep?.path)?.binding?.id;
-        const missingInput = input.compiled.steps.some(step => step.binding?.id === binding.id && Object.keys(step.inputs).some(key => !existing.inputKeys?.includes(key)));
-        if (changed && input.repairBindingId !== binding.id && failedBinding !== binding.id && !missingInput) throw new Error(`Die vorhandene Bindung ${binding.id}@${existing.revision} deckt ihre Eingaben ab und hat keinen belegten Fehler. Verwende diese exakte Revision wieder. Ändere nur die neue fehlende Bindung beziehungsweise den nachweislich defekten kleinsten Block. Insbesondere bleibt die nullable Referenz proposal.referralId bei submitProposal erhalten, damit Standardverträge ohne Direktionsanfrage weiter funktionieren.`);
+        try {
+          const binding = validateTestingBinding(item.binding, input.catalog);
+          const existing = input.catalog.bindings.filter(value => value.id === binding.id && value.status === 'ready').sort((a, b) => b.revision - a.revision)[0];
+          if (!existing) continue;
+          const changed = stableTestingStringify({ locators: existing.locators, recipe: existing.recipe, inputKeys: existing.inputKeys }) !== stableTestingStringify({ locators: binding.locators, recipe: binding.recipe, inputKeys: binding.inputKeys });
+          const failedStep = input.failedRun?.steps.find(step => step.status === 'failed');
+          const failedBinding = input.failedRun?.compiled.steps.find(step => step.path === failedStep?.path)?.binding?.id;
+          const missingInput = input.compiled.steps.some(step => step.binding?.id === binding.id && Object.keys(step.inputs).some(key => !existing.inputKeys?.includes(key)));
+          if (changed && input.repairBindingId !== binding.id && failedBinding !== binding.id && !missingInput) throw new Error(`Die vorhandene Bindung ${binding.id}@${existing.revision} deckt ihre Eingaben ab und hat keinen belegten Fehler. Verwende diese exakte Revision wieder. Ändere nur die neue fehlende Bindung beziehungsweise den nachweislich defekten kleinsten Block. Insbesondere bleibt die nullable Referenz proposal.referralId bei submitProposal erhalten, damit Standardverträge ohne Direktionsanfrage weiter funktionieren.`);
+        } catch (error) { issues.push(`Technische Bindung ${item.binding?.id ?? '(ohne ID)'}: ${error instanceof Error ? error.message : String(error)}`); }
       }
+      if (issues.length) throw new Error(issues.join('\n\n'));
       return result;
     } catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);

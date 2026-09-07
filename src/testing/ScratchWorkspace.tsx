@@ -2,12 +2,13 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Scratch from 'scratch-blocks';
 import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingScenarioLayout, TestingValue } from '../../shared/testing';
 import { createTestingInstance, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
+import { buildValueChanges, changesWithin, type ValueChange } from './valueChanges';
 import { buildReferenceIndex, describeReference, type ReferenceIndex } from './references';
 import { findDefinition, flattenBlocks, formatGermanNumber, kindLabels, parseGermanNumber } from './model';
 
 type ScratchState = Scratch.serialization.blocks.State;
 type BlockMetadata = { instance: TestingBlockInstance; body?: TestingBlockInstance[]; path: string; displayValues?: Record<string, string> };
-export interface ScratchWorkspaceHandle { zoom: (direction: number) => void; center: () => void; undo: () => void; redo: () => void; select: (path: string) => void }
+export interface ScratchWorkspaceHandle { zoom: (direction: number) => void; center: () => void; undo: () => void; redo: () => void; select: (path: string) => void; showChanges: (paths: string[]) => void }
 interface Props { blocks: TestingBlockInstance[]; catalog: TestingCatalog; layout?: TestingScenarioLayout; parameters?: Record<string, TestingValue>; selected?: string; readOnly?: boolean; onChange: (blocks: TestingBlockInstance[]) => void; onSelect: (path: string | undefined) => void; onLayout: (layout: Partial<TestingScenarioLayout>) => void }
 const colours = { action: '#398855', assertion: '#3e80ba', workflow: '#208e86', context: '#bb8328' };
 const definitionForType = new Map<string, TestingBlockDefinition>();
@@ -17,6 +18,13 @@ function displayValue(value: TestingValue | undefined): string {
   if (isTestingParameter(value)) return `$${value.param}`;
   if (typeof value === 'number') return formatGermanNumber(value);
   return value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
+}
+function changeSummary(changes: ValueChange[], path: string) {
+  const relevant = changesWithin(changes, path);
+  if (!relevant.length) return 'Standardwerte';
+  const direct = relevant.filter(change => change.path === path);
+  const shown = (direct.length ? direct : relevant).slice(0, 3);
+  return `Geändert · ${shown.map(change => `${change.label}: ${change.afterLabel.length > 65 ? `${change.afterLabel.slice(0, 62)}…` : change.afterLabel}`).join(' · ')}${relevant.length > shown.length ? ` · ${relevant.length} Abweichungen` : ''}`;
 }
 function visibleInputs(definition: TestingBlockDefinition) { return definition.inputs.filter(input => !['object', 'list'].includes(input.type)).slice(0, 3); }
 
@@ -38,6 +46,7 @@ function registerDefinitions(catalog: TestingCatalog) {
           if (input.type.endsWith('-ref')) { field.setEnabled(false); field.setTooltip('Früheres Ergebnis in den Blockdetails auswählen.'); }
           row.appendField(field, `VALUE_${input.key}`);
         }
+        this.appendDummyInput('CHANGES').appendField(new Scratch.FieldLabelSerializable('Standardwerte'), 'CHANGE_SUMMARY');
         if (definition.kind === 'workflow' || definition.kind === 'context') this.appendStatementInput('BODY');
         this.setInputsInline(false);
         this.setPreviousStatement(true);
@@ -50,7 +59,7 @@ function registerDefinitions(catalog: TestingCatalog) {
   }
 }
 
-function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex): ScratchState {
+function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex, changes: ValueChange[] = []): ScratchState {
   const definition = findDefinition(catalog, block);
   const path = parent ? `${parent}/${block.id}` : block.id;
   if (!definition) throw new Error(`Der Block ${block.definition.id} in Version ${block.definition.version} fehlt im Katalog.`);
@@ -58,27 +67,27 @@ function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent
   const hasCycle = seen.has(testingVersionKey(definition));
   const displayValues = Object.fromEntries(visibleInputs(definition).map(input => {
     const value = block.inputs[input.key] ?? input.default;
-    const resolved = references?.inputs.get(path)?.[input.key] ?? value;
+    const effective = references?.inputs.get(path);
+    const resolved = effective && Object.hasOwn(effective, input.key) ? effective[input.key] : value;
     if (references && (input.type.endsWith('-ref') || isTestingReference(resolved))) {
       const description = describeReference(references, path, resolved, input.type);
       return [input.key, description.source ? `${description.source.outputLabel} „${description.source.name}“ · Schritt ${description.source.step}` : description.label];
     }
-    return [input.key, displayValue(value)];
+    return [input.key, displayValue(resolved)];
   }));
   const state: ScratchState = {
     type: typeFor(block.definition), id: path,
     data: JSON.stringify({ instance: block, body: !block.children ? definition.body : undefined, path, displayValues } satisfies BlockMetadata),
-    fields: Object.fromEntries(visibleInputs(definition).map(input => [`VALUE_${input.key}`, displayValues[input.key]])),
-    ...(depth > 0 && definition.kind === 'workflow' ? { collapsed: true } : {}),
+    fields: { ...Object.fromEntries(visibleInputs(definition).map(input => [`VALUE_${input.key}`, displayValues[input.key]])), CHANGE_SUMMARY: changeSummary(changes, path) },
   };
   if (childBlocks?.length && !hasCycle && depth < 12) {
-    state.inputs = { BODY: { block: chainState(childBlocks, catalog, path, depth + 1, new Set([...seen, testingVersionKey(definition)]), references) } };
+    state.inputs = { BODY: { block: chainState(childBlocks, catalog, path, depth + 1, new Set([...seen, testingVersionKey(definition)]), references, changes) } };
   }
   return state;
 }
-function chainState(blocks: TestingBlockInstance[], catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex): ScratchState {
+function chainState(blocks: TestingBlockInstance[], catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex, changes: ValueChange[] = []): ScratchState {
   references ??= buildReferenceIndex(flattenBlocks(blocks, catalog));
-  const states = blocks.map(block => blockState(block, catalog, parent, depth, seen, references));
+  const states = blocks.map(block => blockState(block, catalog, parent, depth, seen, references, changes));
   for (let index = states.length - 2; index >= 0; index--) states[index].next = { block: states[index + 1] };
   return states[0];
 }
@@ -170,6 +179,14 @@ function parkedStates(layout: TestingScenarioLayout | undefined, catalog: Testin
   return stacks.filter(stack => stack.length).map((stack, index) => ({ ...chainState(stack, catalog), x: layout?.positions?.[stack[0].id]?.x ?? 520, y: layout?.positions?.[stack[0].id]?.y ?? 30 + index * 120 }));
 }
 
+function revealPaths(ws: Scratch.WorkspaceSvg, paths: string[]) {
+  const targets = paths.map(path => ws.getAllBlocks(false).find(block => canonicalPath(block) === path)).filter((block): block is Scratch.BlockSvg => !!block);
+  Scratch.Events.disable();
+  try { for (const block of targets) for (let ancestor: Scratch.Block | null = block; ancestor; ancestor = ancestor.getSurroundParent()) ancestor.setCollapsed(false); }
+  finally { Scratch.Events.enable(); }
+  return targets;
+}
+
 export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(function ScratchWorkspace(props, ref) {
   const element = useRef<HTMLDivElement>(null);
   const workspace = useRef<Scratch.WorkspaceSvg | null>(null);
@@ -178,7 +195,11 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
   const applying = useRef(false);
   const lastBlocks = useRef('');
   const catalogueKey = props.catalog.definitions.map(definition => `${testingVersionKey(definition)}:${JSON.stringify(definition.inputs)}`).join('|');
-  useImperativeHandle(ref, () => ({ zoom: direction => workspace.current?.zoomCenter(direction), center: () => workspace.current?.zoomToFit(), undo: () => workspace.current?.undo(false), redo: () => workspace.current?.undo(true), select: path => { const block = workspace.current?.getAllBlocks(false).find(item => canonicalPath(item) === path); if (block) { for (let parent = block.getSurroundParent(); parent; parent = parent.getSurroundParent()) parent.setCollapsed(false); block.select(); workspace.current?.centerOnBlock(block.id); } } }), []);
+  useImperativeHandle(ref, () => ({
+    zoom: direction => workspace.current?.zoomCenter(direction), center: () => workspace.current?.zoomToFit(), undo: () => workspace.current?.undo(false), redo: () => workspace.current?.undo(true),
+    select: path => { const ws = workspace.current; if (!ws) return; const [block] = revealPaths(ws, [path]); if (block) { block.select(); ws.centerOnBlock(block.id); current.current.onLayout({ collapsed: ws.getAllBlocks(false).filter(item => item.isCollapsed()).map(canonicalPath) }); } },
+    showChanges: paths => { const ws = workspace.current; if (!ws) return; const [block] = revealPaths(ws, paths); if (block) { ws.centerOnBlock(block.id); current.current.onLayout({ collapsed: ws.getAllBlocks(false).filter(item => item.isCollapsed()).map(canonicalPath) }); } },
+  }), []);
   useEffect(() => {
     if (!element.current) return;
     registerDefinitions(current.current.catalog);
@@ -216,7 +237,11 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
         // controls. Keep the inspected block until another real block is chosen
         // or that block is removed from the scenario.
         const path = block && canonicalPath(block);
-        if (path) current.current.onSelect(path);
+        if (path) {
+          revealPaths(ws, [path]);
+          current.current.onLayout({ collapsed: ws.getAllBlocks(false).filter(item => item.isCollapsed()).map(canonicalPath) });
+          current.current.onSelect(path);
+        }
         return;
       }
       if (event.type === Scratch.Events.VIEWPORT_CHANGE) { current.current.onLayout({ zoom: ws.scale }); return; }
@@ -227,7 +252,9 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
         try { normaliseCreatedBlocks(ws, (event as Scratch.Events.BlockCreate).ids ?? []); } finally { Scratch.Events.enable(); }
       }
       const next = readChain(ws.getBlockById('__folio_start')?.getNextBlock() ?? null);
-      const referenceIndex = buildReferenceIndex(flattenBlocks(next, current.current.catalog), current.current.parameters);
+      const nextEntries = flattenBlocks(next, current.current.catalog);
+      const valueChanges = buildValueChanges(nextEntries, current.current.catalog, current.current.parameters);
+      const referenceIndex = valueChanges.current;
       Scratch.Events.disable();
       try {
         for (const canvasBlock of ws.getAllBlocks(false)) {
@@ -235,9 +262,20 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
           if (!definition || !canvasBlock.data) continue;
           const metadata = JSON.parse(canvasBlock.data) as BlockMetadata;
           const path = canonicalPath(canvasBlock);
+          const updated = nextEntries.find(entry => entry.path === path);
+          // Parked stacks are outside the executable reference/parameter scope.
+          // Their native fields and canonical expressions remain editable as-is.
+          if (!updated || !referenceIndex.inputs.has(path)) continue;
+          metadata.instance = structuredClone(updated.block);
+          canvasBlock.setFieldValue(changeSummary(valueChanges.changes, path), 'CHANGE_SUMMARY');
           for (const input of visibleInputs(definition)) {
             const value = referenceIndex.inputs.get(path)?.[input.key];
-            if (!input.type.endsWith('-ref') && !isTestingReference(value)) continue;
+            if (!input.type.endsWith('-ref') && !isTestingReference(value)) {
+              const label = displayValue(value);
+              metadata.displayValues = { ...metadata.displayValues, [input.key]: label };
+              canvasBlock.setFieldValue(label, `VALUE_${input.key}`);
+              continue;
+            }
             const description = describeReference(referenceIndex, path, value, input.type);
             const label = description.source ? `${description.source.outputLabel} „${description.source.name}“ · Schritt ${description.source.step}` : description.label;
             metadata.displayValues = { ...metadata.displayValues, [input.key]: label };
@@ -263,7 +301,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       Scratch.Events.disable();
       try {
         const blocks = current.current.blocks;
-        const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(blocks.length ? { next: { block: chainState(blocks, current.current.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(blocks, current.current.catalog), current.current.parameters)) } } : {}) };
+        const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(blocks.length ? { next: { block: chainState(blocks, current.current.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(blocks, current.current.catalog), current.current.parameters), buildValueChanges(flattenBlocks(blocks, current.current.catalog), current.current.catalog, current.current.parameters).changes) } } : {}) };
         const parked = parkedStates(current.current.layout, current.current.catalog);
         Scratch.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [state, ...parked] } }, ws);
         for (const id of current.current.layout?.collapsed ?? []) ws.getBlockById(id)?.setCollapsed(true);
@@ -282,10 +320,11 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
     Scratch.Events.disable();
     try {
       const oldScroll = { x: ws.scrollX, y: ws.scrollY };
-      const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(props.blocks.length ? { next: { block: chainState(props.blocks, props.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(props.blocks, props.catalog), props.parameters)) } } : {}) };
+      const collapsed = ws.getAllBlocks(false).filter(block => block.isCollapsed()).map(canonicalPath);
+      const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(props.blocks.length ? { next: { block: chainState(props.blocks, props.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(props.blocks, props.catalog), props.parameters), buildValueChanges(flattenBlocks(props.blocks, props.catalog), props.catalog, props.parameters).changes) } } : {}) };
       const parked = parkedStates(props.layout, props.catalog);
       Scratch.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [state, ...parked] } }, ws);
-      for (const id of props.layout?.collapsed ?? []) ws.getBlockById(id)?.setCollapsed(true);
+      for (const id of collapsed) ws.getBlockById(id)?.setCollapsed(true);
       ws.scroll(oldScroll.x, oldScroll.y);
       lastBlocks.current = json;
     } finally { Scratch.Events.enable(); applying.current = false; }

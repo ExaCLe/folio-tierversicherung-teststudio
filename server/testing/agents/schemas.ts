@@ -28,7 +28,7 @@ const knowledge = object({ id: string, title: string, kind: { enum: ['concept', 
 export const BUSINESS_SCHEMA = { ...object({ title: string, expectedOutcome: string, blocks: array({ $ref: '#/$defs/instance' }), knowledgeRefs: strings,
   newDefinitions: array(definition), newKnowledge: array(knowledge), explanation: string, assumptions: strings, openQuestions: strings }), $defs: { instance } };
 export const TECHNICAL_SCHEMA = object({ explanation: string, reuseBindings: array(object({ id: string, revision: { type: 'integer' } })),
-  newBindings: array(object({ bindingJson: { type: 'string', description: 'Vollständiges TestingTechnicalBinding mit inputKeys, locators und deklarativem recipe; gültiges JSON, keine ausführbaren JS-/Shell-Zeichenketten.' }, reason: string })), unsupported: strings });
+  newBindings: array(object({ bindingJson: { type: 'string', description: 'Vollständiges TestingTechnicalBinding mit inputKeys, locators und deklarativem recipe; gültiges JSON, keine ausführbaren JS-/Shell-Zeichenketten. unlessVisible ist nur an click ohne capture erlaubt und benennt einen key aus denselben locators. Speicherklicks mit capture dürfen nicht übersprungen werden.' }, reason: string })), unsupported: strings });
 export const DUPLICATES_SCHEMA = object({ explanation: string, decisions: array(object({ proposed: ref, decision: { enum: ['reuse', 'extend', 'new'] },
   chosen: nullable(ref), reason: string, compatible: boolean })), unresolved: strings });
 export const REUSE_SCHEMA = object({ explanation: string, suggestions: array(object({ name: string, reason: string, instanceIds: array(identifier), parentPath: nullable(string),

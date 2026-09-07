@@ -96,6 +96,10 @@ Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein autom
 5. Prüfe die verbundenen Schritte der Startkette. Wenn du Blöcke aus der Scratch-Werkzeugleiste ziehst, verbinde sie mit dieser Kette. Lose abgelegte Blöcke gehören nicht zum ausführbaren Ablauf. Die Bildschirmposition allein legt keine Reihenfolge fest.
 6. Speichere vorgenommene Änderungen und wähle anschließend „Fachlich freigeben“, wenn der Ablauf zur Anforderung passt.
 
+Unter „Abweichungen vom Standard“ werden die Standardwerte der verwendeten Bibliotheksversion mit den wirksamen lokalen Werten dieses Tests verglichen. Der Vergleich berücksichtigt auch Parameter und lokale Overrides, etwa eine abweichende Versicherungssumme innerhalb eines zusammengesetzten Bausteins.
+
+„Geänderte Schritte aufklappen“ öffnet die betroffenen Schritte im zusammengesetzten Block. Mit „Geänderten Schritt zeigen“ springst du zu einer einzelnen Abweichung. Auch die normale Auswahl eines Schritts öffnet den Zielblock und seine umschließenden Bausteine, damit er sichtbar wird. Diese Aktionen ändern nur Auswahl und Darstellung; sie erzeugen keine neue fachliche Änderung.
+
 Eine fachliche Änderung macht die frühere Freigabe ungültig. Der aktualisierte Stand braucht eine neue Prüfung. Die Freigabe bezieht sich auf den konkreten fachlichen Stand und seine Wissensgrundlagen.
 
 ### Vorhandene und eigene Blöcke ergänzen
@@ -141,6 +145,14 @@ Nach fachlicher Freigabe erscheint „Technik & Probelauf“. Die technische Pha
 Die Laufansicht nennt den Testfall und die tatsächlich ausgeführte Revision. „Testfall öffnen“ führt zum bearbeitbaren Testfall; „Testfall weiterbearbeiten“ in der oberen Leiste führt zum zuletzt bearbeiteten Entwurf zurück. Die Laufnachweise bleiben bei ihrer historischen Revision.
 
 Wenn freigegebener Ablauf und passende Technik bereits vorliegen, erlaubt „Mit vorhandener Technik ausführen“ einen weiteren Browserlauf. Jeder Lauf erstellt eigene fiktive Portalobjekte und behält seine Nachweise.
+
+### Einen technischen Vertragsfehler einordnen
+
+Ein sichtbares Formular kann bereits automatisch geöffnet sein. Nur der reine Öffnungsklick darf dann entfallen. Ausfüllen, Speichern und der Nachweis aus der Speicherantwort müssen trotzdem stattfinden. Ein Fehler zu `unlessVisible` bedeutet, dass die technische Antwort diese Trennung verletzt oder ein unbekanntes Formularfeld benennt.
+
+Neue Fehlermeldungen nennen die betroffene Bindung mit Revision, den genauen Eintrag wie `recipe[3]` und die entsprechende Aktionsnummer. `recipe[3]` ist die vierte Aktion. Der Bericht erklärt, ob die Bedingung an der falschen Aktionsart hängt, ihr Locator-Schlüssel fehlt oder der Klick einen verbindlichen Antwortnachweis `capture` enthält.
+
+Die technische Korrekturrunde erhält alle gefundenen Fehler der neuen Bindungen zusammen. Sie darf einen optionalen Öffnungsklick vom Speicherklick trennen, aber keine Speicheraktion oder Ergebniserfassung entfernen. Bleibt ihre Antwort ungültig, endet der Auftrag ohne Übernahme dieses Plans. Öffne den fehlgeschlagenen Agentenauftrag und prüfe die genannte Bindung. Nach einer Korrektur der technischen Vorgaben kannst du für den weiterhin freigegebenen Fachstand „Technik & Probelauf“ erneut starten. Ein gültiger Plan ist erst nach dem anschließenden echten Browserlauf als funktionierender Test belegt.
 
 Nach einem erfolgreichen Lauf können Vorschläge für wiederverwendbare Teilabläufe entstehen. Falls noch keine Vorschläge vorliegen oder die Analyse fehlgeschlagen ist:
 

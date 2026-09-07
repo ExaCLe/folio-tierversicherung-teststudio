@@ -35,13 +35,24 @@ export function validateTestingBinding(input: unknown, catalog: TestingCatalog):
   const keys = new Set(binding.locators.map(item => item.key));
   if (keys.size !== binding.locators.length) throw new Error('Locator-Schlüssel müssen eindeutig sein.');
   for (const item of binding.locators) if (item.method === 'role' && !item.role) throw new Error(`Locator ${item.key} benötigt eine ARIA-Rolle.`);
+  const openingIssues: string[] = [];
+  for (const [index, item] of (binding.recipe ?? []).entries()) {
+    if (item.unlessVisible) {
+      const location = `Bindung ${binding.id}@${binding.revision}, recipe[${index}] (Aktion ${index + 1}, ${item.op}, locatorKey=${JSON.stringify(item.locatorKey)}), unlessVisible=${JSON.stringify(item.unlessVisible)}`;
+      const reasons: string[] = [];
+      if (item.op !== 'click') reasons.push(`Die Bedingung ist an ${item.op} unzulässig. unlessVisible gehört ausschließlich an einen reinen Öffnungsklick. Füllen, Auswählen und Prüfen müssen danach ohne diese Bedingung stattfinden.`);
+      if (!keys.has(item.unlessVisible)) reasons.push(`Der Locator-Schlüssel ${JSON.stringify(item.unlessVisible)} ist in dieser Bindung nicht definiert. Verwende den key eines tatsächlich sichtbaren Formularfelds aus locators, nicht dessen Beschriftung oder einen Selektor. Vorhandene Schlüssel: ${[...keys].join(', ')}.`);
+      if (item.capture) reasons.push('Die Aktion enthält capture und darf nicht übersprungen werden. Trenne einen optionalen Öffnungsklick von dem Speicherklick mit capture. Der Speicherklick muss ohne unlessVisible ausgeführt werden; Antwortnachweis und fachliche Speicheraktion müssen erhalten bleiben.');
+      if (reasons.length) openingIssues.push(`${location}: ${reasons.join(' ')}`);
+    }
+  }
+  if (openingIssues.length) throw new Error(`Ungültige unlessVisible-Bedingung:\n${openingIssues.join('\n')}`);
   for (const item of binding.recipe ?? []) {
     if (item.value !== undefined) assertSafeValue(item.value);
     if (item.capture?.expect) assertSafeValue(item.capture.expect);
     if (item.op === 'goto') {
       if (typeof item.value !== 'string' || !/^\/portal(?:[/?#]|$)/.test(item.value) || item.value.includes('://') || item.value.includes('\\')) throw new Error('Browserrezepte dürfen ausschließlich lokale /portal-Seiten öffnen.');
     } else if (item.op !== 'captureResponse' && (!item.locatorKey || !keys.has(item.locatorKey))) throw new Error(`Rezeptaktion ${item.op} verweist auf einen unbekannten Locator.`);
-    if (item.unlessVisible && (item.op !== 'click' || !keys.has(item.unlessVisible) || item.capture)) throw new Error('unlessVisible darf nur einen bekannten alternativen Formularzustand eines reinen Öffnungsklicks prüfen.');
     if (item.op === 'captureResponse') throw new Error('Antworten müssen als capture an der auslösenden Klickaktion hängen, damit kein Ereignis verloren geht.');
     if (item.capture && item.op !== 'click') throw new Error('Antwortnachweise sind ausschließlich an Klickaktionen erlaubt.');
     if (item.proof && !['expectText', 'expectVisible'].includes(item.op)) throw new Error('Prüfergebnisse dürfen nur nach einer echten UI-Assertion erfasst werden.');

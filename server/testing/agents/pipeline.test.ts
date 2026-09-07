@@ -11,7 +11,7 @@ process.env.FOLIO_TESTING_RUN_ROOT = resolve(temporary, 'runs');
 process.env.FOLIO_CLI_TEST_LOG = resolve(temporary, 'processes.jsonl');
 const executable = resolve(temporary, 'codex-fixture.mjs');
 await writeFile(executable, `#!/usr/bin/env node
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 const args = process.argv.slice(2);
 let input = ''; for await (const chunk of process.stdin) input += chunk;
 let settings = {}; try { settings = JSON.parse(input); } catch {}
@@ -23,6 +23,7 @@ if (!settings.noResult) {
  const schema = JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1], 'utf8'));
  let output = {status:'bereit'};
  if (schema.properties?.reuseBindings) { const compiled=JSON.parse(readFileSync('freigegeben.json','utf8')); output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',reuseBindings:compiled.bindings.filter(x=>x.status==='ready').map(x=>({id:x.id,revision:x.revision})),newBindings:[],unsupported:[]}; }
+ if (schema.properties?.reuseBindings && existsSync('technischer-testplan.json')) { const fixture=JSON.parse(readFileSync('technischer-testplan.json','utf8')); output=process.cwd().endsWith('-korrektur') ? fixture.correction ?? fixture.initial : fixture.initial; }
  if (schema.properties?.decisions) output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',decisions:[],unresolved:[]};
  writeFileSync(args[args.indexOf('-o')+1], JSON.stringify(output));
 }
@@ -39,6 +40,8 @@ const { compileTestingScenario, testingFingerprint } = await import('../compiler
 const repository = await import('../repository');
 const orchestrator = await import('./orchestrator');
 const { reviewWithCodex, validateDuplicateReview, validateReuseReview } = await import('./reviews');
+const { planTechnicalWithCodex } = await import('./technical');
+const { agentContext } = await import('./prompts');
 const schema = { type: 'object', properties: { status: { type: 'string' } }, required: ['status'], additionalProperties: false };
 const call = (id: string, prompt = '{}', signal?: AbortSignal) => invokeCodex({ id, model: 'luna', prompt, schema, files: { 'kontext.txt': 'Nur synthetische Testdaten.' }, signal });
 
@@ -85,6 +88,81 @@ test('Technische Rezepte können nicht aus dem Portal navigieren oder Felder üb
   assert.throws(() => validateTestingBinding({ ...starter, recipe: [{ op: 'goto', value: 'https://example.test' }] }, catalog), /ausschließlich lokale/);
   assert.throws(() => validateTestingBinding({ ...starter, inputKeys: [...starter.inputKeys!, 'vergessenesFeld'] }, catalog), /weder gesetzt noch geprüft/);
   assert.throws(() => validateTestingBinding({ ...starter, recipe: [{ op: 'eval', value: 'process.exit()' }] }, catalog));
+});
+test('unlessVisible erklärt alle drei Vertragsverletzungen am genauen Rezeptort und erhält gültige Öffnungsklicks', () => {
+  const catalog = getTestingCatalog();
+  const starter = createStarterBindings(catalog).find(item => item.operation === 'createCustomer')!;
+  const openingIndex = starter.recipe!.findIndex(action => action.unlessVisible);
+  const fillIndex = starter.recipe!.findIndex(action => action.op === 'fill');
+  const saveIndex = starter.recipe!.findIndex(action => action.capture);
+  const valid = validateTestingBinding(starter, catalog);
+  assert.deepEqual(valid.recipe, starter.recipe);
+  const malformed = structuredClone(starter);
+  malformed.recipe![openingIndex].unlessVisible = 'Name des Kunden';
+  // An unknown key with spaces fails the shape contract before semantic validation.
+  assert.throws(() => validateTestingBinding(malformed, catalog));
+  malformed.recipe![openingIndex].unlessVisible = 'unknownForm';
+  malformed.recipe![fillIndex].unlessVisible = 'name';
+  malformed.recipe![saveIndex].unlessVisible = 'name';
+  assert.throws(() => validateTestingBinding(malformed, catalog), error => {
+    const message = (error as Error).message;
+    for (const index of [openingIndex, fillIndex, saveIndex]) assert(message.includes(`recipe[${index}]`), message);
+    assert(message.includes(`${starter.id}@${starter.revision}`), message);
+    assert.match(message, /unknownForm.*nicht definiert/);
+    assert.match(message, /fill unzulässig/);
+    assert.match(message, /capture.*nicht übersprungen/);
+    assert.match(message, /Speicherklick muss ohne unlessVisible/);
+    return true;
+  });
+  assert.equal(starter.recipe![saveIndex].unlessVisible, undefined);
+  const mixed = structuredClone(starter);
+  mixed.recipe![saveIndex].op = 'fill'; mixed.recipe![saveIndex].unlessVisible = 'unknownForm';
+  assert.throws(() => validateTestingBinding(mixed, catalog), error => { const message = (error as Error).message; assert.match(message, /fill unzulässig/); assert.match(message, /unknownForm.*nicht definiert/); assert.match(message, /capture.*nicht übersprungen/); return true; });
+});
+
+test('Technische Korrektur erhält alle ungültigen Bindungen und bewahrt Speicheraktionen samt Antwortnachweis', async () => {
+  const catalog = getTestingCatalog();
+  const starter = createStarterBindings(catalog).find(item => item.operation === 'createCustomer')!;
+  const corrected = ['fill', 'unknown', 'capture'].map(kind => ({ ...structuredClone(starter), id: `fixture-${kind}` }));
+  const invalid = structuredClone(corrected);
+  invalid[0].recipe!.find(action => action.op === 'fill')!.unlessVisible = 'name';
+  invalid[1].recipe!.find(action => action.unlessVisible)!.unlessVisible = 'unknownForm';
+  invalid[2].recipe!.find(action => action.capture)!.unlessVisible = 'name';
+  const plan = (bindings: typeof corrected) => ({ explanation: 'Synthetischer Prozessvertragstest, kein KI-Funktionsnachweis.', reuseBindings: [], newBindings: bindings.map(binding => ({ bindingJson: JSON.stringify(binding), reason: 'Vertragstest' })), unsupported: [] });
+  const compiled = compileTestingScenario(repository.getTestingScenario('kuh-direktionsanfrage'), catalog);
+  const context = agentContext(catalog, compiled);
+  assert.match(context['rezept-validierung.ts'], /openingIssues/);
+  assert.match(context['rezept-ausfuehrung.ts'], /action\.unlessVisible/);
+  const beforeBindings = JSON.stringify(getTestingCatalog().bindings);
+  const result = await planTechnicalWithCodex({ id: 'technischer-oeffnungsfehler', model: 'luna', catalog, compiled,
+    files: { 'freigegeben.json': JSON.stringify(compiled), 'technischer-testplan.json': JSON.stringify({ initial: plan(invalid), correction: plan(corrected) }) } });
+  assert.deepEqual(result.value, plan(corrected));
+  const path = resolve(temporary, 'agents/technischer-oeffnungsfehler-korrektur');
+  const diagnostic = await readFile(resolve(path, 'validierungsfehler.txt'), 'utf8');
+  for (const binding of invalid) assert(diagnostic.includes(binding.id), diagnostic);
+  assert.match(diagnostic, /recipe\[\d+\]/);
+  assert.match(diagnostic, /capture/);
+  assert.deepEqual(JSON.parse(await readFile(resolve(path, 'vorherige-antwort.json'), 'utf8')), plan(invalid));
+  assert.match(await readFile(resolve(path, 'prompt.md'), 'utf8'), /behebe alle gemeldeten Aktionen/);
+  assert.match(await readFile(resolve(path, 'prompt.md'), 'utf8'), /Speicherklick.*ohne unlessVisible/);
+  assert.equal(JSON.stringify(getTestingCatalog().bindings), beforeBindings);
+  assert.equal(repository.listTestingRuns().length, 0);
+});
+
+test('Eine weiterhin ungültige technische Korrektur endet nach zwei Antworten ohne Übernahme', async () => {
+  const catalog = getTestingCatalog();
+  const starter = createStarterBindings(catalog).find(item => item.operation === 'createCustomer')!;
+  const invalid = structuredClone(starter);
+  invalid.recipe!.find(action => action.capture)!.unlessVisible = 'name';
+  const plan = { explanation: 'Absichtlich ungültiges Fixture, kein KI-Auftrag.', reuseBindings: [], newBindings: [{ bindingJson: JSON.stringify(invalid), reason: 'Vertragstest' }], unsupported: [] };
+  const compiled = compileTestingScenario(repository.getTestingScenario('kuh-direktionsanfrage'), catalog);
+  const beforeBindings = JSON.stringify(getTestingCatalog().bindings);
+  await assert.rejects(planTechnicalWithCodex({ id: 'technischer-oeffnungsfehler-bleibt', model: 'sol', catalog, compiled,
+    files: { 'freigegeben.json': JSON.stringify(compiled), 'technischer-testplan.json': JSON.stringify({ initial: plan }) } }), /weiterhin ungültig.*[\s\S]*recipe\[.*[\s\S]*capture/);
+  for (const name of ['technischer-oeffnungsfehler-bleibt', 'technischer-oeffnungsfehler-bleibt-korrektur']) assert.deepEqual(JSON.parse(await readFile(resolve(temporary, `agents/${name}/result.json`), 'utf8')), plan);
+  await assert.rejects(readFile(resolve(temporary, 'agents/technischer-oeffnungsfehler-bleibt-korrektur-korrektur/manifest.json')), /ENOENT/);
+  assert.equal(JSON.stringify(getTestingCatalog().bindings), beforeBindings);
+  assert.equal(repository.listTestingRuns().length, 0);
 });
 test('Neue manuelle Fachdefinition ohne operation und bindingId bleibt über semanticKey exakt verdrahtbar', () => {
   const catalog = getTestingCatalog();

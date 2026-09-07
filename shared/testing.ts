@@ -64,6 +64,7 @@ export interface TestingUIRecipeAction {
   /** Nach einer bestandenen UI-Prüfung erfasste Ergebniswerte, keine erfundene Antwort. */
   proof?: { matched?: string; actual?: string };
   when?: { input: string; equals?: TestingValue; present?: boolean };
+  /** Nur am reinen Öffnungsklick ohne capture. Key eines Formularfeld-Locators derselben Bindung; nie an fill, select, check oder Assertions. */
   unlessVisible?: string;
   capture?: { method: string; path: string; status?: number; outputs: Record<string, string>; expect?: Record<string, TestingValue> };
 }

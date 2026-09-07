@@ -101,3 +101,46 @@ test('Veralteter Button scheitert am kleinsten Blatt, Impact verfolgt indirekte 
   expect(previous.compiled.bindings.find(item => item.id === invalid.id)?.revision).toBe(1);
   expect(passed.compiled.bindings.find(item => item.id === invalid.id)?.revision).toBe(2);
 });
+
+test('Ein ungültiger unlessVisible-Speicherwächter wird konkret abgelehnt und das korrigierte Rezept speichert echte Portaldaten', async ({ request }, testInfo) => {
+  const catalog = await json<TestingCatalog>(request, 'get', '/api/testing/catalog');
+  const suffix = randomUUID();
+  const original = catalog.definitions.find(item => item.id === 'kunde.anlegen')!;
+  const originalBinding = catalog.bindings.filter(item => item.id === original.bindingId && item.status === 'ready').sort((a, b) => b.revision - a.revision)[0];
+  const leaf: TestingBlockDefinition = { ...original, id: `guardkunde.${suffix}`, semanticKey: `guardkunde.${suffix}`, operation: `createGuardCustomer.${suffix}`, bindingId: `ui.guardkunde.${suffix}`, name: 'Kunde mit geprüfter Öffnungsbedingung', origin: 'human', createdAt: new Date().toISOString() };
+  await json(request, 'post', '/api/testing/definitions', { definition: leaf });
+  const saveIndex = originalBinding.recipe!.findIndex(action => !!action.capture);
+  expect(saveIndex).toBeGreaterThanOrEqual(0);
+  // Explicit malformed fixture, independent of any unavailable user job or AI call.
+  const invalid: TestingTechnicalBinding = { ...originalBinding, id: leaf.bindingId!, revision: 1, operation: leaf.operation!, definitionRefs: [{ id: leaf.id, version: leaf.version }],
+    recipe: originalBinding.recipe!.map((action, index) => index === saveIndex ? { ...action, unlessVisible: 'name' } : action), changeReason: 'Synthetisches QA-Fixture mit unzulässigem Überspringen einer Speicheraktion.' };
+  const rejected = await request.post('/api/testing/bindings', { data: { binding: invalid } });
+  expect(rejected.ok()).toBeFalsy();
+  const error = (await rejected.json()).error as string;
+  expect(error).toContain(invalid.id);
+  expect(error).toContain(`recipe[${saveIndex}]`);
+  expect(error).toContain('capture');
+  expect(error).toContain('unlessVisible');
+  const afterRejected = await json<TestingCatalog>(request, 'get', '/api/testing/catalog');
+  expect(afterRejected.bindings.some(binding => binding.id === invalid.id)).toBeFalsy();
+  const corrected: TestingTechnicalBinding = { ...invalid, recipe: originalBinding.recipe, changeReason: 'Nur der unzulässige Wächter der Speicheraktion wurde entfernt. Der Öffnungsklick behält seine Formularprüfung.' };
+  const saved = await json<TestingTechnicalBinding>(request, 'post', '/api/testing/bindings', { binding: corrected });
+  expect(saved.recipe?.some(action => action.unlessVisible && action.op === 'click' && !action.capture)).toBeTruthy();
+  expect(saved.recipe?.[saveIndex].unlessVisible).toBeUndefined();
+  const baseWorkflow = catalog.definitions.find(item => item.id === 'ablauf.kuh-vorschlag')!;
+  const workflow: TestingBlockDefinition = { ...baseWorkflow, id: `workflow.guard.${suffix}`, semanticKey: `workflow.guard.${suffix}`, body: baseWorkflow.body!.map(item => item.definition.id === original.id ? { ...item, definition: { id: leaf.id, version: leaf.version } } : item), origin: 'human', createdAt: new Date().toISOString() };
+  await json(request, 'post', '/api/testing/definitions', { definition: workflow });
+  const name = `Guardprüfung ${suffix.slice(0, 8)}`;
+  const scenario = await variation(request, 'kuh-direktionsanfrage', item => { item.title = name; item.blocks[0].definition = { id: workflow.id, version: workflow.version }; item.blocks[0].inputs.customerName = name; });
+  const approval = await approve(request, scenario);
+  const result = await run(request, scenario);
+  expect(result.status, result.error).toBe('passed');
+  expect(result.compiled.fingerprint).toBe(approval.fingerprint);
+  expect(result.compiled.bindings.find(binding => binding.id === corrected.id)?.revision).toBe(1);
+  const detail = await json<ProposalDetail>(request, 'get', `/api/agriculture/proposals/${output(result, 'proposal')}`);
+  expect(detail.customer.name).toBe(name);
+  expect(detail.customer.id).toBe(output(result, 'customer'));
+  expect(detail.farm.customerId).toBe(detail.customer.id);
+  expect(detail.proposal.status).toBe('Direktionsprüfung');
+  await testInfo.attach('ungueltiger-waechter-und-echter-portallauf', { body: JSON.stringify({ fixture: 'synthetic', validationError: error, correctedBinding: saved, runId: result.id, customerId: detail.customer.id, customerName: detail.customer.name, artifacts: result.artifacts }, null, 2), contentType: 'application/json' });
+});
