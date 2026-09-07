@@ -158,3 +158,41 @@ test('Explizit umbenannte Parameter eines inneren Workflows erhalten eigenständ
   assert.equal(compiled.steps[0].inputs.name,'Klara Beispiel');assert.equal(compiled.steps[1].inputs.state,'Bayern');
   assert.deepEqual(repository.getTestingScenario(s.id),s);
 });
+
+test('Referenztypfehler nennen Zielblock, Feld, deutsche Ergebnisart und tatsächliche verschachtelte Quelle',()=>{
+  const c=catalog(),s=clone(seeds()[0]);
+  const customer={...inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),label:'Mein Prüfkunde'};
+  const target={...inst('pruefung','pruefung.vorschlagsstatus',{proposalId:ref('kunde'),expectedStatus:'Entwurf'}),label:'Ergebnisquelle prüfen'};
+  s.blocks=[{...inst('rolle','kontext.rolle',{role:'Vermittler'}),children:[customer,target]}];
+  // Use the actual catalog context key rather than a second synthetic schema.
+  s.blocks[0].definition={id:c.definitions.find(d=>d.kind==='context')!.id,version:'1.0.0'};
+  const issue=compileTestingScenario(s,c).issues.find(i=>i.code==='INPUT_REFERENCE_TYPE')!;
+  assert(issue);assert.equal(issue.path,'rolle/pruefung');assert.equal(issue.field,'proposalId');assert.equal(issue.sourcePath,'rolle/kunde');assert.equal(issue.sourceLabel,'Mein Prüfkunde');
+  assert.match(issue.message,/Ergebnisquelle prüfen/);assert.match(issue.message,/Versicherungsvorschlag/);assert.match(issue.message,/Kunde/);assert.match(issue.message,/Mein Prüfkunde/);
+  assert(!issue.message.includes('proposal-ref'));assert(!issue.message.includes('customer-ref'));
+  target.inputs.proposalId={ref:'kunde',type:'animal-ref'};
+  const annotated=compileTestingScenario(s,c).issues.find(i=>i.code==='REFERENCE_TYPE')!;
+  assert.equal(annotated.path,'rolle/pruefung');assert.equal(annotated.sourcePath,'rolle/kunde');assert.match(annotated.message,/Tier/);assert.match(annotated.message,/Kunde/);
+});
+
+test('Referenzdiagnosen behalten Unterfeldpfade und markieren fehlende Quellen am Ziel',()=>{
+  const c=catalog(),s=clone(seeds()[0]);const original=def(c,'pruefung.vorschlagsstatus');
+  const custom:TestingBlockDefinition={...clone(original),id:'fixture.verschachtelte-eingabe',inputs:[{key:'details',label:'Prüfdetails',type:'object',fields:[{key:'proposalId',label:'Versicherungsvorschlag',type:'proposal-ref',required:true}]}]};
+  c.definitions.push(custom);
+  s.blocks=[inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),inst('ziel',custom.id,{details:{proposalId:ref('kunde')}})];
+  const issue=compileTestingScenario(s,c).issues.find(i=>i.code==='INPUT_REFERENCE_TYPE')!;
+  assert.equal(issue.field,'details.proposalId');assert.equal(issue.path,'ziel');assert.match(issue.message,/Prüfdetails \/ Versicherungsvorschlag/);
+  s.blocks[1].inputs.details={proposalId:ref('erst-spaeter')};
+  const missing=compileTestingScenario(s,c).issues.find(i=>i.code==='REFERENCE_MISSING')!;
+  assert.equal(missing.path,'ziel');assert.equal(missing.field,'details.proposalId');assert.match(missing.message,/noch nicht verfügbar/);assert.match(missing.message,/Prüfdetails/);
+});
+
+
+test('Eine veraltete Typmarkierung wird nicht als falsche fachliche Felderwartung ausgegeben',()=>{
+  const c=catalog(),s=clone(seeds()[0]);
+  s.blocks=[inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),inst('betrieb','betrieb.anlegen',{customerId:{ref:'kunde',type:'farm-ref'}})];
+  const compiled=compileTestingScenario(s,c),issue=compiled.issues.find(i=>i.code==='REFERENCE_TYPE')!;
+  assert(issue);assert.match(issue.message,/als „Betrieb“ markiert/);assert.match(issue.message,/jedoch „Kunde“/);assert.match(issue.message,/erneut aus/);assert(!issue.message.includes('erwartet'));
+  assert.equal(issue.path,'betrieb');assert.equal(issue.field,'customerId');assert.equal(issue.sourcePath,'kunde');
+  assert(!compiled.issues.some(i=>i.code==='INPUT_REFERENCE_TYPE'));
+});

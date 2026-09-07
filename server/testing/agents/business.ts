@@ -30,7 +30,7 @@ export async function planBusinessWithCodex(input: { id: string; model: TestingM
     } catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);
       attempts.push({ id, contextHash: result.contextHash, valid: false, errors: [diagnostic] });
-      if (attempt === 1) throw new Error(`Auch die Codex-Korrektur entspricht noch nicht dem Datenvertrag: ${diagnostic}`);
+      if (attempt === 1) throw new Error(`Auch die KI-Korrektur entspricht noch nicht dem Datenvertrag: ${diagnostic}`);
     }
     input.onEvent?.({ id: `${input.id}-korrekturhinweis`, at: new Date().toISOString(), kind: 'status', message: 'Der Prüfer hat Fehler im Agentenentwurf gefunden. Das gleiche Modell erhält den Validierungsbericht und korrigiert seine Antwort einmal.' });
   }

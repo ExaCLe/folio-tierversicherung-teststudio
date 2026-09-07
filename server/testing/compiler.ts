@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingCompiledStep, TestingDuplicateReport, TestingInput, TestingScenario, TestingTechnicalBinding, TestingValidationIssue, TestingValue, TestingValueType, TestingVersionRef } from '../../shared/testing';
-import { isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
+import { isTestingParameter, isTestingReference, testingVersionKey, testingValueTypeLabels } from '../../shared/testing';
 
 export function stableTestingStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableTestingStringify).join(',')}]`;
@@ -55,7 +55,18 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   const globals = new Map<string,{key:string;type:TestingValueType}>();
   const declaredByScope = new WeakMap<Map<string,{key:string;type:TestingValueType}>,Set<string>>();
   const fingerprint = testingFingerprint(scenario,catalog); let wired = true;
-  const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:'error'|'warning'='error') => issues.push({code,message,severity,instanceId:block?.id,path,field});
+  const sources = new Map<string, { sourcePath: string; sourceLabel: string }>();
+  const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:'error'|'warning'='error',source?:{sourcePath:string;sourceLabel:string}) => issues.push({code,message,severity,instanceId:block?.id,path,field,...source});
+  const blockLabel = (block:TestingBlockInstance) => block.label ?? defs.get(testingVersionKey(block.definition))?.name ?? block.definition.id;
+  const fieldLabel = (block:TestingBlockInstance,field:string) => {
+    let inputs = defs.get(testingVersionKey(block.definition))?.inputs ?? []; const labels:string[]=[];
+    for(const key of field.split('.')) { const input = inputs.find(item=>item.key===key); labels.push(input?.label??key); inputs=input?.fields??[]; }
+    return labels.join(' / ');
+  };
+  const referenceMismatch = (code:string,expected:TestingValueType,actual:TestingValueType,ref:string,block:TestingBlockInstance,path:string,field:string) => {
+    const source=sources.get(ref);
+    issue(code,`Im Block „${blockLabel(block)}“ erwartet das Feld „${fieldLabel(block,field)}“ ein Ergebnis der Art „${testingValueTypeLabels[expected]}“. Ausgewählt ist aber „${testingValueTypeLabels[actual]}“${source?` aus „${source.sourceLabel}“`:''}. Wähle ein passendes Ergebnis eines vorherigen Blocks.`,block,path,field,'error',source);
+  };
   for (const id of deps.missingKnowledge) issue('KNOWLEDGE_MISSING',`Der Wissensbeleg „${id}“ fehlt.`);
   function resolveValue(value:TestingValue, params:Record<string,TestingValue>, scope:Map<string,{key:string;type:TestingValueType}>, block:TestingBlockInstance, path:string, field:string,seen:string[]=[]):TestingValue {
     if (isTestingParameter(value)) {
@@ -65,8 +76,8 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
     }
     if (isTestingReference(value)) {
       const found=scope.get(value.ref)??[...scope.values()].find(item=>item.key===value.ref);
-      if (!found) { issue('REFERENCE_MISSING',`Das Ergebnis „${value.ref}“ wurde vor diesem Schritt nicht erzeugt.`,block,path,field); return value; }
-      if (value.type && value.type!==found.type) issue('REFERENCE_TYPE',`Die Referenz „${value.ref}“ hat den Typ ${found.type}, erwartet ist ${value.type}.`,block,path,field);
+      if (!found) { issue('REFERENCE_MISSING',`Im Block „${blockLabel(block)}“ verweist das Feld „${fieldLabel(block,field)}“ auf ein Ergebnis, das hier noch nicht verfügbar ist. Wähle das passende Ergebnis eines vorherigen Blocks im gültigen Ablaufbereich.`,block,path,field); return value; }
+      if (value.type && value.type!==found.type) { const source=sources.get(found.key); issue('REFERENCE_TYPE',`Im Block „${blockLabel(block)}“ ist die gespeicherte Verknüpfung im Feld „${fieldLabel(block,field)}“ als „${testingValueTypeLabels[value.type]}“ markiert. Das ausgewählte Ergebnis${source?` aus „${source.sourceLabel}“`:''} ist jedoch „${testingValueTypeLabels[found.type]}“. Wähle das Ergebnis im Feld erneut aus.`,block,path,field,'error',source); }
       return {ref:found.key,type:found.type};
     }
     if (Array.isArray(value)) return value.map(v=>resolveValue(v,params,scope,block,path,field,seen));
@@ -75,8 +86,8 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   }
   function validateValue(value:TestingValue|undefined,input:TestingInput,block:TestingBlockInstance,path:string,field=input.key) {
     if (value===undefined || value===null || value==='') { if(input.required) issue('INPUT_REQUIRED',`„${input.label}“ muss angegeben werden.`,block,path,field); return; }
-    if (isTestingReference(value)) { if(input.type.endsWith('-ref') && value.type && value.type!==input.type) issue('INPUT_REFERENCE_TYPE',`„${input.label}“ erwartet ${input.type}, erhalten wurde ${value.type}.`,block,path,field); else if(!input.type.endsWith('-ref') && input.type!=='list' && input.type!=='object') issue('INPUT_REFERENCE_TYPE',`„${input.label}“ erwartet einen Wert und keine Objektreferenz.`,block,path,field); return; }
-    if(input.type.endsWith('-ref')) { issue('INPUT_REFERENCE_REQUIRED',`„${input.label}“ muss auf das Ergebnis eines vorherigen Blocks verweisen.`,block,path,field); return; }
+    if (isTestingReference(value)) { if(input.type.endsWith('-ref') && value.type && value.type!==input.type) referenceMismatch('INPUT_REFERENCE_TYPE',input.type,value.type,value.ref,block,path,field); else if(!input.type.endsWith('-ref') && input.type!=='list' && input.type!=='object') issue('INPUT_REFERENCE_TYPE',`Im Block „${blockLabel(block)}“ braucht das Feld „${fieldLabel(block,field)}“ einen Wert der Art „${testingValueTypeLabels[input.type]}“. Entferne die Ergebnisverknüpfung und trage den Wert direkt ein.`,block,path,field,'error',sources.get(value.ref)); return; }
+    if(input.type.endsWith('-ref')) { issue('INPUT_REFERENCE_REQUIRED',`Im Block „${blockLabel(block)}“ braucht das Feld „${fieldLabel(block,field)}“ ein Ergebnis der Art „${testingValueTypeLabels[input.type]}“. Wähle das passende Ergebnis eines vorherigen Blocks.`,block,path,field); return; }
     if((input.type==='number'||input.type==='money') && (typeof value!=='number'||!Number.isFinite(value))) issue('INPUT_TYPE',`„${input.label}“ benötigt eine Zahl.`,block,path,field);
     if(typeof value==='number' && ((input.minimum!==undefined && value<input.minimum)||(input.maximum!==undefined && value>input.maximum))) issue('INPUT_RANGE',`„${input.label}“ liegt außerhalb des zulässigen Bereichs${input.minimum!==undefined?` ab ${input.minimum}`:''}${input.maximum!==undefined?` bis ${input.maximum}`:''}.`,block,path,field);
     if(input.type==='boolean' && typeof value!=='boolean') issue('INPUT_TYPE',`„${input.label}“ benötigt Ja oder Nein.`,block,path,field);
@@ -138,7 +149,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
         if(binding.status==='ready') for(const inputKey of Object.keys(inputs)) if(!(binding.inputKeys??[]).includes(inputKey)) {wired=false;issue('BINDING_INPUT_MISSING',`Die technische Bindung verwendet das Feld „${inputKey}“ noch nicht.`,block,path,inputKey,'warning');}
       }
       const outputs:Record<string,string>={};
-      for(const output of definition.outputs) {const qualified=`${path}::${output.key}`;outputs[output.key]=qualified;bindOutput(block,output.key,{key:qualified,type:output.type},scope,path);}
+      for(const output of definition.outputs) {const qualified=`${path}::${output.key}`;sources.set(qualified,{sourcePath:path,sourceLabel:blockLabel(block)});outputs[output.key]=qualified;bindOutput(block,output.key,{key:qualified,type:output.type},scope,path);}
       steps.push({id:path,instanceId:block.id,path,ancestors,definition:block.definition,label:block.label??definition.name,kind:definition.kind,operation:effectiveTestingOperation(definition),actor,inputs,outputs,...(binding?{binding:{id:binding.id,revision:binding.revision}}:{}),knowledgeRefs:definition.knowledgeRefs});
     }
   }

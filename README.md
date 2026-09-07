@@ -23,9 +23,22 @@ Vite läuft auf Port 5173, die API auf Port 3001. Beide Ports müssen frei sein.
 
 Beim ersten API-Start legt die Anwendung `.local/folio.json` mit fiktiven Beispieldaten an. Spätere Starts ergänzen fehlende Beispieldaten und erhalten vorhandene Vorgänge. Lokale Daten, Agentenprotokolle und Browsernachweise unter `.local/` werden von Git ignoriert und entstehen erst beim Start beziehungsweise bei ihrer Nutzung.
 
-Portalbearbeitung und die Testbefehle funktionieren ohne Codex-Anmeldung. Für die Agentenfunktionen mit Luna oder Sol ist die [optionale Codex-Einrichtung](#lokale-codex-anbindung) nötig. Zusätzliche Agentenserver werden nicht gestartet; die API ruft die lokale CLI auf.
+Portalbearbeitung und die Testbefehle funktionieren ohne KI-Anmeldung. Für die Agentenfunktionen ist die [Einrichtung von Codex oder Claude Code](#lokale-ki-anbindung) nötig. Zusätzliche Agentenserver werden nicht gestartet; die API ruft die lokale CLI auf.
 
 Der [deutsche Demoguide](docs/demo-walkthrough.md) führt durch Portalbearbeitung, Scratch-Blöcke, fachliche Freigabe und Browsernachweise.
+
+## Eine vorhandene Installation aktualisieren
+
+Den laufenden Entwicklungsserver mit `Ctrl+C` beenden und im Projektverzeichnis ausführen:
+
+```sh
+git pull --ff-only
+npm ci
+npx playwright install chromium
+npm run dev:stable
+```
+
+Danach die Browserseite neu laden. Die vorhandene Datei `.local/folio.json` bleibt erhalten, einschließlich eigener Testfälle und KI-Einstellungen. Änderungen am API-Code werden bei `dev:stable` erst durch den Neustart geladen.
 
 ## Entwicklung und getrennte Prozesse
 
@@ -46,13 +59,13 @@ Die Teile lassen sich auch einzeln starten. Frontend und API laufen dann in zwei
 | Gemeinsamer Start für Vorführungen | `npm run dev:stable` | Beide Prozesse in einem Terminal, ohne automatischen API-Neustart |
 | Unit- und API-Tests | `npm test` | Prüft Domänenmodell, Compiler und Agentenvertrag |
 | Browsertests | `npm run test:e2e` | Startet eigene Testserver auf Port 3002 und 5174 sowie Chromium |
-| Codex-Agenten | Im Teststudio Luna oder Sol wählen und „Fachlichen Entwurf erstellen“ auslösen | Die laufende API startet `codex exec`; kein zusätzlicher Agentenserver nötig |
+| KI-Agenten | Unter „Einstellungen“ Modelle konfigurieren, dann im Teststudio ein Modell wählen und einen Auftrag starten | Die API startet Codex oder Claude Code; kein zusätzlicher Agentenserver nötig |
 
 Die API-Startbefehle sind Alternativen: Für dieselbe Datendatei und Port 3001 darf nur ein API-Prozess laufen. Die technische Umsetzung und weitere Agentenaufträge werden ebenfalls aus dem Teststudio gestartet. Die Schritte stehen im [Demoguide](docs/demo-walkthrough.md).
 
 Für Vorführungen eignet sich `npm run dev:stable`, weil der API-Prozess bei Quelltextänderungen weiterläuft. Ein laufender Browser- oder Agentenauftrag sollte beendet sein, bevor der API-Prozess neu gestartet wird.
 
-Die Installation lädt npm-Pakete und Chromium. Versicherungsportal, Speicherung und Browserausführung laufen lokal. Die Agentenfunktionen des Teststudios rufen Modelle über die lokale Codex-CLI auf und benötigen dafür eine bestehende Anmeldung und Netzwerkverbindung.
+Die Installation lädt npm-Pakete und Chromium. Versicherungsportal, Speicherung und Browserausführung laufen lokal. Die Agentenfunktionen des Teststudios rufen Modelle über die ausgewählte lokale CLI auf und benötigen dafür eine bestehende Anmeldung und Netzwerkverbindung.
 
 ## Einen Versicherungsfall bearbeiten
 
@@ -100,11 +113,25 @@ Eine Definition beschreibt die fachliche Bedeutung und die Eingaben eines Blocks
 
 Agenten erzeugen prüfbare Entwürfe. Fachliche Prüfung, menschliche Freigabe und technische Verdrahtung bleiben sichtbare Schritte. Ein gespeicherter Testfall wird gegen seine Definitionen, Referenzen, Rollen und Freigaben geprüft. Der Browserlauf verwendet den festgehaltenen Stand und bindet Rückgaben an die tatsächlichen im Portal erzeugten Kennungen. Ein erfolgreicher Compilerlauf ist noch kein bestandener Browserlauf.
 
+Prüfhinweise nennen den betroffenen Schritt und das Eingabefeld. Bei einer falschen Verknüpfung erklären sie, welches Ergebnis benötigt wird, etwa ein Versicherungsvorschlag, und welcher frühere Block das ausgewählte Ergebnis erzeugt. Über den Hinweis lässt sich die betreffende Stelle zum Bearbeiten öffnen.
+
 Die [Blockmethode](docs/block-method.md) erklärt die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
 
-## Lokale Codex-Anbindung
+## Einen bestehenden Ablauf mit KI ändern
 
-Die Codex-CLI wird nur für Agentenaufträge benötigt. Sie ist keine npm-Abhängigkeit dieses Projekts. Die [offizielle Installationsanleitung](https://learn.chatgpt.com/docs/codex/cli) beschreibt die Einrichtung für das eigene Betriebssystem. Anschließend die CLI prüfen und anmelden:
+1. Unter „Testfälle“ den gewünschten Testfall öffnen. Das funktioniert auch nach einer abgeschlossenen technischen Umsetzung.
+2. Im Feld „Anweisung für den gesamten Ablauf“ beispielsweise schreiben: „Füge nach der Antragseinreichung eine Prüfung ein, dass ein Vermittler die Direktionsentscheidung nicht bearbeiten darf. Behalte alle anderen Schritte bei.“
+3. „Änderungsvorschlag erstellen“ wählen. Bei ungespeicherten Änderungen speichert „Speichern und Vorschlag erstellen“ zuerst den bearbeiteten Stand.
+4. Den vorgeschlagenen Ablauf und die Änderungen prüfen. Erst die Übernahme ändert den gespeicherten Testfall. Ein Vorschlag kann auch verworfen werden.
+5. Die neue Fassung fachlich prüfen und freigeben. Anschließend die technische Umsetzung und den Browserlauf erneut starten.
+
+Der Auftrag bezieht sich auf eine bestimmte Revision. Zwischenzeitliche Änderungen verhindern, dass ein älterer Vorschlag den neueren Ablauf überschreibt. Vorhandene Testnachweise bleiben ihrer ursprünglichen Fassung zugeordnet.
+
+## Lokale KI-Anbindung
+
+Das Teststudio unterstützt Codex und Claude Code. Die CLI des gewünschten Providers muss auf demselben Rechner wie die API installiert und angemeldet sein. Die Anwendung verwendet die bestehende Anmeldung; sie liest oder kopiert keine Anmeldedateien.
+
+Für Codex die [offizielle Installationsanleitung](https://learn.chatgpt.com/docs/codex/cli) verwenden und anschließend prüfen:
 
 ```sh
 codex --version
@@ -112,15 +139,20 @@ codex login
 codex login status
 ```
 
-`codex login` öffnet die Anmeldung im Browser. Eine vorhandene Anmeldung kann mit `codex login status` geprüft und weiterverwendet werden. Weitere Anmeldeverfahren stehen in der [offiziellen OpenAI-Dokumentation](https://learn.chatgpt.com/docs/auth).
+Für Claude Code die [offizielle CLI-Dokumentation](https://code.claude.com/docs/en/cli-reference) verwenden. `claude --version` prüft die Installation; mit `claude` lässt sich die interaktive Einrichtung und Anmeldung durchführen.
 
-Danach im Teststudio Luna oder Sol wählen und "Fachlichen Entwurf erstellen" auslösen. Die laufende API startet `codex exec` selbst; ein zusätzlicher CLI-Prozess oder Agentenserver muss nicht manuell gestartet werden.
+Unter **Einstellungen** im Teststudio:
 
-Die Agentenaufrufe verwenden die installierte Codex-CLI und deren lokale Anmeldung. Die Anwendung liest oder kopiert keine Anmeldedateien. Die konfigurierten Modelle sind `gpt-5.6-luna` und `gpt-5.6-sol`. Verfügbarkeit und Laufzeit hängen vom verwendeten Konto und der Verbindung ab. Wenn ein Modell nicht verfügbar ist, zeigt das Teststudio den Fehler des Aufrufs.
+1. „Modell hinzufügen“ wählen, einen Anzeigenamen vergeben und den Provider auswählen.
+2. Unter „Modellname / Slug“ den Modellnamen der CLI eintragen, beispielsweise `sonnet` für Claude Code oder den gewünschten Codex-Modellnamen. Die vorhandenen Profile Luna und Sol bleiben vorkonfiguriert.
+3. Zusätzliche Argumente für einen Provider oder ein einzelnes Modell eintragen. Für Claude Code ist beispielsweise `--effort high` möglich. Hier stehen nur die Argumente, nicht der vollständige Befehl `claude --effort high`.
+4. Das Standardmodell auswählen und „Einstellungen speichern“ drücken. Anschließend stehen die Modelle bei den KI-Aufträgen zur Auswahl.
 
-Automatisierte Aufträge laufen über `codex exec`. Der Prompt wird über die Standardeingabe übergeben, strukturierte Ergebnisse werden mit einem Ausgabeschema gelesen. `-m` wählt das Modell, `-p` bezeichnet ein Profil. Die CLI kann mit `codex exec --help` geprüft werden. Der nicht interaktive Aufruf ist auch in der [offiziellen OpenAI-Dokumentation](https://learn.chatgpt.com/docs/non-interactive-mode) beschrieben.
+Das optionale Feld „CLI-Programm“ enthält nur den Programmnamen oder Pfad. Leer verwendet es die lokale Standardkonfiguration. Die Modellverfügbarkeit hängt vom jeweiligen Konto ab. Ein nicht verfügbares Modell ergibt einen sichtbaren Fehler und wird nicht still ersetzt.
 
-Die vollständige Konfiguration, Zustände und Nachweise stehen in [Codex-Anbindung](docs/codex-anbindung.md). `FOLIO_CODEX_EXECUTABLE` kann einen abweichenden CLI-Pfad setzen, `FOLIO_CODEX_TIMEOUT_MS` das Zeitlimit eines Aufrufs. Agentenprompts, übergebener Kontext und Ergebnisse liegen getrennt von den Versicherungsdaten unter `.local/testing/agents/`.
+Die API startet `codex exec` beziehungsweise `claude --print` mit einem strukturierten Ausgabeschema. Nutzertext wird über die Standardeingabe übergeben. Ein zusätzliches Terminal mit einem laufenden Agenten ist nicht nötig. Provider, Modell und Argumente werden für jeden Auftrag festgehalten; spätere Einstellungsänderungen gelten für neue Aufträge.
+
+Details zu unterstützten Argumenten, Grenzen und Nachweisen stehen in [KI-Anbindung](docs/codex-anbindung.md). Die Auftragsartefakte liegen unter `.local/testing/agents/` und gehören nicht ins öffentliche Repository.
 
 ## Prüfen und bauen
 
@@ -171,7 +203,7 @@ Danach sind [Portal](http://127.0.0.1:3001/portal) und [Teststudio](http://127.0
 | `src/testing/` | Eigenständiges grünes Teststudio mit Scratch-Arbeitsfläche |
 | `e2e/helpers/agriculture-driver.ts` | Generische Ausführung der gespeicherten Portalbindungen |
 | `e2e/agriculture-*.spec.ts`, `e2e/testing-*.spec.ts` | Aktive Browser- und API-Abnahme |
-| `docs/` | Fachmethode, Schnittstellen, Speicherung und Codex-Anbindung |
+| `docs/` | Fachmethode, Schnittstellen, Speicherung und KI-Anbindung |
 | `.local/` | Lokale Daten, Testberichte sowie Agenten- und Browsernachweise |
 
 Die gemeinsame lokale Datei ist `.local/folio.json`. Neue Versicherungsobjekte liegen ausschließlich in `agriculture.*`-Kollektionen. `FOLIO_DATA_FILE` wählt bei Bedarf eine andere Datei. Ein Speichervorgang erhält andere Kollektionen und schreibt über eine temporäre Datei mit anschließendem atomarem Umbenennen. Pro Datendatei soll ein Serverprozess laufen. Der Prototyp enthält keine verteilte Produktionsdatenbank.

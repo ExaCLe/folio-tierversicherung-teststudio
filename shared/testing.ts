@@ -1,8 +1,21 @@
 /** Fachlicher Vertrag. Darstellung und technische Ausführung sind eigene Datensätze. */
-export type TestingModel = 'luna' | 'sol';
+/** Stable local model-profile key; legacy luna/sol remain valid. */
+export type TestingModel = string;
+export type TestingProvider = 'codex' | 'claude';
+export interface TestingModelProfile { id: string; label: string; provider: TestingProvider; slug: string; extraArgs: string[] }
+export interface TestingProviderSettings { executable: string; extraArgs: string[] }
+export interface TestingAgentSettings {
+  id: 'local'; revision: number; defaultModel: TestingModel; models: TestingModelProfile[];
+  providers: Record<TestingProvider, TestingProviderSettings>;
+}
+export interface TestingAgentConfiguration {
+  provider: TestingProvider; modelId: TestingModel; modelLabel: string; modelSlug: string;
+  executable: string; args: string[]; settingsRevision: number;
+}
 export type TestingVersion = string;
 export interface TestingVersionRef { id: string; version: TestingVersion }
 export type TestingValueType = 'text' | 'number' | 'money' | 'boolean' | 'date' | 'choice' | 'object' | 'list' | 'customer-ref' | 'farm-ref' | 'animal-ref' | 'proposal-ref' | 'referral-ref' | 'contract-ref' | 'policy-ref' | 'document-ref';
+export const testingValueTypeLabels: Record<TestingValueType, string> = { text: 'Text', number: 'Zahl', money: 'Geldbetrag', boolean: 'Ja / Nein', date: 'Datum', choice: 'Auswahl', object: 'Wertepaare', list: 'Liste', 'customer-ref': 'Kunde', 'farm-ref': 'Betrieb', 'animal-ref': 'Tier', 'proposal-ref': 'Versicherungsvorschlag', 'referral-ref': 'Direktionsanfrage', 'contract-ref': 'Vertrag', 'policy-ref': 'Police', 'document-ref': 'Dokument' };
 export interface TestingReference { ref: string; type?: TestingValueType }
 export interface TestingParameter { param: string }
 export type TestingValue = string | number | boolean | null | TestingReference | TestingParameter | TestingValue[] | { [key: string]: TestingValue };
@@ -80,7 +93,7 @@ export interface TestingCatalog {
   knowledge: TestingKnowledgeDocument[];
 }
 export interface TestingValidationIssue {
-  code: string; message: string; severity: 'error' | 'warning'; instanceId?: string; path?: string; field?: string;
+  code: string; message: string; severity: 'error' | 'warning'; instanceId?: string; path?: string; field?: string; sourcePath?: string; sourceLabel?: string;
 }
 export interface TestingCompiledStep {
   id: string; instanceId: string; path: string; ancestors: string[]; definition: TestingVersionRef;
@@ -126,7 +139,7 @@ export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   prompt: string; scenarioId?: string; scenarioRevision?: number; fingerprint?: string;
   startedAt: string; finishedAt?: string; events: TestingAgentEvent[]; error?: string;
-  result?: unknown; artifactDirectory?: string;
+  result?: unknown; artifactDirectory?: string; agentConfig?: TestingAgentConfiguration;
 }
 export interface TestingStepResult {
   id: string; instanceId: string; path: string; label: string; status: 'running' | 'passed' | 'failed' | 'skipped';
@@ -144,6 +157,16 @@ export interface TestingBusinessDraft {
   title: string; expectedOutcome: string; blocks: TestingBlockInstance[]; knowledgeRefs: string[];
   newDefinitions: TestingBlockDefinition[]; newKnowledge: TestingKnowledgeDocument[];
   explanation: string; assumptions: string[]; openQuestions: string[];
+}
+export interface TestingScenarioEditChange {
+  kind: 'add' | 'remove' | 'move' | 'values' | 'metadata'; path: string; label: string;
+  before?: unknown; after?: unknown;
+}
+export interface TestingScenarioEditProposal {
+  scope: 'scenario'; applied: boolean; reviewStatus: 'pending' | 'applied' | 'dismissed';
+  before: TestingScenario; scenario: TestingScenario; draft: TestingBusinessDraft;
+  compiled: TestingCompiledScenario; changes: TestingScenarioEditChange[];
+  contextHash: string; attempts: number; appliedRevision?: number;
 }
 export interface TestingTechnicalPlan {
   scenarioId: string; fingerprint: string; bindings: TestingTechnicalBinding[];

@@ -38,7 +38,7 @@ export async function planTechnicalWithCodex(input: { id: string; model: Testing
       return result;
     } catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);
-      if (attempt) throw new Error(`Die technische Codex-Korrektur ist weiterhin ungültig: ${diagnostic}`);
+      if (attempt) throw new Error(`Die technische KI-Korrektur ist weiterhin ungültig: ${diagnostic}`);
       input.onEvent?.({ id: `${input.id}-technische-korrektur`, at: new Date().toISOString(), kind: 'status', message: 'Die technische Antwort enthält einen Vertrags- oder Referenzfehler. Das gleiche Modell erhält den genauen Bericht und korrigiert den Plan einmal.' });
     }
   }

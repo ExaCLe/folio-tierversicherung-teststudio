@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingTechnicalPlan } from '../../../shared/testing';
+import type { TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingScenarioEditProposal, TestingTechnicalPlan } from '../../../shared/testing';
 import { db } from '../../store';
 import { getTestingCatalog } from '../catalog';
 import { compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from '../compiler';
-import { createTestingScenarioFromDraft, getTestingApproval, getTestingRun, getTestingScenario, listTestingRuns, previewTestingBusinessDraft, saveTestingBinding, saveTestingRun, TestingModelError } from '../repository';
+import { applyTestingScenarioEdit, createTestingScenarioFromDraft, getTestingApproval, getTestingRun, getTestingScenario, listTestingRuns, previewTestingBusinessDraft, saveTestingBinding, saveTestingRun, TestingModelError } from '../repository';
 import { executeTestingRun } from '../runner';
 import { validateTestingBinding } from '../bindings/validation';
 import { invokeCodex, AGENT_ARTIFACTS_ROOT, recoverCodexJobProcesses } from './cli';
 import { agentContext, businessPrompt, duplicatePrompt, reusePrompt, technicalPrompt } from './prompts';
 import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeDuplicates, decodeReuse, decodeTechnicalPlan, DUPLICATES_SCHEMA, REUSE_SCHEMA, TECHNICAL_SCHEMA, reuseSchemaFor, duplicateSchemaFor } from './schemas';
 import { planBusinessWithCodex } from './business';
+import { planScenarioEdit } from './flow-edit';
+import { getTestingAgentSettings, resolveAgentConfiguration, withAgentConfiguration } from './settings';
 import { planTechnicalWithCodex } from './technical';
 import { reviewWithCodex, validateDuplicateReview, validateReuseReview } from './reviews';
 
@@ -40,16 +42,16 @@ function updateJob(id: string, patch: Partial<TestingAgentJob>) { const current 
 function addEvent(id: string, event: TestingAgentJob['events'][number]) { const job = getTestingJob(id); saveJob({ ...job, events: [...job.events.slice(-299), event] }); }
 function status(id: string, text: string) { addEvent(id, { id: randomUUID(), at: now(), kind: 'status', message: text }); }
 function launch(phase: TestingAgentJob['phase'], model: TestingModel, prompt: string, task: (job: TestingAgentJob, signal: AbortSignal) => Promise<unknown>, scenario?: TestingScenario, fingerprint?: string, initialResult?: unknown) {
-  if (!['luna', 'sol'].includes(model)) throw new TestingModelError('Bitte Luna oder Sol auswählen.');
+  const agentConfig = resolveAgentConfiguration(model);
   if (listTestingJobs().filter(job => job.status === 'queued' || job.status === 'running').length >= 12) throw new TestingModelError('Es sind bereits zwölf Agentenaufträge offen. Bitte zuerst einen Auftrag abschließen oder abbrechen.', 429);
   const id = `agent-${randomUUID()}`, controller = new AbortController();
-  const job: TestingAgentJob = { id, phase, model, status: 'queued', prompt, startedAt: now(), events: [], artifactDirectory: resolve(AGENT_ARTIFACTS_ROOT, id),
+  const job: TestingAgentJob = { id, phase, model: agentConfig.modelId, agentConfig, status: 'queued', prompt, startedAt: now(), events: [], artifactDirectory: resolve(AGENT_ARTIFACTS_ROOT, id),
     ...(scenario ? { scenarioId: scenario.id, scenarioRevision: scenario.revision } : {}), ...(fingerprint ? { fingerprint } : {}), ...(initialResult !== undefined ? { result: initialResult } : {}) };
   saveJob(job); controls.set(id, controller);
   const promise = new Promise<TestingAgentJob>(done => setImmediate(() => {
     if (controller.signal.aborted) { done(getTestingJob(id)); return; }
     updateJob(id, { status: 'running' });
-    void task(job, controller.signal).then(result => {
+    void withAgentConfiguration(agentConfig, () => task(job, controller.signal)).then(result => {
       if (!controller.signal.aborted) updateJob(id, { status: 'completed', result, finishedAt: now() });
     }).catch(error => {
       updateJob(id, { status: controller.signal.aborted ? 'cancelled' : 'failed', error: message(error), finishedAt: now() });
@@ -103,6 +105,40 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
     updateJob(job.id, { scenarioId: scenario.id, scenarioRevision: scenario.revision });
     return { scenario, draft, compiled: compileTestingScenario(scenario, getTestingCatalog()), duplicateReports: preview.duplicateReports, applied: true, contextHash: result.contextHash, attempts };
   }, existing, fingerprint).job;
+}
+
+export function startScenarioEditJob(input: { scenarioId: string; revision: number; text: string; model: TestingModel }) {
+  if (typeof input.text !== 'string' || input.text.trim().length < 5 || input.text.length > 15_000) throw new TestingModelError('Bitte die gewünschte Ablaufänderung mit 5 bis 15.000 Zeichen beschreiben.');
+  const scenario = getTestingScenario(input.scenarioId), catalog = getTestingCatalog();
+  if (scenario.revision !== input.revision) throw new TestingModelError('Der Änderungsvorschlag benötigt die aktuelle gespeicherte Testfallrevision.', 409, 'AGENT_REVISION_STALE');
+  const fingerprint = testingFingerprint(scenario, catalog);
+  return launch('business', input.model, input.text, async (job, signal) => {
+    const { result, parsed, attempts } = await planScenarioEdit({ id: job.id, model: input.model, request: input.text, scenario, catalog, signal, onEvent: event => addEvent(job.id, event) });
+    if (signal.aborted) throw new Error('Die Ablaufüberarbeitung wurde abgebrochen.');
+    assertFresh(scenario, fingerprint);
+    const proposal: TestingScenarioEditProposal = { scope: 'scenario', applied: false, reviewStatus: 'pending', before: scenario, ...parsed, contextHash: result.contextHash, attempts };
+    await writeFile(resolve(result.directory, 'validated-proposal.json'), JSON.stringify(proposal, null, 2));
+    if (signal.aborted) throw new Error('Die Ablaufüberarbeitung wurde abgebrochen.');
+    assertFresh(scenario, fingerprint);
+    return proposal;
+  }, scenario, fingerprint, { scope: 'scenario', applied: false }).job;
+}
+function scenarioEditProposal(job: TestingAgentJob): TestingScenarioEditProposal {
+  const proposal = job.result as TestingScenarioEditProposal | undefined;
+  if (job.phase !== 'business' || job.status !== 'completed' || proposal?.scope !== 'scenario' || !proposal.scenario || !job.scenarioId || !job.fingerprint) throw new TestingModelError('Dieser Auftrag enthält keinen abgeschlossenen Vorschlag zur Ablaufüberarbeitung.', 409);
+  if (proposal.applied || proposal.reviewStatus !== 'pending') throw new TestingModelError('Dieser Änderungsvorschlag wurde bereits übernommen oder verworfen.', 409);
+  return proposal;
+}
+export function applyScenarioEditJob(input: { jobId: string; expectedRevision: number; fingerprint: string }) {
+  const job = getTestingJob(input.jobId), proposal = scenarioEditProposal(job);
+  if (input.expectedRevision !== job.scenarioRevision || input.fingerprint !== job.fingerprint) throw new TestingModelError('Die Prüfung bezieht sich nicht auf die Ausgangsfassung dieses Vorschlags.', 409, 'AGENT_REVISION_STALE');
+  const scenario = applyTestingScenarioEdit(job.scenarioId!, proposal.draft, job.model, input.expectedRevision, input.fingerprint);
+  updateJob(job.id, { result: { ...proposal, applied: true, reviewStatus: 'applied', appliedRevision: scenario.revision } });
+  return { scenario, compiled: compileTestingScenario(scenario, getTestingCatalog()), requiresApproval: true };
+}
+export function dismissScenarioEditJob(jobId: string) {
+  const job = getTestingJob(jobId), proposal = scenarioEditProposal(job);
+  return updateJob(job.id, { result: { ...proposal, reviewStatus: 'dismissed' } });
 }
 
 async function performReuse(run: TestingRun, model: TestingModel) {
@@ -205,10 +241,13 @@ export function startDirectRun(input: { scenarioId: string; revision: number; mo
   const { scenario, compiled } = requireApproved(input.scenarioId, input.revision);
   if (!compiled.executable) throw new TestingModelError('Die technischen Bindungen fehlen noch. Bitte zuerst die technische Phase starten.', 409);
   if (runningRuns.size >= 2) throw new TestingModelError('Es laufen bereits zwei Browserprüfungen.', 429);
+  const settings = getTestingAgentSettings();
+  const reuseModel = input.model ?? (settings.models.some(item => item.id === scenario.model) ? scenario.model : settings.defaultModel);
+  const configuration = process.env.FOLIO_AUTO_REUSE === '0' ? undefined : resolveAgentConfiguration(reuseModel);
   const id = `testlauf-${randomUUID()}`;
   const run: TestingRun = { id, scenarioId: scenario.id, scenarioRevision: scenario.revision, scenarioTitle: scenario.title, compiled, status: 'queued', startedAt: now(), steps: [] };
   saveTestingRun(run);
   runningRuns.add(id);
-  setImmediate(() => { void runCompiled(compiled, input.model ?? scenario.model ?? 'luna', undefined, undefined, id).catch(error => saveTestingRun({ ...getTestingRun(id), status: 'failed', finishedAt: now(), error: message(error) })); });
+  setImmediate(() => { const execute = () => runCompiled(compiled, reuseModel ?? settings.defaultModel, undefined, undefined, id); void (configuration ? withAgentConfiguration(configuration, execute) : execute()).catch(error => saveTestingRun({ ...getTestingRun(id), status: 'failed', finishedAt: now(), error: message(error) })); });
   return run;
 }

@@ -201,6 +201,7 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
     await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
     const path = page.locator(`g[data-id="${id}"] > path.blocklyPath[id]`);
     await expect(path).toBeVisible();
+    await path.scrollIntoViewIfNeeded();
     const box = (await path.boundingBox())!;
     await page.mouse.click(box.x + 24, box.y + 10);
   };
@@ -336,6 +337,7 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   await expectEditor(page, current);
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
+  await page.locator('.t-canvas').scrollIntoViewIfNeeded();
   const parkedPath = page.locator('g[data-id="park-kunde"] > path.blocklyPath[id]');
   const original = (await parkedPath.boundingBox())!;
   await page.mouse.move(original.x + 25, original.y + 12);
@@ -347,6 +349,7 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   const parked = () => page.locator('g[data-id="park-kunde"]');
   await expect(parked()).toContainText(parkedValues.name);
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
+  await page.locator('.t-canvas').scrollIntoViewIfNeeded();
   await page.locator('g[data-id="kuhvorschlag/kunde"]').getByText('Startkundin', { exact: true }).dblclick();
   const canvasInput = page.locator('input.blocklyHtmlInput');
   await expect(canvasInput).toBeVisible();
@@ -359,6 +362,7 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   await page.reload();
   await expect(parked()).toContainText(parkedValues.name);
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
+  await page.locator('.t-canvas').scrollIntoViewIfNeeded();
   const source = (await parkedPath.boundingBox())!;
   const tail = (await page.locator('g[data-id="pruefung"] > path.blocklyPath[id]').boundingBox())!;
   await page.mouse.move(source.x + 24, source.y + 10);

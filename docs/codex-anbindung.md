@@ -1,8 +1,8 @@
-# Lokale Codex-Anbindung
+# Lokale KI-Anbindung
 
-Das Teststudio ruft die vorhandene Codex CLI auf dieser Maschine auf. Die fachlichen Entwürfe, die technische Planung, die unabhängige Dublettenprüfung und die Wiederverwendungsvorschläge entstehen in echten Modellaufrufen. Die Anwendung enthält keinen regelbasierten Textplaner, der einen erfolgreichen KI-Lauf vortäuscht.
+Das Teststudio ruft die lokal installierte Codex CLI oder Claude Code auf dem Rechner der API auf. Die fachlichen Entwürfe, die technische Planung, die unabhängige Dublettenprüfung und die Wiederverwendungsvorschläge entstehen in echten Modellaufrufen. Die Anwendung enthält keinen regelbasierten Textplaner, der einen erfolgreichen KI-Lauf vortäuscht.
 
-Luna wird ausdrücklich als `gpt-5.6-luna` aufgerufen, Sol als `gpt-5.6-sol`. Die Auswahl erfolgt im Teststudio und bleibt im gespeicherten Modellmanifest sichtbar. Ist das gewählte Modell nicht erreichbar oder nicht freigeschaltet, zeigt der Auftrag den tatsächlichen Fehler. Die Anwendung ersetzt es nicht still durch ein anderes Modell.
+Luna ist als `gpt-5.6-luna` vorkonfiguriert, Sol als `gpt-5.6-sol`. Unter „Einstellungen“ lassen sich weitere Modellprofile mit Anzeigename, Provider, Modell-Slug und zusätzlichen Argumenten speichern. Die Auswahl erfolgt im Teststudio und bleibt im gespeicherten Modellmanifest sichtbar. Ist das gewählte Modell nicht erreichbar oder nicht freigeschaltet, zeigt der Auftrag den tatsächlichen Fehler. Die Anwendung ersetzt es nicht still durch ein anderes Modell.
 
 Die installierte CLI bestätigt mit `codex exec --help` den nicht interaktiven Aufruf, JSON-Ereignisse und ein JSON-Ausgabeschema. `-p` bezeichnet ein Konfigurationsprofil. Einen Prompt übergibt die Anwendung über stdin an `codex exec -`. Das entspricht der [offiziellen Dokumentation zum nicht interaktiven Modus](https://learn.chatgpt.com/docs/non-interactive-mode).
 
@@ -18,6 +18,42 @@ codex exec --ignore-user-config --ephemeral --json --color never \
 ```
 
 Der Adapter startet das Programm mit einer Argumentliste und ohne Shell. Nutzertext wird deshalb weder als Shellbefehl noch als Dateiname ausgewertet. Die bestehende lokale Anmeldung verwendet die CLI selbst. Die Anwendung liest, kopiert und veröffentlicht keine Anmeldedateien. `--ignore-user-config` verhindert, dass persönliche Modellvorgaben oder zusätzliche Werkzeuge den abgegrenzten Auftrag verändern; die bestehende Authentifizierung bleibt erhalten. Die innere Agentensandbox ist schreibgeschützt.
+
+## Claude Code und eigene Modelle
+
+Claude Code wird im nicht interaktiven Modus mit `--print`, `--output-format stream-json`, `--verbose`, `--json-schema` und `--model` gestartet. Die Anwendung liest das Feld `structured_output` aus dem erfolgreichen abschließenden `result`-Ereignis. Ein Fehlerergebnis oder ein fehlendes strukturiertes Ergebnis gilt nicht als Erfolg. Diese Ausgabeformate beschreibt die [offizielle Dokumentation](https://code.claude.com/docs/en/headless).
+
+Die Claude-Anbindung erlaubt ausschließlich die lesenden Werkzeuge `Read`, `Glob` und `Grep`. `--safe-mode`, leere Einstellungssourcen und eine leere strikte MCP-Konfiguration schalten persönliche Anpassungen und zusätzliche Werkzeuge für den Auftrag aus. Die normale CLI-Anmeldung bleibt verwendbar. Es gibt keine automatische Berechtigungsumgehung. Eine aktuelle Claude-Code-Version muss die verwendeten Flags unterstützen; `claude --help` zeigt die Fähigkeiten der Installation.
+
+Provider- und Modellprofile werden lokal in der Kollektion `testingAgentSettings` derselben JSON-Datendatei gespeichert. Ein Auftrag hält eine Kopie der verwendeten Konfiguration als `agentConfig` fest. Auch seine Korrekturversuche und zugehörigen Agentenschritte verwenden diese Kopie. Ein späterer Wechsel der Einstellungen verändert laufende Aufträge nicht. Alte Aufträge ohne diesen Zusatz bleiben lesbar.
+
+Das Feld für zusätzliche Argumente verarbeitet Anführungszeichen und Escapezeichen, führt aber keine Shell, Variablen oder Befehlsersetzungen aus. Das Modell wird über das Modellprofil gesetzt. Ausgabeformat, Werkzeuge, Arbeitsverzeichnis und Berechtigungen gehören zum Ausführungsvertrag und lassen sich nicht über Zusatzargumente überschreiben.
+
+Unterstützte Zusatzargumente:
+
+| Provider | Argumente |
+| --- | --- |
+| Claude Code | `--effort low`, `medium`, `high`, `xhigh` oder `max`; `--max-budget-usd` mit einem positiven Betrag |
+| Codex | `-c model_reasoning_effort=high` mit `minimal`, `low`, `medium`, `high`, `xhigh`, `max` oder `ultra`; `-c model_verbosity=low` mit `low`, `medium` oder `high` |
+
+Die installierte CLI und das gewählte Modell müssen den Wert unterstützen. Andere Zusatzargumente werden beim Speichern mit einer Erklärung abgelehnt. Bei mehrfach angegebenen Optionen gilt der letzte Wert; Modellargumente überschreiben dieselbe Provideroption. Bei Codex erfolgt dies getrennt je Konfigurationsschlüssel.
+
+Beispiel für ein Claude-Code-Profil:
+
+- Anzeigename `Claude mit hoher Denktiefe`
+- Provider `Claude Code`
+- Modellname / Slug `sonnet`, oder ein auf dem eigenen Konto verfügbarer Modellname
+- Zusätzliche Modellargumente `--effort high`
+
+Ein leeres Feld „CLI-Programm“ verwendet die Umgebungsvariable beziehungsweise den lokalen Standardpfad. Ein eingetragener Pfad enthält nur das Programm. Die Anwendung hängt ihre Argumente selbst an. Die Modell-Slugs werden unverändert an den gewählten Provider übergeben und nicht auf eine andere Modellfamilie umgeschrieben.
+
+## Einen vorhandenen Ablauf überarbeiten
+
+„Ablauf mit KI überarbeiten“ startet eine eigene fachliche Runde für den gespeicherten Testfall. Der Agent erhält den vollständigen Ablauf, die verschachtelten Blockpositionen, vorhandene Definitionen und das Fachwissen. Er kann Schritte einfügen, entfernen, umordnen oder Werte ändern und bei Bedarf neue Definitionen samt Wissen vorschlagen.
+
+Das Ergebnis bleibt zunächst im Agentenauftrag. Der Testfall und der Katalog ändern sich erst durch „Ablaufänderung übernehmen und speichern“. Die Oberfläche zeigt die ursprüngliche Fassung, den Vorschlag und die Unterschiede. Der Vorschlag bleibt auch nach einem Seitenwechsel über den Auftrag erreichbar.
+
+Die Annahme prüft Ausgangsrevision und Fachfingerprint erneut und speichert den neuen Ablauf samt neuen Definitionen und Wissensverweisen atomar. Veraltete Vorschläge können den aktuellen Stand nicht überschreiben. Der geänderte Ablauf benötigt eine neue Fachfreigabe, bevor die technische Runde ihn umsetzt. Frühere Laufnachweise behalten ihre ursprüngliche Momentaufnahme.
 
 ## Die fachliche Runde
 
@@ -55,7 +91,7 @@ Nach der Verdrahtung öffnet Chromium das Versicherungsportal und führt den Abl
 
 ## Wiederverwendung und Reparatur
 
-Erst nach einem erfolgreichen Browserlauf erhält ein weiterer Codex-Agent den geprüften Ablauf und die Laufnachweise. Er schlägt passende Kompositionen und veränderliche Parameter vor. Der Mensch kann Namen und Parameter bearbeiten, Vorschläge annehmen oder verwerfen. Die Annahme prüft nochmals den exakt erfolgreich getesteten Fachstand. Verschachtelte Vorschläge benennen ihre übergeordnete Ebene mit `parentPath`; angenommen wird jeweils ein Vorschlag. Eine fehlgeschlagene Wiederverwendungsprüfung kann auf dem bereits bestandenen Lauf erneut gestartet werden, ohne erneut Versicherungsobjekte anzulegen.
+Erst nach einem erfolgreichen Browserlauf erhält ein weiterer Agent den geprüften Ablauf und die Laufnachweise. Er schlägt passende Kompositionen und veränderliche Parameter vor. Der Mensch kann Namen und Parameter bearbeiten, Vorschläge annehmen oder verwerfen. Die Annahme prüft nochmals den exakt erfolgreich getesteten Fachstand. Verschachtelte Vorschläge benennen ihre übergeordnete Ebene mit `parentPath`; angenommen wird jeweils ein Vorschlag. Eine fehlgeschlagene Wiederverwendungsprüfung kann auf dem bereits bestandenen Lauf erneut gestartet werden, ohne erneut Versicherungsobjekte anzulegen.
 
 Wenn ein Portalbutton umbenannt wird, scheitert der kleinste technische Block. Der Einflussbericht verfolgt die Bindung durch direkte Verwendungen und enthaltene Workflows bis zu allen betroffenen Testfällen. Ein Reparaturauftrag enthält den fehlgeschlagenen Lauf, die alte Bindung und die aktuellen Portalquellen. Der Agent liefert eine neue Revision derselben Bindung. Alte Läufe behalten ihre ursprünglichen Selektoren und Nachweise.
 
@@ -64,13 +100,14 @@ Wenn ein Portalbutton umbenannt wird, scheitert der kleinste technische Block. D
 | Variable | Bedeutung |
 | --- | --- |
 | `FOLIO_CODEX_EXECUTABLE` | Pfad zur Codex CLI; ansonsten `/opt/homebrew/bin/codex`, falls vorhanden, sonst `codex` aus PATH |
-| `FOLIO_CODEX_TIMEOUT_MS` | Zeitlimit pro CLI-Aufruf, standardmäßig 300000 ms, höchstens 1800000 ms |
+| `FOLIO_CLAUDE_EXECUTABLE` | Pfad zu Claude Code; ansonsten `/opt/homebrew/bin/claude`, falls vorhanden, sonst `claude` aus PATH |
+| `FOLIO_CODEX_TIMEOUT_MS` | Gemeinsames Zeitlimit pro CLI-Aufruf beider Provider, standardmäßig 300000 ms, höchstens 1800000 ms |
 | `FOLIO_AGENT_ARTIFACTS_ROOT` | Agentennachweise, standardmäßig `.local/testing/agents` |
 | `FOLIO_TESTING_RUN_ROOT` | Browsernachweise, standardmäßig `.local/testing/runs` |
 | `FOLIO_APP_URL` | Adresse des Portals, standardmäßig `http://127.0.0.1:5173` |
 | `FOLIO_AUTO_REUSE=0` | Deaktiviert ausschließlich die automatische KI-Nachprüfung erfolgreicher Browserläufe, beispielsweise auf einem isolierten Testserver. Es wird kein KI-Ergebnis simuliert. Standardmäßig ist sie aktiv. |
 
-Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindprozesse. Weitere Aufträge warten. Ein Abbruch beendet die zugehörige Prozessgruppe, auch bei einer Warteposition oder direkt vor dem Start. Ein Zeitlimit beendet einen hängenden Aufruf. Beim Neustart werden unterbrochene Aufträge als abgebrochen markiert; anhand gespeicherter PID und des exakten Auftragsverzeichnisses werden noch laufende zugehörige Codex-Prozesse erkannt und beendet. Ein altes `result.json` wird vor jedem erneuten Aufruf entfernt und kann keinen neuen Erfolg vortäuschen.
+Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindprozesse. Weitere Aufträge warten. Ein Abbruch beendet die zugehörige Prozessgruppe, auch bei einer Warteposition oder direkt vor dem Start. Ein Zeitlimit beendet einen hängenden Aufruf. Beim Neustart werden unterbrochene Aufträge als abgebrochen markiert; anhand gespeicherter PID und des exakten Auftragsverzeichnisses werden noch laufende zugehörige CLI-Prozesse erkannt und beendet. Ein altes `result.json` wird vor jedem erneuten Aufruf entfernt und kann keinen neuen Erfolg vortäuschen.
 
 `npm run dev:stable` hält den Backendprozess während einer Vorführung stabil. Ein laufender Agenten- oder Browserauftrag sollte vor einer bewussten Backendänderung beendet werden. Der Frontendcode aktualisiert sich weiterhin über Vite.
 
@@ -81,5 +118,9 @@ Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindpr
 `server/testing/agents/pipeline.test.ts` prüft den Prozessvertrag mit einer ausdrücklich als Testfixture benannten lokalen CLI. Das sind keine Belege für Modellqualität oder echten KI-Erfolg. Es prüft Argumente, globale Parallelität, Abbruch, veraltete Antworten, technische Eingabeabdeckung und eine Szenarioänderung während der Agentenarbeit.
 
 `e2e/testing-runtime.spec.ts` prüft echte Browserläufe mit getrennten Testdaten, eine neu definierte freie Assertion sowie einen absichtlich veralteten Button und die zentrale Reparatur. Echte Luna-/Sol-Aufrufe werden separat im lokalen System durchgeführt; ihre Prompts, Modelle, Schemas und Ergebnisse bleiben als Agentenartefakte erhalten.
+
+`server/testing/agents/providers.test.ts` prüft beide CLI-Adapter mit ausdrücklich künstlichen Prozessantworten, gespeicherte Modellprofile, Argumente, Fehlerergebnisse und unveränderliche Auftragskonfigurationen. `server/testing/agents/flow-edit.test.ts` prüft Vorschau, verschachtelte Änderungen, Verwerfen, Übernahme und veraltete Revisionen. Die Browserprüfungen der KI-Oberfläche verwenden vorbereitete Agentenantworten; sie behaupten keinen echten Modelllauf.
+
+Bei der lokalen Abnahme am 7. September 2026 wurde Claude Code zusätzlich mit einem künstlichen Prompt für `{ "ok": true }` und ohne Kontextdateien aufgerufen. Die CLI akzeptierte die Argumente, meldete aber „Not logged in“. Eine erfolgreiche strukturierte Modellantwort von Claude ist damit auf diesem Rechner noch nicht nachgewiesen. Die Anwendung zeigt diesen Anmeldefehler an. Eine Anmeldung in der eigenen Claude CLI ist vor dem ersten Auftrag erforderlich.
 
 Konkrete lokale Abnahmebelege und ihre Grenzen stehen in [Pipeline-Nachweise](pipeline-nachweise.md).

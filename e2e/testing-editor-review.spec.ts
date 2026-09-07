@@ -214,6 +214,7 @@ test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im ec
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
   const blockPath = page.locator('g[data-id="pruefung"] > path.blocklyPath[id]');
   await expect(blockPath).toBeVisible();
+  await blockPath.scrollIntoViewIfNeeded();
   const box = await blockPath.boundingBox();
   expect(box).toBeTruthy();
   await page.mouse.move(box!.x + 25, box!.y + 12);

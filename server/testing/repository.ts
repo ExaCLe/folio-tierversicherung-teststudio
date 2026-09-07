@@ -104,8 +104,24 @@ export function previewTestingBusinessDraft(intent:string,draft:TestingBusinessD
   const compiled=compileTestingScenario(scenario,augmented);
   return {scenario,catalog:augmented,compiled,duplicateReports:draft.newDefinitions.map(definition=>findTestingDuplicates(definition,catalog))};
 }
+export function previewTestingScenarioEdit(existing:TestingScenario,draft:TestingBusinessDraft,model:TestingModel,catalog:TestingCatalog=getTestingCatalog()) {
+  const preview=previewTestingBusinessDraft(existing.intent,draft,model,catalog);
+  for(const document of draft.newKnowledge){assertKnowledge(document);if(document.definitionRefs.some(ref=>!preview.catalog.definitions.some(definition=>testingVersionKey(definition)===testingVersionKey(ref))))throw new TestingModelError(`„${document.title}“ verweist auf eine fehlende Definitionsversion.`);if(document.relatedKnowledge.some(id=>!preview.catalog.knowledge.some(item=>item.id===id)))throw new TestingModelError(`„${document.title}“ verweist auf fehlendes weiteres Wissen.`);}
+  const scenario:TestingScenario={...clone(existing),title:draft.title,blocks:clone(draft.blocks),expectedOutcome:draft.expectedOutcome,knowledgeRefs:clone(draft.knowledgeRefs)};
+  return {...preview,scenario,compiled:compileTestingScenario(scenario,preview.catalog)};
+}
+export function applyTestingScenarioEdit(id:string,draft:TestingBusinessDraft,model:TestingModel,expectedRevision:number,fingerprint:string):TestingScenario {
+  const existing=getTestingScenario(id),catalog=getTestingCatalog();
+  if(existing.revision!==expectedRevision||testingFingerprint(existing,catalog)!==fingerprint)throw new TestingModelError('Der Testfall oder sein Wissensstand hat sich seit dem Änderungsvorschlag geändert. Bitte den aktuellen Ablauf erneut überarbeiten.',409,'AGENT_REVISION_STALE');
+  const preview=previewTestingScenarioEdit(existing,draft,model,catalog);
+  if(!preview.compiled.valid)throw new TestingModelError(`Der Änderungsvorschlag hat fachliche Fehler: ${preview.compiled.issues.filter(issue=>issue.severity==='error').map(issue=>issue.message).join(' ')}`);
+  return persistTestingBusinessDraft(existing.intent,draft,model,existing);
+}
 export function createTestingScenarioFromDraft(intent:string,draft:TestingBusinessDraft,model:TestingModel):TestingScenario {
-  const preview=previewTestingBusinessDraft(intent,draft,model);
+  return persistTestingBusinessDraft(intent,draft,model);
+}
+function persistTestingBusinessDraft(intent:string,draft:TestingBusinessDraft,model:TestingModel,existing?:TestingScenario):TestingScenario {
+  const preview=existing?previewTestingScenarioEdit(existing,draft,model):previewTestingBusinessDraft(intent,draft,model);
   const current=getTestingCatalog();const definitions=new Map(current.definitions.map(d=>[testingVersionKey(d),d]));const knowledge=new Map(current.knowledge.map(d=>[`${d.id}@${d.revision}`,d]));
   for(const definition of draft.newDefinitions){assertTestingDefinition(definition);const key=testingVersionKey(definition),previous=definitions.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(definition))throw new TestingModelError('Der Agentenentwurf überschreibt eine bestehende Definitionsversion.',409,'DEFINITION_IMMUTABLE');definitions.set(key,clone(definition));}
   for(const doc of draft.newKnowledge){assertKnowledge(doc);const key=`${doc.id}@${doc.revision}`,previous=knowledge.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(doc))throw new TestingModelError('Der Agentenentwurf überschreibt eine bestehende Wissensrevision.',409,'KNOWLEDGE_IMMUTABLE');knowledge.set(key,clone(doc));}
@@ -115,7 +131,9 @@ export function createTestingScenarioFromDraft(intent:string,draft:TestingBusine
   const collections:Record<string,unknown[]>=existsSync(dataFile)?JSON.parse(readFileSync(dataFile,'utf8')):{};
   const merge=<T>(collection:string,added:T[],key:(value:T)=>string)=>{collections[collection]=[...new Map([...(collections[collection]??[]) as T[],...added].map(value=>[key(value),clone(value)])).values()];};
   merge('testingDefinitions',draft.newDefinitions,testingVersionKey);merge('testingKnowledge',addedKnowledge,d=>`${d.id}@${d.revision}`);
-  const scenario=preview.scenario;merge('testingScenarios',[scenario],s=>s.id);merge('testingScenarioRevisions',[{id:`${scenario.id}@${scenario.revision}`,scenario}],r=>r.id);
+  const scenario=existing?{...preview.scenario,revision:existing.revision+1,updatedAt:now()}:preview.scenario;
+  if(existing)merge('testingScenarioRevisions',[{id:`${existing.id}@${existing.revision}`,scenario:existing}],r=>r.id);
+  merge('testingScenarios',[scenario],s=>s.id);merge('testingScenarioRevisions',[{id:`${scenario.id}@${scenario.revision}`,scenario}],r=>r.id);
   // One synchronous atomic replacement commits the entire adoption, preserving every other collection.
   mkdirSync(dirname(dataFile),{recursive:true});const temporary=`${dataFile}.${process.pid}.${randomUUID()}.tmp`;writeFileSync(temporary,`${JSON.stringify(collections,null,2)}\n`,{encoding:'utf8',mode:0o600});renameSync(temporary,dataFile);
   return clone(scenario);

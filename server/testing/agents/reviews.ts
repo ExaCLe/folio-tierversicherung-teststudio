@@ -14,7 +14,7 @@ export async function reviewWithCodex<T>(input: { id: string; model: TestingMode
     try { return { result, parsed: input.validate(result.value), attempts: attempt + 1 }; }
     catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);
-      if (attempt) throw new Error(`${input.label}: Auch die echte Codex-Korrektur verletzt den Vertrag: ${diagnostic}`);
+      if (attempt) throw new Error(`${input.label}: Auch die KI-Korrektur verletzt den Vertrag: ${diagnostic}`);
       input.onEvent?.({ id: `${input.id}-korrektur`, at: new Date().toISOString(), kind: 'status', message: `${input.label}: Das gleiche Modell erhält den genauen Validierungsbericht und korrigiert seine Antwort einmal.` });
     }
   }

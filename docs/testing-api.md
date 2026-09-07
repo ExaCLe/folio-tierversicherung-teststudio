@@ -42,6 +42,8 @@ Ein Eingabeschema verwendet bekannte Werttypen. Auswahlfelder benötigen Auswahl
 
 `testingFingerprint(scenario, catalog)` liefert den Hash des fachlichen Stands. Technische Bindungsrevisionen, Editorlayout und reine Wissensrückverweise gehören nicht zur Fachsemantik. Regeln, Pflichtfelder, Definitionskomposition, lokale Abweichungen und Werte gehören dazu.
 
+Referenzfehler verwenden deutsche Fachbegriffe und nennen Block und Eingabefeld. `path` bezeichnet die genaue verschachtelte Blockverwendung; `field` den Eingabeschlüssel, bei verschachtelten Werten als Punktpfad. Die optionalen Felder `sourcePath` und `sourceLabel` benennen den Block, der das ausgewählte Ergebnis tatsächlich erzeugt. Die Oberfläche verwendet diese Angaben für die Navigation zur betroffenen Eingabe und zur Ergebnisquelle. Technische Fehlercodes bleiben für Diagnose und automatisierte Prüfungen erhalten.
+
 Eine fehlende technische Bindung erzeugt `BINDING_MISSING` als Warnung und `executable: false`. Ein unbekanntes Eingabefeld erzeugt `INPUT_UNKNOWN` als fachlichen Fehler. Ein fachlich definiertes, aber technisch nicht verwendetes Feld erzeugt `BINDING_INPUT_MISSING` und verhindert die Ausführung.
 
 ## Technische Zuordnung
@@ -106,11 +108,16 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 
 | Route | Eingabe und Ergebnis |
 | --- | --- |
-| `GET /bootstrap` | `{catalog,scenarios,jobs,runs,approvals,layouts,cli}` |
+| `GET /bootstrap` | `{catalog,scenarios,jobs,runs,approvals,layouts,cli,settings}` |
+| `GET /settings` | Lokale Modellprofile, Providerargumente, Standardmodell und Einstellungsrevision |
+| `PUT /settings` | Vollständige Einstellungen mit erwarteter `revision`; speichert die nächste Revision, veraltet ergibt 409 |
 | `POST /jobs/business` | `{request,model}` → Agentenauftrag, HTTP 202 |
 | `PUT /scenarios/:id` | `{scenario,expectedRevision}` → gespeicherte neue Szenariorevision |
 | `POST /scenarios/:id/approve` | `{revision,comment?}` → Freigabe genau dieser fachlichen Fassung |
 | `POST /scenarios/:id/interpret-override` | `{revision,instanceId,text,model}` → Agentenauftrag mit lokalem Diff; noch nicht gespeichert |
+| `POST /scenarios/:id/interpret-revision` | `{revision,text,model}` → Vorschlag für den vollständigen Ablauf, HTTP 202; verändert noch keinen Testfall oder Katalog |
+| `POST /jobs/:id/apply-revision` | `{expectedRevision,fingerprint}` → übernimmt den geprüften Ablaufvorschlag atomar als neue Revision; `requiresApproval: true` |
+| `POST /jobs/:id/dismiss-revision` | Verwirft einen noch offenen Ablaufvorschlag |
 | `POST /jobs/technical` | `{scenarioId,revision,model,repairBindingId?}` → Agentenauftrag einschließlich Dublettenprüfung und echtem Browserlauf |
 | `POST /scenarios/:id/run` | `{revision,model?}` → tatsächlicher Browserlauf mit vorhandenen Bindungen |
 | `POST /runs/:id/reuse` | `{model}` → erneute KI-Wiederverwendungsprüfung des bereits bestandenen, unveränderten Laufs, ohne Browserlauf oder neue Versicherungsobjekte |
@@ -119,6 +126,6 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 | `POST /reuse/:id/accept` | `{proposalIds:[id],edits?:[{id,name?,parameters?}]}` → genau **einen** Vorschlag annehmen; `parentPath` wird unverändert an die verschachtelte Promotion übergeben |
 | `POST /reuse/:id/dismiss` | `{proposalIds:[id]}` → Vorschlag verwerfen |
 
-`model` ist ausschließlich `luna` oder `sol`. Der technische Probelauf verwendet genau die vom Agenten ausgewählten Bindungsrevisionen. Ein zwischenzeitlich veränderter fachlicher Stand kann nicht mit einem alten Agentenergebnis überschrieben werden. Eine Annahme nach erfolgreichem Lauf prüft dessen Revision und Fingerprint erneut.
+`model` ist die gespeicherte Profil-ID aus `GET /settings`. `luna` und `sol` sind vorkonfigurierte Profile. Eigene Profile enthalten `id`, `label`, `provider` mit `codex` oder `claude`, `slug` und `extraArgs`. Die Einstellungen enthalten außerdem `defaultModel` und für beide Provider `executable` und `extraArgs`. Beim Speichern dürfen Argumente als Text oder Argumentliste angegeben werden; die Antwort enthält normalisierte Listen. Jeder neue Agentenauftrag hält seine aufgelöste Konfiguration in `agentConfig` fest. Der technische Probelauf verwendet genau die vom Agenten ausgewählten Bindungsrevisionen. Ein zwischenzeitlich veränderter fachlicher Stand kann nicht mit einem alten Agentenergebnis überschrieben werden. Eine Annahme nach erfolgreichem Lauf prüft dessen Revision und Fingerprint erneut.
 
 `GET /jobs/:id/attempts` listet den ursprünglichen und gegebenenfalls den einmaligen Korrekturversuch. Prompt, Manifest, Schema und Rohantwort sind über `/jobs/:id/attempts/:attempt/artifacts/:filename` zugänglich. Beide Antworten bleiben getrennt erhalten. Die bestehende direkte Route `/jobs/:id/artifacts/:filename` verweist auf den ersten Versuch.
