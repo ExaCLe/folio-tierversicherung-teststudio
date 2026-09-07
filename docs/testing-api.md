@@ -44,6 +44,8 @@ Ein Eingabeschema verwendet bekannte Werttypen. Auswahlfelder benötigen Auswahl
 
 Referenzfehler verwenden deutsche Fachbegriffe und nennen Block und Eingabefeld. `path` bezeichnet die genaue verschachtelte Blockverwendung; `field` den Eingabeschlüssel, bei verschachtelten Werten als Punktpfad. Die optionalen Felder `sourcePath` und `sourceLabel` benennen den Block, der das ausgewählte Ergebnis tatsächlich erzeugt. Die Oberfläche verwendet diese Angaben für die Navigation zur betroffenen Eingabe und zur Ergebnisquelle. Technische Fehlercodes bleiben für Diagnose und automatisierte Prüfungen erhalten.
 
+Bei einem ausdrücklich als `*-ref` definierten Eingabefeld bestimmen dessen gepinnte Definition und der tatsächlich aufgelöste Quellausgang die erlaubte Ergebnisart. Eine ältere optionale `TestingReference.type`-Annotation überschreibt diese Fachdefinition nicht. Das gilt auch für verschachtelte Schemafelder und Parameterketten. Das Kompilat enthält den tatsächlichen Quelltyp. Fehlende Quellen, falsche Ablaufbereiche und echte Typkonflikte bleiben Fehler. Bei Referenzen ohne eigenes Referenzfeldschema, etwa in untypisierten Listen, bleibt die Annotation eine geprüfte Typanforderung.
+
 Eine fehlende technische Bindung erzeugt `BINDING_MISSING` als Warnung und `executable: false`. Ein unbekanntes Eingabefeld erzeugt `INPUT_UNKNOWN` als fachlichen Fehler. Ein fachlich definiertes, aber technisch nicht verwendetes Feld erzeugt `BINDING_INPUT_MISSING` und verhindert die Ausführung.
 
 ## Technische Zuordnung

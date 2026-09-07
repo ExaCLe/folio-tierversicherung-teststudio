@@ -171,8 +171,8 @@ test('Referenztypfehler nennen Zielblock, Feld, deutsche Ergebnisart und tatsäc
   assert.match(issue.message,/Ergebnisquelle prüfen/);assert.match(issue.message,/Versicherungsvorschlag/);assert.match(issue.message,/Kunde/);assert.match(issue.message,/Mein Prüfkunde/);
   assert(!issue.message.includes('proposal-ref'));assert(!issue.message.includes('customer-ref'));
   target.inputs.proposalId={ref:'kunde',type:'animal-ref'};
-  const annotated=compileTestingScenario(s,c).issues.find(i=>i.code==='REFERENCE_TYPE')!;
-  assert.equal(annotated.path,'rolle/pruefung');assert.equal(annotated.sourcePath,'rolle/kunde');assert.match(annotated.message,/Tier/);assert.match(annotated.message,/Kunde/);
+  const annotated=compileTestingScenario(s,c).issues.find(i=>i.code==='INPUT_REFERENCE_TYPE')!;
+  assert.equal(annotated.path,'rolle/pruefung');assert.equal(annotated.sourcePath,'rolle/kunde');assert.match(annotated.message,/Versicherungsvorschlag/);assert.match(annotated.message,/Kunde/);assert(!annotated.message.includes('Tier'));
 });
 
 test('Referenzdiagnosen behalten Unterfeldpfade und markieren fehlende Quellen am Ziel',()=>{
@@ -188,11 +188,29 @@ test('Referenzdiagnosen behalten Unterfeldpfade und markieren fehlende Quellen a
 });
 
 
-test('Eine veraltete Typmarkierung wird nicht als falsche fachliche Felderwartung ausgegeben',()=>{
+test('Das skalare Eingabeschema und die echte Quelle haben Vorrang vor einer alten Typmarkierung',()=>{
   const c=catalog(),s=clone(seeds()[0]);
   s.blocks=[inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),inst('betrieb','betrieb.anlegen',{customerId:{ref:'kunde',type:'farm-ref'}})];
-  const compiled=compileTestingScenario(s,c),issue=compiled.issues.find(i=>i.code==='REFERENCE_TYPE')!;
-  assert(issue);assert.match(issue.message,/als „Betrieb“ markiert/);assert.match(issue.message,/jedoch „Kunde“/);assert.match(issue.message,/erneut aus/);assert(!issue.message.includes('erwartet'));
-  assert.equal(issue.path,'betrieb');assert.equal(issue.field,'customerId');assert.equal(issue.sourcePath,'kunde');
-  assert(!compiled.issues.some(i=>i.code==='INPUT_REFERENCE_TYPE'));
+  const original=JSON.stringify(s),compiled=compileTestingScenario(s,c);
+  assert(!compiled.issues.some(i=>['REFERENCE_TYPE','INPUT_REFERENCE_TYPE'].includes(i.code)));
+  assert.deepEqual(compiled.steps.find(step=>step.path==='betrieb')!.inputs.customerId,{ref:'kunde::customer',type:'customer-ref'});
+  assert.equal(JSON.stringify(s),original);
+});
+
+ test('Listen und untypisierte Objektwerte behalten ihre ausdrückliche Referenztypprüfung',()=>{
+  const c=catalog(),s=clone(seeds()[0]),original=def(c,'pruefung.vorschlagsstatus');
+  const custom:TestingBlockDefinition={...clone(original),id:'fixture.offene-werte',inputs:[{key:'liste',label:'Ergebnisliste',type:'list'},{key:'details',label:'Details',type:'object',extensible:true},{key:'typisiert',label:'Typisiert',type:'object',fields:[{key:'kunde',label:'Kunde',type:'customer-ref'}]}]};
+  c.definitions.push(custom);const stale={ref:'kunde',type:'farm-ref' as const};
+  s.blocks=[inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),inst('ziel',custom.id,{liste:[stale],details:{frei:stale},typisiert:{kunde:{param:'auswahl'}}})];s.parameters={auswahl:{param:'indirekt'},indirekt:stale};
+  const issues=compileTestingScenario(s,c).issues.filter(issue=>issue.code==='REFERENCE_TYPE');
+  assert.deepEqual(issues.map(issue=>issue.field).sort(),['details.frei','liste']);
+  assert(issues.every(issue=>issue.path==='ziel'&&issue.sourcePath==='kunde'));
+});
+
+ test('Wiederverwendung übernimmt den Typ einer bekannten Quelle statt alter Referenzmetadaten',()=>{
+  const base=clone(seeds().find(s=>s.id==='kuh-direktionsanfrage')!);base.id='promotion-alte-markierung';base.blocks[1].inputs.proposalId={ref:'vorschlag',type:'contract-ref'};
+  const saved=repository.saveTestingScenario(base,0);assert.equal(compileTestingScenario(saved,catalog()).valid,true);
+  const promoted=repository.promoteTestingBlocks({scenarioId:saved.id,expectedRevision:saved.revision,instanceIds:['angebot','einreichen'],name:'Angebot und Antrag mit alter Markierung',description:'Synthetische Referenztypregression',parameters:[],replaceSelection:true});
+  assert.equal(promoted.definition.inputs.find(input=>input.key==='ref_vorschlag')!.type,'proposal-ref');
+  assert.equal(compileTestingScenario(promoted.scenario,getTestingCatalog()).valid,true);
 });

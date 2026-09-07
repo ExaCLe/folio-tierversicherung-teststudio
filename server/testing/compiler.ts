@@ -68,20 +68,20 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
     issue(code,`Im Block „${blockLabel(block)}“ erwartet das Feld „${fieldLabel(block,field)}“ ein Ergebnis der Art „${testingValueTypeLabels[expected]}“. Ausgewählt ist aber „${testingValueTypeLabels[actual]}“${source?` aus „${source.sourceLabel}“`:''}. Wähle ein passendes Ergebnis eines vorherigen Blocks.`,block,path,field,'error',source);
   };
   for (const id of deps.missingKnowledge) issue('KNOWLEDGE_MISSING',`Der Wissensbeleg „${id}“ fehlt.`);
-  function resolveValue(value:TestingValue, params:Record<string,TestingValue>, scope:Map<string,{key:string;type:TestingValueType}>, block:TestingBlockInstance, path:string, field:string,seen:string[]=[]):TestingValue {
+  function resolveValue(value:TestingValue, params:Record<string,TestingValue>, scope:Map<string,{key:string;type:TestingValueType}>, block:TestingBlockInstance, path:string, field:string,seen:string[]=[],input?:TestingInput):TestingValue {
     if (isTestingParameter(value)) {
       if (!Object.hasOwn(params,value.param)) { issue('PARAMETER_MISSING',`Der Parameter „${value.param}“ ist nicht belegt.`,block,path,field); return null; }
       if (seen.includes(value.param)) { issue('PARAMETER_CYCLE',`Die Parameterverknüpfung für „${value.param}“ enthält einen Kreis.`,block,path,field); return null; }
-      return resolveValue(params[value.param],params,scope,block,path,field,[...seen,value.param]);
+      return resolveValue(params[value.param],params,scope,block,path,field,[...seen,value.param],input);
     }
     if (isTestingReference(value)) {
       const found=scope.get(value.ref)??[...scope.values()].find(item=>item.key===value.ref);
       if (!found) { issue('REFERENCE_MISSING',`Im Block „${blockLabel(block)}“ verweist das Feld „${fieldLabel(block,field)}“ auf ein Ergebnis, das hier noch nicht verfügbar ist. Wähle das passende Ergebnis eines vorherigen Blocks im gültigen Ablaufbereich.`,block,path,field); return value; }
-      if (value.type && value.type!==found.type) { const source=sources.get(found.key); issue('REFERENCE_TYPE',`Im Block „${blockLabel(block)}“ ist die gespeicherte Verknüpfung im Feld „${fieldLabel(block,field)}“ als „${testingValueTypeLabels[value.type]}“ markiert. Das ausgewählte Ergebnis${source?` aus „${source.sourceLabel}“`:''} ist jedoch „${testingValueTypeLabels[found.type]}“. Wähle das Ergebnis im Feld erneut aus.`,block,path,field,'error',source); }
+      if (value.type && value.type!==found.type && !input?.type.endsWith('-ref')) { const source=sources.get(found.key); issue('REFERENCE_TYPE',`Im Block „${blockLabel(block)}“ ist die gespeicherte Verknüpfung im Feld „${fieldLabel(block,field)}“ als „${testingValueTypeLabels[value.type]}“ markiert. Das ausgewählte Ergebnis${source?` aus „${source.sourceLabel}“`:''} ist jedoch „${testingValueTypeLabels[found.type]}“. Wähle das Ergebnis im Feld erneut aus.`,block,path,field,'error',source); }
       return {ref:found.key,type:found.type};
     }
     if (Array.isArray(value)) return value.map(v=>resolveValue(v,params,scope,block,path,field,seen));
-    if (value && typeof value==='object') return Object.fromEntries(Object.entries(value).map(([key,v])=>[key,resolveValue(v,params,scope,block,path,`${field}.${key}`,seen)]));
+    if (value && typeof value==='object') return Object.fromEntries(Object.entries(value).map(([key,v])=>[key,resolveValue(v,params,scope,block,path,`${field}.${key}`,seen,input?.type==='object'?input.fields?.find(field=>field.key===key):undefined)]));
     return value;
   }
   function validateValue(value:TestingValue|undefined,input:TestingInput,block:TestingBlockInstance,path:string,field=input.key) {
@@ -112,7 +112,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
       if(active.includes(key)) {issue('COMPOSITION_CYCLE',`„${definition.name}“ enthält sich selbst.`,block,path);continue;}
       for(const outputKey of Object.keys(block.outputs??{})) if(!definition.outputs.some(o=>o.key===outputKey)) issue('OUTPUT_UNKNOWN',`„${outputKey}“ ist kein Ergebnis von „${definition.name}“.`,block,path,outputKey);
       const raw={...Object.fromEntries(definition.inputs.filter(i=>i.default!==undefined).map(i=>[i.key,structuredClone(i.default!)])),...block.inputs,...(overrides[block.id]??{})};
-      const inputs=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,resolveValue(v,params,scope,block,path,k)]));
+      const inputs=Object.fromEntries(Object.entries(raw).map(([k,v])=>[k,resolveValue(v,params,scope,block,path,k,[],definition.inputs.find(input=>input.key===k))]));
       for(const input of definition.inputs) {
         const required=input.requiredWhen?.values.some(v=>v===inputs[input.requiredWhen!.input]);
         validateValue(inputs[input.key],required?{...input,required:true}:input,block,path);

@@ -115,6 +115,10 @@ Agenten erzeugen prüfbare Entwürfe. Fachliche Prüfung, menschliche Freigabe u
 
 Prüfhinweise nennen den betroffenen Schritt und das Eingabefeld. Bei einer falschen Verknüpfung erklären sie, welches Ergebnis benötigt wird, etwa ein Versicherungsvorschlag, und welcher frühere Block das ausgewählte Ergebnis erzeugt. Über den Hinweis lässt sich die betreffende Stelle zum Bearbeiten öffnen.
 
+Wenn eine Blockdefinition korrigiert wurde, zeigt der Inspector die verwendete Blockversion. Dort lässt sich eine bereits veröffentlichte neue Version für diese Verwendung übernehmen. Eine Bearbeitung direkt am Block aktualisiert diese Verwendung; eine Änderung in der Bibliothek veröffentlicht zunächst nur eine neue Version. Andere Testfälle und frühere Laufnachweise behalten ihren Stand.
+
+Bei einem korrigierten Eingabefeld prüft das Studio dessen aktuelle Definition gegen das tatsächlich ausgewählte Ergebnis. Eine alte gespeicherte Typangabe allein macht eine passende Auswahl nicht ungültig. Ist weiterhin ein Vertrag ausgewählt, obwohl nun ein Versicherungsvorschlag benötigt wird, bleibt der Hinweis bestehen, bis die passende Quelle gewählt wurde.
+
 Die [Blockmethode](docs/block-method.md) erklärt die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
 
 ## Einen bestehenden Ablauf mit KI ändern

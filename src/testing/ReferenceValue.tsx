@@ -3,17 +3,18 @@ import type { TestingValue, TestingValueType } from '../../shared/testing';
 import { isTestingReference } from '../../shared/testing';
 import { describeReference, referenceChoices, type ReferenceIndex } from './references';
 import './references.css';
+import { typeLabels } from './model';
 
-export function ReferenceValue({ id, value, type, index, path, onChange, onSource }: {
-  id: string; value?: TestingValue; type?: TestingValueType; index: ReferenceIndex; path: string;
+export function ReferenceValue({ id, value, type, index, path, onChange, onSource, typeIsAnnotation = false }: {
+  typeIsAnnotation?: boolean; id: string; value?: TestingValue; type?: TestingValueType; index: ReferenceIndex; path: string;
   onChange?: (value: TestingValue) => void; onSource?: (path: string) => void;
 }) {
-  const description = describeReference(index, path, value, type);
+  const description = describeReference(index, path, value, type, typeIsAnnotation);
   const options = referenceChoices(index, path, type?.endsWith('-ref') ? type : undefined);
   const current = description.status === 'available' ? description.source?.value : '__unavailable__';
   return <div className="t-result-reference" data-reference-status={description.status}>
     {onChange && <select id={id} value={current ?? '__unavailable__'} onChange={event => { const option = options.find(item => item.value === event.target.value); if (option) onChange({ ref: option.value, type: option.type }); }}>
-      {description.status !== 'available' && <option value="__unavailable__" disabled>{description.label}</option>}
+      {description.status !== 'available' && <option value="__unavailable__" disabled>{description.status === 'type' && type ? `Benötigt: ${typeLabels[type]} · Ergebnis neu auswählen` : description.label}</option>}
       {options.map(option => <option key={`${option.value}:${option.key}`} value={option.value}>{option.label}</option>)}
     </select>}
     <div className="t-result-description"><Link2 size={14} /><span>{description.label}</span></div>

@@ -15,4 +15,8 @@
 .testing-app .t-validation-strip button>div { flex:1; min-width:0; }
 .testing-app .t-validation-strip strong { display:block; font-size:12px; }
 .testing-app .t-validation-strip small { display:block; font-size:11px; }
+.testing-app .t-definition-version { display:grid; gap:8px; padding:16px 20px; border-bottom:1px solid #dce5d5; }
+.testing-app .t-definition-version label { font-size:12px; font-weight:600; }
+.testing-app .t-definition-version p,.testing-app .t-definition-version small { font-size:11px; line-height:1.6; color:#647364; }
+.testing-app .t-definition-version .t-button { white-space:normal; }
 @media(max-width:700px) { .testing-app .t-instruction-actions { flex-direction:column; align-items:stretch; } .testing-app .t-settings-model { grid-template-columns:minmax(0,1fr); } .testing-app .t-settings-section,.testing-app .t-scenario-instruction { padding:16px; } }

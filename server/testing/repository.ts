@@ -190,7 +190,7 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
   for(const block of flatten(body)) for(const value of Object.values(block.inputs)) values(value,v=>{
     if(!isTestingReference(v)||localAliases.has(v.ref)||inputs.some(i=>i.key===`ref_${v.ref.replace(/[^a-zA-Z0-9_]/g,'_')}`))return;
     const key=`ref_${v.ref.replace(/[^a-zA-Z0-9_]/g,'_')}`;
-    const type=v.type??knownAliases.get(v.ref);if(!type)throw new TestingModelError(`Der Typ des externen Ergebnisses „${v.ref}“ ist nicht eindeutig. Verbinde es vor der Wiederverwendung.`);
+    const type=knownAliases.get(v.ref)??v.type;if(!type)throw new TestingModelError(`Der Typ des externen Ergebnisses „${v.ref}“ ist nicht eindeutig. Verbinde es vor der Wiederverwendung.`);
     inputs.push({key,label:`Vorhandenes Ergebnis: ${v.ref}`,type,required:true});replacementInputs[key]=clone(v);
     for(const nested of flatten(body)) nested.inputs=Object.fromEntries(Object.entries(nested.inputs).map(([field,current])=>[field,mapValues(current,x=>isTestingReference(x)&&x.ref===v.ref?{param:key}:x)]));
   });

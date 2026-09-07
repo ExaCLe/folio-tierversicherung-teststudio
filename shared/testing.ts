@@ -16,6 +16,7 @@ export type TestingVersion = string;
 export interface TestingVersionRef { id: string; version: TestingVersion }
 export type TestingValueType = 'text' | 'number' | 'money' | 'boolean' | 'date' | 'choice' | 'object' | 'list' | 'customer-ref' | 'farm-ref' | 'animal-ref' | 'proposal-ref' | 'referral-ref' | 'contract-ref' | 'policy-ref' | 'document-ref';
 export const testingValueTypeLabels: Record<TestingValueType, string> = { text: 'Text', number: 'Zahl', money: 'Geldbetrag', boolean: 'Ja / Nein', date: 'Datum', choice: 'Auswahl', object: 'Wertepaare', list: 'Liste', 'customer-ref': 'Kunde', 'farm-ref': 'Betrieb', 'animal-ref': 'Tier', 'proposal-ref': 'Versicherungsvorschlag', 'referral-ref': 'Direktionsanfrage', 'contract-ref': 'Vertrag', 'policy-ref': 'Police', 'document-ref': 'Dokument' };
+/** Optional type constrains untyped containers; a declared scalar reference field uses its schema and the actual source type. */
 export interface TestingReference { ref: string; type?: TestingValueType }
 export interface TestingParameter { param: string }
 export type TestingValue = string | number | boolean | null | TestingReference | TestingParameter | TestingValue[] | { [key: string]: TestingValue };

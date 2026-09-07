@@ -68,3 +68,123 @@ test('Globale Parameter, lokale Änderungen und Listen liefern verständliche Na
   assert.match(describeReference(index, 'workflow/betrieb', index.inputs.get('workflow/betrieb')?.customerId).label, /Geänderter Name/);
   assert.equal(JSON.stringify(blocks), original);
 });
+
+const { migrateDefinition } = await import('../../src/testing/definitionMigration');
+const { loadTestingSourceCatalog } = await import('./catalog');
+const { testingFingerprint } = await import('./compiler');
+function migrationFixture(nested = false) {
+  const c = loadTestingSourceCatalog();
+  const base = c.definitions.find(item => item.id === 'pruefung.vorschlagsstatus')!;
+  const before: TestingBlockDefinition = { ...structuredClone(base), id: 'fixture.pruefung', name: 'Korrigierbare Prüfung', inputs: [{ key: 'proposalId', label: 'Vorschlag', type: 'contract-ref', required: true }], version: '1.0.0' };
+  const after: TestingBlockDefinition = { ...structuredClone(before), version: '1.0.1', supersedes: { id: before.id, version: before.version }, inputs: [{ ...before.inputs[0], type: 'proposal-ref' }] };
+  c.definitions.push(before, after);
+  const target = block('pruefung', before.id, { proposalId: { ref: 'vorschlag', type: 'contract-ref' } });
+  const blocks = [block('vorbereitung', 'ablauf.kuh-vorschlag', {}, { proposal: 'vorschlag' }), ...(nested ? [{ ...block('rolle', 'rolle.als', { role: 'Vermittler' }), children: [target] }] : [target])];
+  return { c, before, after, target, blocks, path: nested ? 'rolle/pruefung' : 'pruefung', scenario: { ...structuredClone(seeds[0]), blocks } };
+}
+
+test('Expliziter Versionswechsel verwendet neuen Feldtyp und behält Referenz sowie alte Version', () => {
+  const { c, after, blocks, path, scenario } = migrationFixture();
+  const beforeJSON = JSON.stringify({ c, blocks }), fingerprint = testingFingerprint(scenario, c);
+  const compiledBefore = compileTestingScenario(scenario, c);
+  assert(compiledBefore.issues.some(issue => issue.code === 'INPUT_REFERENCE_TYPE'));
+  const migrated = migrateDefinition(blocks, path, c, after);
+  assert.deepEqual(migrated[1].inputs.proposalId, blocks[1].inputs.proposalId);
+  assert.equal(migrated[1].definition.version, '1.0.1');
+  const compiledAfter = compileTestingScenario({ ...scenario, blocks: migrated }, c);
+  assert.equal(compiledAfter.valid, true, JSON.stringify(compiledAfter.issues));
+  const index = indexFor(migrated, {}, c);
+  assert.equal(describeReference(index, path, index.inputs.get(path)!.proposalId, 'proposal-ref').status, 'available');
+  assert.deepEqual(referenceChoices(index, path, 'proposal-ref').map(source => source.value), ['vorschlag']);
+  assert.equal(JSON.stringify({ c, blocks }), beforeJSON);
+  assert.equal(testingFingerprint(scenario, c), fingerprint);
+  assert.equal(flattenBlocks(blocks, c).find(entry => entry.path === path)!.definition!.inputs[0].type, 'contract-ref');
+});
+
+test('Tatsächlich falsche Quelle wird bei Versionswechsel weder umgebunden noch passend markiert', () => {
+  const { c, after, blocks, path, scenario } = migrationFixture();
+  blocks[0] = block('vorbereitung', 'ablauf.kuh-standardvertrag', {}, { contract: 'vertrag' });
+  blocks[1].inputs.proposalId = { ref: 'vertrag', type: 'contract-ref' };
+  const migrated = migrateDefinition(blocks, path, c, after);
+  assert.deepEqual(migrated[1].inputs.proposalId, blocks[1].inputs.proposalId);
+  const issue = compileTestingScenario({ ...scenario, blocks: migrated }, c).issues.find(item => item.code === 'INPUT_REFERENCE_TYPE' && item.path === path);
+  assert(issue); assert.match(issue.message, /Vertrag/); assert.match(issue.message, /Versicherungsvorschlag/);
+});
+
+test('Veralteter Definitionsdefault wird korrekt aufgelöst und bleibt ohne neuen lokalen Override geerbt', () => {
+  const { c, after, blocks, path, scenario } = migrationFixture();
+  after.inputs[0].default = { ref: 'vorschlag', type: 'contract-ref' };
+  blocks[1].inputs = {};
+  blocks.push({ ...structuredClone(blocks[1]), id: 'andere-verwendung' });
+  const original = JSON.stringify({ c, blocks });
+  const migrated = migrateDefinition(blocks, path, c, after);
+  assert.deepEqual(migrated[1].inputs.proposalId, blocks[1].inputs.proposalId);
+  assert.deepEqual(migrated[2], blocks[2]);
+  assert.equal(Object.hasOwn(migrated[1].inputs,'proposalId'),false);
+  assert.deepEqual(after.inputs[0].default, { ref: 'vorschlag', type: 'contract-ref' });
+  assert(!compileTestingScenario({ ...scenario, blocks: migrated }, c).issues.some(issue => issue.path === path && ['REFERENCE_TYPE', 'INPUT_REFERENCE_TYPE'].includes(issue.code)));
+  assert.equal(JSON.stringify({ c, blocks }), original);
+});
+
+test('Vererbter Block und äußerer Override werden gezielt migriert, andere Workflownutzung bleibt unverändert', () => {
+  const { c, before, after, blocks, scenario } = migrationFixture();
+  const workflow: TestingBlockDefinition = { ...structuredClone(c.definitions.find(item => item.kind === 'workflow')!), id: 'fixture.container', inputs: [], outputs: [], exports: {}, body: [block('pruefung', before.id, { proposalId: { ref: 'vorschlag', type: 'contract-ref' } })] };
+  c.definitions.push(workflow);
+  const first = { ...block('eins', workflow.id), overrides: { pruefung: { proposalId: { ref: 'vorschlag', type: 'contract-ref' as const } } } };
+  blocks.splice(1, 1, first, { ...structuredClone(first), id: 'zwei' });
+  const original = JSON.stringify({ c, blocks });
+  const migrated = migrateDefinition(blocks, 'eins/pruefung', c, after);
+  assert.equal(migrated[1].children![0].definition.version, after.version);
+  assert.deepEqual(migrated[1].overrides!.pruefung.proposalId, first.overrides.pruefung.proposalId);
+  assert.deepEqual(migrated[2], blocks[2]);
+  assert.equal(workflow.body![0].definition.version, before.version);
+  assert(!compileTestingScenario({ ...scenario, blocks: migrated }, c).issues.some(issue => issue.path === 'eins/pruefung' && ['REFERENCE_TYPE', 'INPUT_REFERENCE_TYPE'].includes(issue.code)));
+  assert.equal(JSON.stringify({ c, blocks }), original);
+});
+
+test('Verschachteltes Referenzfeld unter mehreren Overrides löst den tatsächlich wirksamen Wert auf', () => {
+  const { c, before, after, blocks, scenario } = migrationFixture();
+  before.inputs = [{ key: 'details', label: 'Details', type: 'object', fields: [{ key: 'proposalId', label: 'Vorschlag', type: 'contract-ref' }] }];
+  after.inputs = [{ ...structuredClone(before.inputs[0]), fields: [{ ...before.inputs[0].fields![0], type: 'proposal-ref' }] }];
+  const target = block('pruefung', before.id, { details: { proposalId: { ref: 'vorschlag', type: 'contract-ref' }, extra: 'Erhalten' } });
+  const inner = { ...block('innen', 'rolle.als', { role: 'Vermittler' }), children: [target], overrides: { pruefung: { details: { proposalId: { ref: 'unwirksam', type: 'contract-ref' as const } } } } };
+  c.definitions.push({ ...structuredClone(c.definitions.find(item=>item.id==='rolle.als')!), id: 'fixture.aussere-rolle' });
+  const outer = { ...block('aussen', 'fixture.aussere-rolle', { role: 'Vermittler' }), children: [inner], overrides: { 'innen/pruefung': { details: { proposalId: { ref: 'vorschlag', type: 'contract-ref' as const } } } } };
+  blocks.splice(1, 1, outer);
+  const migrated = migrateDefinition(blocks, 'aussen/innen/pruefung', c, after);
+  assert.deepEqual(migrated[1].overrides!['innen/pruefung'].details, outer.overrides['innen/pruefung'].details);
+  assert.deepEqual(migrated[1].children![0].overrides, inner.overrides);
+  assert.deepEqual(migrated[1].children![0].children![0].inputs, target.inputs);
+  assert(!compileTestingScenario({ ...scenario, blocks: migrated }, c).issues.some(issue => issue.path === 'aussen/innen/pruefung' && ['REFERENCE_TYPE', 'INPUT_REFERENCE_TYPE'].includes(issue.code)));
+});
+
+test('Parameterbindung bleibt erhalten und die konsumierende Felddefinition bestimmt den Typ', () => {
+  const { c, after, blocks, path, scenario } = migrationFixture();
+  blocks[1].inputs.proposalId = { param: 'auswahl' };
+  const parameters = { auswahl: { ref: 'vorschlag', type: 'contract-ref' as const } }, original = JSON.stringify(parameters);
+  const migrated = migrateDefinition(blocks, path, c, after, parameters);
+  assert.deepEqual(migrated[1].inputs.proposalId, { param: 'auswahl' });
+  assert.equal(JSON.stringify(parameters), original);
+  const issues = compileTestingScenario({ ...scenario, blocks: migrated, parameters }, c).issues;
+  assert(!issues.some(issue => ['REFERENCE_TYPE','INPUT_REFERENCE_TYPE'].includes(issue.code) && issue.path === path));
+  const index=indexFor(migrated,parameters,c);assert.equal(describeReference(index,path,index.inputs.get(path)!.proposalId,'proposal-ref').status,'available');
+});
+
+test('Migration akzeptiert keine spätere oder fremde Quelle trotz passender Typmarkierung', () => {
+  const { c, after, blocks, path, scenario } = migrationFixture();
+  blocks.reverse();
+  const migrated = migrateDefinition(blocks, path, c, after);
+  assert.deepEqual(migrated[0].inputs.proposalId, { ref: 'vorschlag', type: 'contract-ref' });
+  assert(compileTestingScenario({ ...scenario, blocks: migrated }, c).issues.some(issue => issue.code === 'REFERENCE_MISSING' && issue.path === path));
+  assert.throws(() => migrateDefinition(blocks, 'fehlender/pfad', c, after), /ausgewählte Verwendung/);
+});
+
+
+test('Picker und Compiler prüfen Listenannotation weiterhin, skalares Schema normalisiert nur die Darstellung',()=>{
+  const { c,after,blocks,path,scenario }=migrationFixture();const migrated=migrateDefinition(blocks,path,c,after),index=indexFor(migrated,{},c);
+  const stale={ref:'vorschlag',type:'contract-ref' as const};
+  assert.equal(describeReference(index,path,stale,'proposal-ref').status,'available');
+  assert.equal(describeReference(index,path,stale).status,'type');
+  assert.equal(describeReference(index,path,stale,'contract-ref',true).status,'type');
+  assert.deepEqual(index.inputs.get(path)!.proposalId,compileTestingScenario({...scenario,blocks:migrated},c).steps.find(step=>step.path===path)!.inputs.proposalId);
+});

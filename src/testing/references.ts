@@ -1,4 +1,4 @@
-import type { TestingValue, TestingValueType } from '../../shared/testing';
+import type { TestingInput, TestingValue, TestingValueType } from '../../shared/testing';
 import { isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
 import { typeLabels, type BlockEntry } from './model';
 
@@ -35,11 +35,11 @@ function sourceTrail(entry: BlockEntry): string {
 export function buildReferenceIndex(entries: BlockEntry[], parameters: Record<string, TestingValue> = {}): ReferenceIndex {
   const index: ReferenceIndex = { before: new Map(), inputs: new Map(), outputs: new Map(), all: [] };
   type Scope = Map<string, ReferenceSource>;
-  const resolve = (value: TestingValue, params: Record<string, TestingValue>, scope: Scope, seen: string[] = []): TestingValue => {
-    if (isTestingParameter(value)) return !seen.includes(value.param) && Object.hasOwn(params, value.param) ? resolve(params[value.param], params, scope, [...seen, value.param]) : value;
-    if (isTestingReference(value)) { const found = scope.get(value.ref) ?? [...scope.values()].find(item => item.key === value.ref); return found ? { ...value, ref: found.key, type: value.type ?? found.type } : value; }
+  const resolve = (value: TestingValue, params: Record<string, TestingValue>, scope: Scope, seen: string[] = [], input?: TestingInput): TestingValue => {
+    if (isTestingParameter(value)) return !seen.includes(value.param) && Object.hasOwn(params, value.param) ? resolve(params[value.param], params, scope, [...seen, value.param], input) : value;
+    if (isTestingReference(value)) { const found = scope.get(value.ref) ?? [...scope.values()].find(item => item.key === value.ref); return found ? { ...value, ref: found.key, type: input?.type.endsWith('-ref') ? found.type : value.type ?? found.type } : value; }
     if (Array.isArray(value)) return value.map(item => resolve(item, params, scope, seen));
-    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item, params, scope, seen)]));
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item, params, scope, seen, input?.type === 'object' ? input.fields?.find(field => field.key === key) : undefined)]));
     return value;
   };
   const walk = (children: BlockEntry[], params: Record<string, TestingValue>, scope: Scope, active: string[], overrides: Record<string, Record<string, TestingValue>> = {}) => {
@@ -51,7 +51,7 @@ export function buildReferenceIndex(entries: BlockEntry[], parameters: Record<st
       ids.add(block.id);
       index.before.set(entry.path, new Map(scope));
       const raw = { ...Object.fromEntries(definition.inputs.filter(input => input.default !== undefined).map(input => [input.key, input.default!])), ...block.inputs, ...overrides[block.id] };
-      const values = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, resolve(value, params, scope)]));
+      const values = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, resolve(value, params, scope, [], definition.inputs.find(input => input.key === key))]));
       index.inputs.set(entry.path, values);
       const bind = (outputKey: string, source: ReferenceSource) => {
         const alias = block.outputs?.[outputKey] ?? `${block.id}.${outputKey}`;
@@ -93,13 +93,14 @@ export function buildReferenceIndex(entries: BlockEntry[], parameters: Record<st
 export function referenceChoices(index: ReferenceIndex, path: string, type?: TestingValueType): ReferenceSource[] {
   return [...index.before.get(path)?.values() ?? []].filter(source => !type || source.type === type);
 }
-export function describeReference(index: ReferenceIndex, path: string, value: TestingValue | undefined, type?: TestingValueType): { label: string; source?: ReferenceSource; status: 'available' | 'missing' | 'future' | 'type' | 'literal' | 'parameter' } {
+export function describeReference(index: ReferenceIndex, path: string, value: TestingValue | undefined, type?: TestingValueType, typeIsAnnotation = false): { label: string; source?: ReferenceSource; status: 'available' | 'missing' | 'future' | 'type' | 'literal' | 'parameter' } {
   if (isTestingParameter(value)) return { label: `Parameter „${value.param}“ ist hier nicht aufgelöst`, status: 'parameter' };
   if (!isTestingReference(value)) return { label: value ? `Fester Wert „${String(value)}“ · kein Verweis auf ein früheres Ergebnis` : 'Noch kein früheres Ergebnis ausgewählt', status: 'literal' };
   const scope = index.before.get(path);
   const source = scope?.get(value.ref) ?? [...scope?.values() ?? []].find(item => item.key === value.ref);
   if (source) {
-    if ((type?.endsWith('-ref') && source.type !== type) || (value.type && value.type !== source.type)) return { label: `${source.label} · Ergebnisart passt nicht zu diesem Feld`, source, status: 'type' };
+    if (type?.endsWith('-ref') && source.type !== type) return { label: `${source.label} · Ergebnisart passt nicht zu diesem Feld`, source, status: 'type' };
+    if ((!type?.endsWith('-ref') || typeIsAnnotation) && value.type && value.type !== source.type) return { label: `${source.label} · Gespeicherte Ergebnisart ist veraltet. Quelle erneut auswählen.`, source, status: 'type' };
     return { label: source.label, source, status: 'available' };
   }
   const localFuture = index.all.filter(item => (item.value === value.ref || item.key === value.ref) && item.sourcePath.split('/').slice(0, -1).join('/') === path.split('/').slice(0, -1).join('/'));
