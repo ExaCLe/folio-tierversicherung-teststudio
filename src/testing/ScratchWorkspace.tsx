@@ -212,7 +212,11 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       if (event.type === Scratch.Events.SELECTED) {
         const selected = event as Scratch.Events.Selected;
         const block = selected.newElementId ? ws.getBlockById(selected.newElementId) : undefined;
-        current.current.onSelect(block ? canonicalPath(block) || undefined : undefined);
+        // Scratch clears canvas focus on document clicks, including inspector
+        // controls. Keep the inspected block until another real block is chosen
+        // or that block is removed from the scenario.
+        const path = block && canonicalPath(block);
+        if (path) current.current.onSelect(path);
         return;
       }
       if (event.type === Scratch.Events.VIEWPORT_CHANGE) { current.current.onLayout({ zoom: ws.scale }); return; }
@@ -245,7 +249,10 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       const json = JSON.stringify(next);
       if (json !== lastBlocks.current) { lastBlocks.current = json; current.current.onChange(next); }
       const selected = Scratch.getSelected();
-      if (selected instanceof Scratch.BlockSvg) current.current.onSelect(canonicalPath(selected) || undefined);
+      if (selected instanceof Scratch.BlockSvg && selected.workspace === ws) {
+        const path = canonicalPath(selected);
+        if (path) current.current.onSelect(path);
+      }
       const parkedStacks = ws.getTopBlocks(false).filter(block => block.id !== '__folio_start').map(readChain);
       current.current.onLayout({ parkedStacks, parkedBlocks: parkedStacks.flat(), positions: Object.fromEntries(ws.getTopBlocks(false).map(block => { const pos = block.getRelativeToSurfaceXY(); return [canonicalPath(block) || block.id, { x: pos.x, y: pos.y }]; })), zoom: ws.scale, collapsed: ws.getAllBlocks(false).filter(block => block.isCollapsed()).map(canonicalPath) });
     };
@@ -283,6 +290,9 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       lastBlocks.current = json;
     } finally { Scratch.Events.enable(); applying.current = false; }
   }, [props.blocks, props.catalog, props.layout]);
+  useEffect(() => {
+    if (props.selected && !flattenBlocks(props.blocks, props.catalog).some(entry => entry.path === props.selected)) current.current.onSelect(undefined);
+  }, [props.blocks, props.catalog, props.selected]);
   useEffect(() => { const block = props.selected ? workspace.current?.getAllBlocks(false).find(item => canonicalPath(item) === props.selected) : undefined; if (block && Scratch.getSelected() !== block) block.select(); }, [props.selected]);
   return <div className="t-scratch-workspace" ref={element} aria-label="Scratch-Arbeitsfläche" />;
 });

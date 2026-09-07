@@ -70,7 +70,7 @@ Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebe
 
 ## 5. Eine fachliche Anforderung im Teststudio beschreiben
 
-Öffne das Teststudio. Beschreibe unter „Deine Anforderung“ zum Beispiel:
+Öffne das Teststudio und wähle den Navigationstab „Neuer Testfall“. Beschreibe unter „Deine Anforderung“ zum Beispiel:
 
 > Ich möchte eine Tierlebensversicherung für die Kuh Berta auf einem Betrieb in Bayern. Die Versicherungssumme beträgt 15.000 Euro. Prüfe, dass nach dem Einreichen eine offene Direktionsanfrage besteht. Der Vertrag soll noch nicht abgeschlossen werden.
 
@@ -79,18 +79,18 @@ Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebe
 3. Öffne den angezeigten Agentenauftrag, um Modell, Fortschritt, Begründung und mögliche offene Fragen zu prüfen.
 4. Nach einem erfolgreichen Auftrag öffnet „Entwurf ansehen“ den fachlichen Ablauf.
 
-Ein KI-Fehler bleibt sichtbar und erzeugt keinen vorgetäuschten erfolgreichen Entwurf. Ein bereits gespeicherter Testfall kann auch ohne neuen fachlichen KI-Auftrag untersucht werden. Unter „Gespeicherte Testfälle“ sind „Kuh mit hoher Versicherungssumme“ und „Police als Sachbearbeiter drucken“ vorbereitet.
+Ein KI-Fehler bleibt sichtbar und erzeugt keinen vorgetäuschten erfolgreichen Entwurf. Ein bereits gespeicherter Testfall kann auch ohne neuen fachlichen KI-Auftrag untersucht werden. Der eigene Navigationstab „Testfälle“ zeigt alle vorhandenen Abläufe. Unter „Gespeicherte Testfälle“ sind „Kuh mit hoher Versicherungssumme“ und „Police als Sachbearbeiter drucken“ vorbereitet. Mit „Testfälle durchsuchen“ findest du einen Fall über seinen Namen oder seine Anforderung; ein Klick auf die Karte öffnet den Editor. Die Karte zeigt die Revision, vorhandene lokale Änderungen und gegebenenfalls den letzten Lauf.
 
-Auf der Startseite findest du unter „Bisherige Agentenaufträge“ auch frühere Aufträge. Der Dialog nennt den zugehörigen Testfall und die Auftragsrevision. „Entwurf ansehen“ öffnet diesen Testfall. Liegt inzwischen eine neuere gespeicherte Revision vor, wird der Unterschied angezeigt. Eigene ungespeicherte Änderungen bleiben im geöffneten Entwurf erhalten.
+In der Übersicht „Testfälle“ findest du unter „Bisherige Agentenaufträge“ auch frühere Aufträge. Der Dialog nennt den zugehörigen Testfall und die Auftragsrevision. „Entwurf ansehen“ öffnet diesen Testfall. Liegt inzwischen eine neuere gespeicherte Revision vor, wird der Unterschied angezeigt. Eigene ungespeicherte Änderungen bleiben im geöffneten Entwurf erhalten.
 
-Die Leiste „Aktueller Testfall“ beziehungsweise „Zuletzt bearbeitet“ nennt Titel und Revision. Über „Testfall weiterbearbeiten“ kehrst du aus der Blockbibliothek, den Ausführungen oder einer anderen Studioseite zum Editor zurück. Auch die Zurück- und Vorwärtstasten des Browsers öffnen den Testfall, der zur Adresse gehört. Ungespeicherte Änderungen werden beim Wechsel und beim erneuten Laden im selben Browser-Tab wiederhergestellt. „Speichern“ sichert sie dauerhaft; „Verwerfen“ stellt den gespeicherten Stand wieder her.
+Die Leiste „Aktueller Testfall“ beziehungsweise „Zuletzt bearbeitet“ nennt Titel und Revision. Über „Testfall weiterbearbeiten“ kehrst du aus der Blockbibliothek, den Ausführungen oder einer anderen Studioseite zum Editor zurück. Der Pfeil „Zur Testfallübersicht“ im Editor führt zurück zur Sammlung. „Testfälle“ und „Neuer Testfall“ haben eigene Adressen; auch die Zurück- und Vorwärtstasten des Browsers stellen die entsprechende Ansicht und den zur Adresse gehörenden Testfall wieder her. Ungespeicherte Änderungen werden beim Wechsel und beim erneuten Laden im selben Browser-Tab wiederhergestellt. „Speichern“ sichert sie dauerhaft; „Verwerfen“ stellt den gespeicherten Stand wieder her.
 
 ## 6. Die Scratch-Blöcke fachlich prüfen
 
 Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein automatischer Vertragsabschluss würde seine Anforderung verändern. Der zweite Test bereitet dagegen einen vollständigen Standardvertrag vor und wechselt für Ausgabe und Druck zum Sachbearbeiter.
 
 1. Wähle einen Scratch-Block aus oder öffne die tastaturbedienbare „Ablaufliste“.
-2. Prüfe rechts unter „Werte“ die konkreten Eingaben. Achte besonders auf Versicherungssumme, Betriebsadresse, Tierart und Rollen.
+2. Prüfe rechts unter „Werte“ die konkreten Eingaben. Achte besonders auf Versicherungssumme, Betriebsadresse, Tierart und Rollen. Der ausgewählte Block bleibt beim Bearbeiten eines Feldes und beim Wechsel zwischen den Detailtabs ausgewählt; du kannst seine Angaben nacheinander prüfen, ohne ihn erneut anzuklicken.
 3. Öffne „Wissen“, um die verknüpften Regeln und fachlichen Quellen zu lesen.
 4. Prüfe bei einem zusammengesetzten Block die enthaltenen Schritte. Werte einer Verwendung dürfen vom gemeinsamen Baustein abweichen.
 5. Prüfe die verbundenen Schritte der Startkette. Wenn du Blöcke aus der Scratch-Werkzeugleiste ziehst, verbinde sie mit dieser Kette. Lose abgelegte Blöcke gehören nicht zum ausführbaren Ablauf. Die Bildschirmposition allein legt keine Reihenfolge fest.
