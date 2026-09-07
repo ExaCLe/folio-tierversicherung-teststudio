@@ -81,6 +81,10 @@ Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebe
 
 Ein KI-Fehler bleibt sichtbar und erzeugt keinen vorgetäuschten erfolgreichen Entwurf. Ein bereits gespeicherter Testfall kann auch ohne neuen fachlichen KI-Auftrag untersucht werden. Unter „Gespeicherte Testfälle“ sind „Kuh mit hoher Versicherungssumme“ und „Police als Sachbearbeiter drucken“ vorbereitet.
 
+Auf der Startseite findest du unter „Bisherige Agentenaufträge“ auch frühere Aufträge. Der Dialog nennt den zugehörigen Testfall und die Auftragsrevision. „Entwurf ansehen“ öffnet diesen Testfall. Liegt inzwischen eine neuere gespeicherte Revision vor, wird der Unterschied angezeigt. Eigene ungespeicherte Änderungen bleiben im geöffneten Entwurf erhalten.
+
+Die Leiste „Aktueller Testfall“ beziehungsweise „Zuletzt bearbeitet“ nennt Titel und Revision. Über „Testfall weiterbearbeiten“ kehrst du aus der Blockbibliothek, den Ausführungen oder einer anderen Studioseite zum Editor zurück. Auch die Zurück- und Vorwärtstasten des Browsers öffnen den Testfall, der zur Adresse gehört. Ungespeicherte Änderungen werden beim Wechsel und beim erneuten Laden im selben Browser-Tab wiederhergestellt. „Speichern“ sichert sie dauerhaft; „Verwerfen“ stellt den gespeicherten Stand wieder her.
+
 ## 6. Die Scratch-Blöcke fachlich prüfen
 
 Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein automatischer Vertragsabschluss würde seine Anforderung verändern. Der zweite Test bereitet dagegen einen vollständigen Standardvertrag vor und wechselt für Ausgabe und Druck zum Sachbearbeiter.
@@ -89,10 +93,29 @@ Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein autom
 2. Prüfe rechts unter „Werte“ die konkreten Eingaben. Achte besonders auf Versicherungssumme, Betriebsadresse, Tierart und Rollen.
 3. Öffne „Wissen“, um die verknüpften Regeln und fachlichen Quellen zu lesen.
 4. Prüfe bei einem zusammengesetzten Block die enthaltenen Schritte. Werte einer Verwendung dürfen vom gemeinsamen Baustein abweichen.
-5. Verbinde neue Blöcke mit der Startkette. Lose abgelegte Blöcke gehören nicht zum ausführbaren Ablauf. Die Bildschirmposition allein legt keine Reihenfolge fest.
+5. Prüfe die verbundenen Schritte der Startkette. Wenn du Blöcke aus der Scratch-Werkzeugleiste ziehst, verbinde sie mit dieser Kette. Lose abgelegte Blöcke gehören nicht zum ausführbaren Ablauf. Die Bildschirmposition allein legt keine Reihenfolge fest.
 6. Speichere vorgenommene Änderungen und wähle anschließend „Fachlich freigeben“, wenn der Ablauf zur Anforderung passt.
 
 Eine fachliche Änderung macht die frühere Freigabe ungültig. Der aktualisierte Stand braucht eine neue Prüfung. Die Freigabe bezieht sich auf den konkreten fachlichen Stand und seine Wissensgrundlagen.
+
+### Vorhandene und eigene Blöcke ergänzen
+
+Direkt unter der Scratch-Arbeitsfläche und der Ablaufliste stehen zwei Aktionen:
+
+1. Wähle die „Einfügestelle“. Standardmäßig wird am Ende des Ablaufs ergänzt. Wenn ein zusammengesetzter Block ausgewählt ist, kannst du stattdessen innerhalb dieses Blocks ergänzen.
+2. „Vorhandenen Block hinzufügen“ öffnet die Suche. Suche nach Namen, fachlicher Bedeutung oder Kategorie und wähle den gewünschten Block samt Version. Er wird unmittelbar an der gewählten Stelle in den Ablauf eingefügt und ausgewählt.
+3. Wenn die Fähigkeit fehlt, öffne „Neuen Block definieren und hinzufügen“. Dafür muss noch kein Block im Testfall vorhanden sein. Beschreibe Name, fachliche Bedeutung und Blockart.
+4. Der „Fachliche Schlüssel“ wird aus dem Namen vorgeschlagen. Er dient der internen Zuordnung und kann bei Bedarf angepasst werden. Du musst dafür keinen eigenen technischen Bezeichner erfinden.
+5. Über „Eingabe ergänzen“ legst du typisierte Felder an, zum Beispiel einen „Geldbetrag“, eine „Zahl“ oder eine „Auswahl“. Ergänze passende Bezeichnungen, gegebenenfalls Pflichtangaben und Standardwerte.
+6. „Definieren und zum Ablauf hinzufügen“ speichert die Definition in der Bibliothek und fügt eine Verwendung an der gewählten Stelle ein. Prüfe deren Werte und speichere den Testfall.
+
+Fehlt die technische Bindung, zeigen Dialog und Editor dies an. Du kannst die Fähigkeit fachlich beschreiben und prüfen, bevor sie technisch ausgeführt werden kann.
+
+### Ergebnisse früherer Schritte erkennen
+
+Verwendet ein Block einen zuvor angelegten Kunden, Betrieb, ein Tier oder ein anderes Ergebnis, zeigen die Blockdetails die Ergebnisart, den Namen und den erzeugenden Schritt. „Quelle im Ablauf zeigen“ springt zu diesem Schritt. In der Ablaufliste wird die betreffende Zeile ausgewählt; die Scratch-Ansicht zeigt den Quellblock auch dann, wenn sein Baustein zuvor eingeklappt war.
+
+Über die Auswahl im Referenzfeld kannst du ein anderes passendes Ergebnis aus einem früheren Schritt wählen. Noch fehlende, erst später erzeugte oder in diesem Ablaufbereich nicht verfügbare Ergebnisse werden ausdrücklich angezeigt. „Technischen Verweis anzeigen“ öffnet bei Bedarf die gespeicherte Kennung. Der erzeugende Block nennt unter „Ergebnisse dieses Schritts“ seine Ausgaben.
 
 ## 7. Eine lokale Ausnahme formulieren
 
@@ -114,6 +137,8 @@ Nach fachlicher Freigabe erscheint „Technik & Probelauf“. Die technische Pha
 4. Prüfe jeden Schrittnachweis, Screenshot und die zugehörigen Objektkennungen.
 5. Öffne den erzeugten Portalvorgang und kontrolliere das fachliche Ergebnis. Beim Direktionsbeispiel ist das eine offene Anfrage; beim Policenbeispiel eine neue Dokumentversion mit passendem Druckauftrag.
 6. Prüfe das Laufmanifest und bei Bedarf den Playwright-Trace. Sie dokumentieren die ausgeführte Revision und die verwendeten Bindungen.
+
+Die Laufansicht nennt den Testfall und die tatsächlich ausgeführte Revision. „Testfall öffnen“ führt zum bearbeitbaren Testfall; „Testfall weiterbearbeiten“ in der oberen Leiste führt zum zuletzt bearbeiteten Entwurf zurück. Die Laufnachweise bleiben bei ihrer historischen Revision.
 
 Wenn freigegebener Ablauf und passende Technik bereits vorliegen, erlaubt „Mit vorhandener Technik ausführen“ einen weiteren Browserlauf. Jeder Lauf erstellt eigene fiktive Portalobjekte und behält seine Nachweise.
 

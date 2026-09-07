@@ -2,12 +2,13 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Scratch from 'scratch-blocks';
 import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingScenarioLayout, TestingValue } from '../../shared/testing';
 import { createTestingInstance, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
-import { findDefinition, formatGermanNumber, kindLabels, parseGermanNumber } from './model';
+import { buildReferenceIndex, describeReference, type ReferenceIndex } from './references';
+import { findDefinition, flattenBlocks, formatGermanNumber, kindLabels, parseGermanNumber } from './model';
 
 type ScratchState = Scratch.serialization.blocks.State;
-type BlockMetadata = { instance: TestingBlockInstance; body?: TestingBlockInstance[]; path: string };
+type BlockMetadata = { instance: TestingBlockInstance; body?: TestingBlockInstance[]; path: string; displayValues?: Record<string, string> };
 export interface ScratchWorkspaceHandle { zoom: (direction: number) => void; center: () => void; undo: () => void; redo: () => void; select: (path: string) => void }
-interface Props { blocks: TestingBlockInstance[]; catalog: TestingCatalog; layout?: TestingScenarioLayout; selected?: string; readOnly?: boolean; onChange: (blocks: TestingBlockInstance[]) => void; onSelect: (path: string | undefined) => void; onLayout: (layout: Partial<TestingScenarioLayout>) => void }
+interface Props { blocks: TestingBlockInstance[]; catalog: TestingCatalog; layout?: TestingScenarioLayout; parameters?: Record<string, TestingValue>; selected?: string; readOnly?: boolean; onChange: (blocks: TestingBlockInstance[]) => void; onSelect: (path: string | undefined) => void; onLayout: (layout: Partial<TestingScenarioLayout>) => void }
 const colours = { action: '#398855', assertion: '#3e80ba', workflow: '#208e86', context: '#bb8328' };
 const definitionForType = new Map<string, TestingBlockDefinition>();
 function typeFor(definition: { id: string; version: string }) { return `folio_${Array.from(`${definition.id}@${definition.version}`).map(char => char.codePointAt(0)!.toString(16)).join('_')}`; }
@@ -34,6 +35,7 @@ function registerDefinitions(catalog: TestingCatalog) {
           // Parameter and reference expressions remain intact on the canvas.
           // The inspector provides type-specific controls for their resolved values.
           const field = new Scratch.FieldTextInput(displayValue(input.default));
+          if (input.type.endsWith('-ref')) { field.setEnabled(false); field.setTooltip('Früheres Ergebnis in den Blockdetails auswählen.'); }
           row.appendField(field, `VALUE_${input.key}`);
         }
         if (definition.kind === 'workflow' || definition.kind === 'context') this.appendStatementInput('BODY');
@@ -48,25 +50,35 @@ function registerDefinitions(catalog: TestingCatalog) {
   }
 }
 
-function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>()): ScratchState {
+function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex): ScratchState {
   const definition = findDefinition(catalog, block);
   const path = parent ? `${parent}/${block.id}` : block.id;
   if (!definition) throw new Error(`Der Block ${block.definition.id} in Version ${block.definition.version} fehlt im Katalog.`);
   const childBlocks = block.children ?? definition.body;
   const hasCycle = seen.has(testingVersionKey(definition));
+  const displayValues = Object.fromEntries(visibleInputs(definition).map(input => {
+    const value = block.inputs[input.key] ?? input.default;
+    const resolved = references?.inputs.get(path)?.[input.key] ?? value;
+    if (references && (input.type.endsWith('-ref') || isTestingReference(resolved))) {
+      const description = describeReference(references, path, resolved, input.type);
+      return [input.key, description.source ? `${description.source.outputLabel} „${description.source.name}“ · Schritt ${description.source.step}` : description.label];
+    }
+    return [input.key, displayValue(value)];
+  }));
   const state: ScratchState = {
     type: typeFor(block.definition), id: path,
-    data: JSON.stringify({ instance: block, body: !block.children ? definition.body : undefined, path } satisfies BlockMetadata),
-    fields: Object.fromEntries(visibleInputs(definition).map(input => [`VALUE_${input.key}`, displayValue(block.inputs[input.key] ?? input.default)])),
+    data: JSON.stringify({ instance: block, body: !block.children ? definition.body : undefined, path, displayValues } satisfies BlockMetadata),
+    fields: Object.fromEntries(visibleInputs(definition).map(input => [`VALUE_${input.key}`, displayValues[input.key]])),
     ...(depth > 0 && definition.kind === 'workflow' ? { collapsed: true } : {}),
   };
   if (childBlocks?.length && !hasCycle && depth < 12) {
-    state.inputs = { BODY: { block: chainState(childBlocks, catalog, path, depth + 1, new Set([...seen, testingVersionKey(definition)])) } };
+    state.inputs = { BODY: { block: chainState(childBlocks, catalog, path, depth + 1, new Set([...seen, testingVersionKey(definition)]), references) } };
   }
   return state;
 }
-function chainState(blocks: TestingBlockInstance[], catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>()): ScratchState {
-  const states = blocks.map(block => blockState(block, catalog, parent, depth, seen));
+function chainState(blocks: TestingBlockInstance[], catalog: TestingCatalog, parent = '', depth = 0, seen = new Set<string>(), references?: ReferenceIndex): ScratchState {
+  references ??= buildReferenceIndex(flattenBlocks(blocks, catalog));
+  const states = blocks.map(block => blockState(block, catalog, parent, depth, seen, references));
   for (let index = states.length - 2; index >= 0; index--) states[index].next = { block: states[index + 1] };
   return states[0];
 }
@@ -84,7 +96,7 @@ function readBlock(block: Scratch.Block): TestingBlockInstance | undefined {
   for (const input of visibleInputs(definition)) {
     const raw = String(block.getFieldValue(`VALUE_${input.key}`) ?? '');
     const original = instance.inputs[input.key] ?? input.default;
-    if (raw === displayValue(original)) continue;
+    if (input.type.endsWith('-ref') || raw === metadata.displayValues?.[input.key] || raw === displayValue(original)) continue;
     if (raw.startsWith('↗ ')) instance.inputs[input.key] = { ref: raw.slice(2), type: input.type };
     else if (raw.startsWith('$')) instance.inputs[input.key] = { param: raw.slice(1) };
     else if (input.type === 'number' || input.type === 'money') instance.inputs[input.key] = parseGermanNumber(raw) ?? raw;
@@ -166,7 +178,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
   const applying = useRef(false);
   const lastBlocks = useRef('');
   const catalogueKey = props.catalog.definitions.map(definition => `${testingVersionKey(definition)}:${JSON.stringify(definition.inputs)}`).join('|');
-  useImperativeHandle(ref, () => ({ zoom: direction => workspace.current?.zoomCenter(direction), center: () => workspace.current?.zoomToFit(), undo: () => workspace.current?.undo(false), redo: () => workspace.current?.undo(true), select: path => { const block = workspace.current?.getAllBlocks(false).find(item => canonicalPath(item) === path); block?.select(); if (block) workspace.current?.centerOnBlock(block.id); } }), []);
+  useImperativeHandle(ref, () => ({ zoom: direction => workspace.current?.zoomCenter(direction), center: () => workspace.current?.zoomToFit(), undo: () => workspace.current?.undo(false), redo: () => workspace.current?.undo(true), select: path => { const block = workspace.current?.getAllBlocks(false).find(item => canonicalPath(item) === path); if (block) { for (let parent = block.getSurroundParent(); parent; parent = parent.getSurroundParent()) parent.setCollapsed(false); block.select(); workspace.current?.centerOnBlock(block.id); } } }), []);
   useEffect(() => {
     if (!element.current) return;
     registerDefinitions(current.current.catalog);
@@ -211,6 +223,25 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
         try { normaliseCreatedBlocks(ws, (event as Scratch.Events.BlockCreate).ids ?? []); } finally { Scratch.Events.enable(); }
       }
       const next = readChain(ws.getBlockById('__folio_start')?.getNextBlock() ?? null);
+      const referenceIndex = buildReferenceIndex(flattenBlocks(next, current.current.catalog), current.current.parameters);
+      Scratch.Events.disable();
+      try {
+        for (const canvasBlock of ws.getAllBlocks(false)) {
+          const definition = definitionForType.get(canvasBlock.type);
+          if (!definition || !canvasBlock.data) continue;
+          const metadata = JSON.parse(canvasBlock.data) as BlockMetadata;
+          const path = canonicalPath(canvasBlock);
+          for (const input of visibleInputs(definition)) {
+            const value = referenceIndex.inputs.get(path)?.[input.key];
+            if (!input.type.endsWith('-ref') && !isTestingReference(value)) continue;
+            const description = describeReference(referenceIndex, path, value, input.type);
+            const label = description.source ? `${description.source.outputLabel} „${description.source.name}“ · Schritt ${description.source.step}` : description.label;
+            metadata.displayValues = { ...metadata.displayValues, [input.key]: label };
+            canvasBlock.setFieldValue(label, `VALUE_${input.key}`);
+          }
+          canvasBlock.data = JSON.stringify(metadata);
+        }
+      } finally { Scratch.Events.enable(); }
       const json = JSON.stringify(next);
       if (json !== lastBlocks.current) { lastBlocks.current = json; current.current.onChange(next); }
       const selected = Scratch.getSelected();
@@ -225,7 +256,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       Scratch.Events.disable();
       try {
         const blocks = current.current.blocks;
-        const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(blocks.length ? { next: { block: chainState(blocks, current.current.catalog) } } : {}) };
+        const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(blocks.length ? { next: { block: chainState(blocks, current.current.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(blocks, current.current.catalog), current.current.parameters)) } } : {}) };
         const parked = parkedStates(current.current.layout, current.current.catalog);
         Scratch.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [state, ...parked] } }, ws);
         for (const id of current.current.layout?.collapsed ?? []) ws.getBlockById(id)?.setCollapsed(true);
@@ -244,7 +275,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
     Scratch.Events.disable();
     try {
       const oldScroll = { x: ws.scrollX, y: ws.scrollY };
-      const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(props.blocks.length ? { next: { block: chainState(props.blocks, props.catalog) } } : {}) };
+      const state: ScratchState = { type: 'folio_start', id: '__folio_start', x: 36, y: 30, ...(props.blocks.length ? { next: { block: chainState(props.blocks, props.catalog, '', 0, new Set(), buildReferenceIndex(flattenBlocks(props.blocks, props.catalog), props.parameters)) } } : {}) };
       const parked = parkedStates(props.layout, props.catalog);
       Scratch.serialization.workspaces.load({ blocks: { languageVersion: 0, blocks: [state, ...parked] } }, ws);
       for (const id of props.layout?.collapsed ?? []) ws.getBlockById(id)?.setCollapsed(true);
