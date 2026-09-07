@@ -12,6 +12,7 @@ import { invokeCodex, AGENT_ARTIFACTS_ROOT, recoverCodexJobProcesses } from './c
 import { agentContext, businessPrompt, duplicatePrompt, reusePrompt, technicalPrompt } from './prompts';
 import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeDuplicates, decodeReuse, decodeTechnicalPlan, DUPLICATES_SCHEMA, REUSE_SCHEMA, TECHNICAL_SCHEMA, reuseSchemaFor, duplicateSchemaFor } from './schemas';
 import { planBusinessWithCodex } from './business';
+import { duplicateReviewContext } from './duplicate-context';
 import { planScenarioEdit } from './flow-edit';
 import { getTestingAgentSettings, resolveAgentConfiguration, withAgentConfiguration } from './settings';
 import { planTechnicalWithCodex } from './technical';
@@ -188,8 +189,8 @@ export function startTechnicalJob(input: { scenarioId: string; revision: number;
     const files = agentContext(catalog, compiled, undefined, failedRun);
     status(job.id, 'Technische Verdrahtung und eine unabhängige Dublettenprüfung starten parallel.');
     const duplicate = launch('duplicates', input.model, 'Unabhängige Dublettenprüfung für die freigegebene Fachfassung.', async (duplicateJob, duplicateSignal) => {
-      const { parsed } = await reviewWithCodex({ id: duplicateJob.id, model: input.model, prompt: duplicatePrompt(), schema: duplicateSchemaFor(compiled),
-        files: { ...files, 'pruefgegenstaende.json': JSON.stringify(compiled.definitions.filter(item => item.origin !== 'seed'), null, 2) }, signal: duplicateSignal,
+      const { parsed } = await reviewWithCodex({ id: duplicateJob.id, model: input.model, prompt: duplicatePrompt(), schema: duplicateSchemaFor(compiled, catalog),
+        files: { ...files, ...duplicateReviewContext(compiled, catalog) }, signal: duplicateSignal,
         label: 'Dublettenprüfung', validate: value => validateDuplicateReview(value, compiled, catalog), onEvent: event => { addEvent(duplicateJob.id, event); if (event.kind === 'status') status(job.id, `Dublettenprüfung: ${event.message}`); } });
       assertFresh(scenario, compiled.fingerprint); return parsed;
     }, scenario, compiled.fingerprint);

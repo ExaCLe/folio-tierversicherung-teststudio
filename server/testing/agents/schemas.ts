@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import type { TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCompiledScenario, TestingInput, TestingKnowledgeDocument, TestingTechnicalBinding } from '../../../shared/testing';
+import type { TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingInput, TestingKnowledgeDocument, TestingTechnicalBinding } from '../../../shared/testing';
+
+import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplicate-context';
 
 type Schema = Record<string, any>;
 const identifier = { type: 'string', pattern: '^[a-zA-Z0-9_.-]+$', minLength: 1, maxLength: 140 };
@@ -44,17 +46,26 @@ export function reuseSchemaFor(compiled: TestingCompiledScenario) {
   else parameters.maxItems = 0;
   return schema;
 }
-export function duplicateSchemaFor(compiled: TestingCompiledScenario) {
-  const schema = cloneSchemaTree(DUPLICATES_SCHEMA), candidates = compiled.definitions.filter(item => item.origin !== 'seed');
-  if (candidates.length) {
-    const references = candidates.map(item => object({
-      id: { type: 'string', enum: [item.id], description: 'Exakte Definitions-ID des Prüfgegenstands, nicht seine Versionsnummer.' },
-      version: { type: 'string', enum: [item.version], description: 'Zur Definitions-ID gehörende freigegebene Version.' },
-    }));
-    // Keep each ID paired with its actual version, rather than permitting a
-    // cross-product of IDs and versions from unrelated review subjects.
-    schema.properties.decisions.items.properties.proposed = references.length === 1 ? references[0] : { anyOf: references };
-  } else schema.properties.decisions.maxItems = 0;
+export function duplicateSchemaFor(compiled: TestingCompiledScenario, catalog: TestingCatalog) {
+  const schema = cloneSchemaTree(DUPLICATES_SCHEMA), subjects = duplicateReviewSubjects(compiled);
+  const exactRef = (item: { id:string;version:string }) => object({
+    id: { type: 'string', enum: [item.id], description: 'Exakte Definitions-ID, nicht die Versionsnummer.' },
+    version: { type: 'string', enum: [item.version], description: 'Zur ID gehörende gespeicherte Version.' },
+  });
+  if (!subjects.length) { schema.properties.decisions.maxItems = 0; return schema; }
+  const branches = subjects.flatMap(subject => {
+    const decision = cloneSchemaTree(DUPLICATES_SCHEMA.properties.decisions.items);
+    decision.properties.proposed = exactRef(subject);
+    const independent = cloneSchemaTree(decision);
+    independent.properties.decision = { type: 'string', enum: ['new'], description: 'Keine passende ANDERE Definition gefunden; auch eine bereits gespeicherte eigene Version darf so beibehalten werden.' };
+    independent.properties.chosen = { type: 'null' };
+    const comparisons = duplicateComparisonCandidates(subject, catalog).map(exactRef);
+    if (!comparisons.length) return [independent];
+    decision.properties.decision = { type: 'string', enum: ['reuse', 'extend'] };
+    decision.properties.chosen = comparisons.length === 1 ? comparisons[0] : { anyOf: comparisons };
+    return [independent, decision];
+  });
+  schema.properties.decisions.items = branches.length === 1 ? branches[0] : { anyOf: branches };
   return schema;
 }
 

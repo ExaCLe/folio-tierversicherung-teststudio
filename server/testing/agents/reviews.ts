@@ -1,6 +1,7 @@
 import type { TestingAgentEvent, TestingCatalog, TestingCompiledScenario, TestingModel, TestingScenario } from '../../../shared/testing';
 import { invokeCodex } from './cli';
 import { decodeDuplicates, decodeReuse } from './schemas';
+import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplicate-context';
 
 /** A rejected answer is returned to the same real model; no local answer is substituted. */
 export async function reviewWithCodex<T>(input: { id: string; model: TestingModel; prompt: string; schema: Record<string, unknown>;
@@ -23,17 +24,24 @@ export async function reviewWithCodex<T>(input: { id: string; model: TestingMode
 
 export function validateDuplicateReview(raw: unknown, compiled: TestingCompiledScenario, catalog: TestingCatalog) {
   const parsed = decodeDuplicates(raw);
-  const candidates = compiled.definitions.filter(item => item.origin !== 'seed');
-  const keys = new Set<string>();
-  for (const decision of parsed.decisions) {
-    const key = `${decision.proposed.id}@${decision.proposed.version}`;
-    if (!candidates.some(item => item.id === decision.proposed.id && item.version === decision.proposed.version)) throw new Error(`Die vorgeschlagene Definition ${key} wird in diesem freigegebenen Testfall nicht als neue menschliche oder agentische Definition verwendet. Erlaubte Prüfgegenstände: ${candidates.map(item => `${item.id}@${item.version}`).join(', ') || 'keine; decisions muss [] sein'}. Andere Katalogdefinitionen dienen nur als Vergleichskandidaten.`);
-    if (keys.has(key)) throw new Error(`Die Definition ${key} wurde mehrfach beurteilt.`); keys.add(key);
-    if (decision.decision === 'new' && decision.chosen) throw new Error(`Eine neue Fähigkeit ${key} darf keine chosen-Definition nennen.`);
-    if (decision.decision !== 'new' && !decision.chosen) throw new Error(`Die Entscheidung ${decision.decision} für ${key} braucht eine existierende chosen-Definition.`);
-    if (decision.chosen && (!catalog.definitions.some(item => item.id === decision.chosen!.id && item.version === decision.chosen!.version) || `${decision.chosen.id}@${decision.chosen.version}` === key)) throw new Error(`Der Vergleichsblock für ${key} muss eine andere vorhandene Definition sein.`);
+  const candidates = duplicateReviewSubjects(compiled), keys = new Set<string>(), issues:string[]=[];
+  for (const [index,decision] of parsed.decisions.entries()) {
+    const key = `${decision.proposed.id}@${decision.proposed.version}`, location = `decisions[${index}] (${key})`;
+    const subject = candidates.find(item => item.id === decision.proposed.id && item.version === decision.proposed.version);
+    if (!subject) issues.push(`${location}: Dieser Block gehört nicht zu den verwendeten eigenen Definitionen. Erlaubte Prüfgegenstände: ${candidates.map(item => `${item.id}@${item.version}`).join(', ') || 'keine; decisions muss [] sein'}. Andere Katalogdefinitionen dienen nur als Vergleichskandidaten.`);
+    if (keys.has(key)) issues.push(`${location}: Die Definition wurde mehrfach beurteilt. Prüfe jeden Prüfgegenstand genau einmal.`);
+    keys.add(key);
+    if (decision.decision === 'new' && decision.chosen) issues.push(`${location}: new bedeutet keine passende andere Definition; chosen muss null sein.`);
+    if (decision.decision !== 'new' && !decision.chosen) issues.push(`${location}: ${decision.decision} braucht ein anderes vorhandenes chosen-Paar aus vergleichskandidaten.json.`);
+    if (decision.chosen) {
+      const chosenKey = `${decision.chosen.id}@${decision.chosen.version}`;
+      if (chosenKey === key) issues.push(`${location}: Der Vergleichsblock ist der Prüfgegenstand selbst. Selbstvergleiche sind keine Dubletten. Vergleiche mit den anderen Kandidaten aus vergleichskandidaten.json. Falls keine passende ANDERE Definition existiert, liefere decision:"new", chosen:null mit fachlicher Begründung, auch wenn die eigene Version bereits im Katalog steht.`);
+      else if (!duplicateComparisonCandidates(decision.proposed, catalog).some(item => item.id === decision.chosen!.id && item.version === decision.chosen!.version)) issues.push(`${location}: Der Vergleichsblock ${chosenKey} ist nicht vorhanden. Wähle nur ein vollständiges ID-Versionspaar aus vergleichskandidaten.json.`);
+    }
   }
-  for (const candidate of candidates) if (!keys.has(`${candidate.id}@${candidate.version}`)) throw new Error(`Die verwendete neue Definition ${candidate.id}@${candidate.version} fehlt in der unabhängigen Dublettenprüfung.`);
+  for (const candidate of candidates) if (!keys.has(`${candidate.id}@${candidate.version}`)) issues.push(`Die verwendete eigene Definition ${candidate.id}@${candidate.version} fehlt in der unabhängigen Dublettenprüfung.`);
+  if (issues.length) throw new Error(`Die Dublettenprüfung enthält ${issues.length} Vertragsfehler. Korrigiere alle folgenden Entscheidungen gemeinsam:\n${issues.map(issue=>`- ${issue}`).join('\n')}`);
+
   return parsed;
 }
 

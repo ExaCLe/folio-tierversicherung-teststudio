@@ -119,6 +119,8 @@ Wenn eine Blockdefinition korrigiert wurde, zeigt der Inspector die verwendete B
 
 Bei einem korrigierten Eingabefeld prüft das Studio dessen aktuelle Definition gegen das tatsächlich ausgewählte Ergebnis. Eine alte gespeicherte Typangabe allein macht eine passende Auswahl nicht ungültig. Ist weiterhin ein Vertrag ausgewählt, obwohl nun ein Versicherungsvorschlag benötigt wird, bleibt der Hinweis bestehen, bis die passende Quelle gewählt wurde.
 
+Scheitert der KI-Vergleich mit vorhandenen Bausteinen, erklärt die Auftragsansicht, welcher Arbeitsschritt nicht abgeschlossen wurde. Interne Fehlermeldungen stehen unter den technischen Details. Über „Testfall öffnen und fortsetzen“ gelangst du zurück zum betroffenen Ablauf. Dort kannst du den Auftrag erneut starten. Ein Fehler in der KI-Antwort verlangt keine Änderung deiner fachlichen Blockdefinitionen.
+
 Die [Blockmethode](docs/block-method.md) erklärt die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
 
 ## Einen bestehenden Ablauf mit KI ändern

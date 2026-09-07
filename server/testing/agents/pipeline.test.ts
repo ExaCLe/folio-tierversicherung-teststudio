@@ -25,6 +25,7 @@ if (!settings.noResult) {
  if (schema.properties?.reuseBindings) { const compiled=JSON.parse(readFileSync('freigegeben.json','utf8')); output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',reuseBindings:compiled.bindings.filter(x=>x.status==='ready').map(x=>({id:x.id,revision:x.revision})),newBindings:[],unsupported:[]}; }
  if (schema.properties?.reuseBindings && existsSync('technischer-testplan.json')) { const fixture=JSON.parse(readFileSync('technischer-testplan.json','utf8')); output=process.cwd().endsWith('-korrektur') ? fixture.correction ?? fixture.initial : fixture.initial; }
  if (schema.properties?.decisions) output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',decisions:[],unresolved:[]};
+ if (schema.properties?.decisions && process.env.FOLIO_DUPLICATE_PLAN) { const fixture=JSON.parse(readFileSync(process.env.FOLIO_DUPLICATE_PLAN,'utf8')); output=process.cwd().endsWith('-korrektur') ? fixture.correction : fixture.initial; }
  writeFileSync(args[args.indexOf('-o')+1], JSON.stringify(output));
 }
 appendFileSync(process.env.FOLIO_CLI_TEST_LOG, JSON.stringify({type:'end',pid:process.pid,at:Date.now()})+'\\n');
@@ -248,5 +249,31 @@ test('Änderung während technischem und Dublettenauftrag verhindert jede Übern
   assert.equal(completed.status, 'failed'); assert.match(completed.error!, /geändert|veraltet/);
   assert.equal(JSON.stringify(getTestingCatalog().bindings), bindingsBefore);
   assert.equal(repository.listTestingRuns().length, 0);
+});
+test('Zwei Selbstvergleiche werden gemeinsam korrigiert; die echte Pipeline hält für fachliche Prüfung statt abzubrechen', async () => {
+  const catalog=getTestingCatalog(),base=catalog.definitions.find(item=>item.id==='pruefung.vorschlagsstatus')!;
+  const subjects=['fixture.freigabe','fixture.berechtigung'].map(id=>({...structuredClone(base),id,origin:'human' as const,name:`Synthetischer Prüfgegenstand ${id}`}));
+  for(const definition of subjects)repository.saveTestingDefinition(definition);
+  const source=repository.getTestingScenario('kuh-direktionsanfrage');
+  const scenario=repository.saveTestingScenario({...source,id:'doppelte-selbstvergleiche',blocks:[...source.blocks,...subjects.map((definition,index)=>({id:`pruefung-${index}`,definition:{id:definition.id,version:definition.version},inputs:{proposalId:{ref:'vorschlag'},expectedStatus:'Direktionsprüfung'}}))]},0);
+  repository.approveTestingScenario(scenario.id,scenario.revision);
+  const initial={explanation:'Synthetische falsche Selbstauswahl, kein Modellnachweis.',decisions:subjects.map(definition=>({proposed:{id:definition.id,version:definition.version},decision:'reuse',chosen:{id:definition.id,version:definition.version},reason:'Synthetischer Selbstvergleich',compatible:true})),unresolved:[]};
+  const correction={...initial,explanation:'Synthetische fachliche Überprüfung, noch keine automatische Übernahme.',decisions:[{...initial.decisions[0],decision:'extend',chosen:{id:base.id,version:base.version},compatible:false},{...initial.decisions[1],decision:'new',chosen:null,compatible:false}]};
+  process.env.FOLIO_DUPLICATE_PLAN=resolve(temporary,'duplicate-plan.json');await writeFile(process.env.FOLIO_DUPLICATE_PLAN,JSON.stringify({initial,correction}));
+  const beforeBindings=JSON.stringify(getTestingCatalog().bindings),beforeRuns=JSON.stringify(repository.listTestingRuns());
+  try {
+    const started=orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna'}),finished=await orchestrator.waitTestingJob(started.id);
+    assert.equal(finished.status,'completed',finished.error);
+    const result=finished.result as {needsBusinessReview:boolean;duplicateJobId:string;duplicateDecisions:unknown[];run?:unknown};
+    assert.equal(result.needsBusinessReview,true);assert.equal(result.run,undefined);assert.deepEqual(result.duplicateDecisions,correction.decisions);
+    const duplicate=orchestrator.getTestingJob(result.duplicateJobId);assert.equal(duplicate.status,'completed');
+    const directory=resolve(temporary,`agents/${duplicate.id}-korrektur`),diagnostic=await readFile(resolve(directory,'validierungsfehler.txt'),'utf8');
+    for(const text of ['decisions[0]','decisions[1]',...subjects.map(item=>item.id)])assert(diagnostic.includes(text),diagnostic);
+    assert.deepEqual(JSON.parse(await readFile(resolve(directory,'vorherige-antwort.json'),'utf8')),initial);
+    const comparisons=JSON.parse(await readFile(resolve(directory,'vergleichskandidaten.json'),'utf8'));
+    for(const row of comparisons)assert(row.candidates.every((candidate:any)=>candidate.id!==row.proposed.id||candidate.version!==row.proposed.version));
+    const first=JSON.parse(await readFile(resolve(temporary,`agents/${duplicate.id}/manifest.json`),'utf8')),retry=JSON.parse(await readFile(resolve(directory,'manifest.json'),'utf8'));assert.equal(first.model,retry.model);
+    assert.deepEqual(repository.getTestingScenario(scenario.id),scenario);assert.equal(JSON.stringify(getTestingCatalog().bindings),beforeBindings);assert.equal(JSON.stringify(repository.listTestingRuns()),beforeRuns);
+  } finally { delete process.env.FOLIO_DUPLICATE_PLAN; }
 });
 test.after(async () => { await rm(temporary, { recursive: true, force: true }); });

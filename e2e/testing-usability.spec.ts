@@ -381,3 +381,41 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   expect(compilation.steps.find((step: { path: string }) => step.path === 'park-kunde')?.inputs.name).toBe(parkedValues.name);
   await page.screenshot({ path: testInfo.outputPath('geparkte-eigene-werte-erhalten.png'), fullPage: true });
 });
+
+for (const phase of ['duplicates', 'technical'] as const) test(`Ein fehlgeschlagener Bausteinvergleich (${phase}) erklärt die Wiederaufnahme und erhält lokale Änderungen`, async ({ page, request }, testInfo) => {
+  const original = await fixture(request);
+  expect((await request.post(`/api/testing/scenarios/${original.id}/approve`, { data: { revision: original.revision } })).ok()).toBeTruthy();
+  // Historical error fixture with invented identifiers; no model call or imported customer data.
+  const rawError = `${phase === 'technical' ? 'Die unabhängige Dublettenprüfung ist fehlgeschlagen: ' : ''}Dublettenprüfung: Auch die KI-Korrektur verletzt den Vertrag: Der Vergleichsblock für qa.berechtigung@1.0.0 muss eine andere vorhandene Definition sein.`;
+  const job: TestingAgentJob = { id: `synthetic-failed-${randomUUID()}`, phase, status: 'failed', model: 'luna', prompt: 'Synthetischer fehlerhafter Bausteinvergleich.', scenarioId: original.id, scenarioRevision: original.revision, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), error: rawError, events: [{ id: randomUUID(), at: new Date().toISOString(), kind: 'error', message: rawError }] };
+  await page.route('**/api/testing/bootstrap', async route => { const upstream = await route.fetch(); const data = await upstream.json(); await route.fulfill({ json: { ...data, jobs: [job, ...data.jobs] } }); });
+  const submitted: unknown[] = [];
+  await page.route('**/api/testing/jobs/technical', async route => { submitted.push(route.request().postDataJSON()); await route.fulfill({ status: 202, json: { ...job, id: `synthetic-retry-${randomUUID()}`, phase: 'technical', status: 'completed', error: undefined, events: [], result: { needsBusinessReview: true, duplicateDecisions: [{ proposed: original.blocks[0].definition, chosen: { id: 'direktion.entscheiden', version: '1.0.0' }, decision: 'extend', compatible: false, reason: 'Der vorhandene Block muss fachlich erweitert werden.' }] } } }); });
+  await openOutline(page, original);
+  await page.getByLabel(/Versicherungssumme in EUR/).fill('17.654,32');
+  await page.getByRole('link', { name: 'Testfälle', exact: true }).click();
+  await page.reload();
+  await page.getByRole('region', { name: 'Bisherige Agentenaufträge', exact: true }).getByRole('button').filter({ hasText: original.title }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('alert')).toContainText('Die KI hat keinen gültigen Vergleich geliefert');
+  await expect(dialog.getByRole('alert')).toContainText('Dieses Ergebnis wurde nicht übernommen');
+  await expect(dialog.getByText(rawError, { exact: true })).not.toBeVisible();
+  await dialog.getByText('Technische Fehlerdetails anzeigen', { exact: true }).click();
+  await expect(dialog.locator('pre').filter({ hasText: rawError })).toBeVisible();
+  await dialog.getByText('Technische Fehlerdetails anzeigen', { exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('bausteinvergleich-verstaendlicher-fehler.png') });
+  await dialog.getByRole('button', { name: 'Testfall öffnen und fortsetzen', exact: true }).click();
+  await expectEditor(page, original);
+  await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
+  await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
+  expect(submitted).toEqual([]);
+  const current = await save(page, request, original.id);
+  await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toBeEnabled();
+  await page.getByLabel('Modell für KI-Aufträge', { exact: true }).selectOption('sol');
+  await page.getByRole('button', { name: 'Technik & Probelauf', exact: true }).click();
+  expect(submitted).toEqual([{ scenarioId: original.id, revision: current.revision, model: 'sol' }]);
+  await expect(page.getByRole('heading', { name: 'Vorhandene Fähigkeiten bewusst wiederverwenden', exact: true })).toBeVisible();
+  await expect(page.locator('.t-agent-failure')).toHaveCount(0);
+  await expect(page.locator('.t-duplicate-review')).toContainText('Die Definition muss fachlich überarbeitet werden');
+});
