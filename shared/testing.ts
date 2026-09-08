@@ -135,7 +135,22 @@ export interface TestingImpact {
   suggestedScenarioIds: string[];
 }
 export type TestingAgentPhase = 'business' | 'exploration' | 'technical' | 'duplicates' | 'reuse';
-export type TestingAgentStage = 'knowledge' | 'exploring' | 'planning' | 'duplicates' | 'wiring' | 'running' | 'reuse';
+export type TestingAgentStage = 'knowledge' | 'exploring' | 'planning' | 'validating' | 'duplicates' | 'wiring' | 'running' | 'reuse';
+export interface TestingAgentTermination {
+  cause:'user_cancelled'|'parent_cancelled'|'time_limit'|'action_limit'|'no_progress'|'server_restart'|'output_limit'|'interrupted';
+  message:string; at:string; limitMs?:number;
+}
+export interface TestingAgentProgress {
+  stage:'knowledge'|'exploring'; status:'waiting-model'|'acting'|'observed'|'finished';
+  round:number; observationCount:number; actionLimit:number; startedAt:string; deadlineAt:string; summary:string;
+  questions?:TestingExplorationQuestion[];
+}
+export interface TestingExplorationQuestion {
+  id:string; text:string; requiresBrowser:boolean; status:'open'|'answered'; answer:string; evidenceIds:string[]; knowledgeIds:string[];
+}
+export interface TestingAgentWorkStage {
+  stage:TestingAgentStage; status:'running'|'completed'|'skipped'|'failed'; startedAt?:string; finishedAt?:string; summary?:string;
+}
 export interface TestingScenarioLifecycle {
   scenarioId:string; scenarioRevision:number; fingerprint:string;
   phase:'request'|'exploration'|'review'|'technical'|'result'; status:'idle'|'running'|'attention'|'ready'|'failed'|'cancelled';
@@ -149,6 +164,7 @@ export interface TestingAgentJob {
   startedAt: string; finishedAt?: string; events: TestingAgentEvent[]; error?: string;
   result?: unknown; artifactDirectory?: string; agentConfig?: TestingAgentConfiguration;
   parentJobId?:string; childJobIds?:string[]; stage?:TestingAgentStage; runId?:string;
+  termination?:TestingAgentTermination; progress?:TestingAgentProgress; workStages?:TestingAgentWorkStage[];
 }
 export interface TestingStepResult {
   id: string; instanceId: string; path: string; label: string; status: 'running' | 'passed' | 'failed' | 'skipped';

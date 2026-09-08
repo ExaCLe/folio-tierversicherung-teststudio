@@ -1,5 +1,7 @@
-import type { TestingAgentJob, TestingBusinessDraft, TestingKnowledgeDocument } from '../../shared/testing';
+import type { TestingAgentJob, TestingExplorationQuestion, TestingBusinessDraft, TestingKnowledgeDocument } from '../../shared/testing';
 import { Notice } from './ui';
+import { ExplorationQuestions } from './ExplorationQuestions';
+import { explorationEvidenceLabel } from './explorationEvidence';
 export function AgentOutcome({ result }: { result: unknown }) {
   const parsed = result as { draft?: TestingBusinessDraft; plan?: { explanation?: string; unsupported?: string[] }; explanation?: string; openQuestions?: string[]; assumptions?: string[]; unsupported?: string[] };
   const value = parsed.draft ?? parsed.plan ?? parsed;
@@ -10,6 +12,6 @@ export function AgentOutcome({ result }: { result: unknown }) {
 export function ExplorationSummary({ jobs }: { jobs: TestingAgentJob[] }) {
   const job = jobs.find(item => item.phase === 'exploration' && item.status === 'completed');
   if (!job?.result) return null;
-  const result = job.result as { explored?: boolean; explanation?: string; openQuestions?: string[]; newKnowledge?: TestingKnowledgeDocument[]; evidence?: { id: string; action: string; path: string; screenshot?: string }[] };
-  return <section className="t-exploration-summary" aria-label="Erkundungsergebnis"><div><strong>{result.openQuestions?.length ? 'Das Wissen braucht noch eine Ergänzung' : result.explored ? 'Die Anwendung wurde untersucht' : 'Das vorhandene Wissen reicht für den Entwurf'}</strong><span>{result.newKnowledge?.length ?? 0} neue Wissensbelege · {result.evidence?.length ?? 0} Beobachtungen</span></div><details><summary>Erkenntnisse und Belege ansehen</summary><p>{result.explanation}</p>{result.newKnowledge?.map(doc => <article key={doc.id}><h4>{doc.title}</h4><p>{doc.summary}</p></article>)}{result.evidence?.map(item => <a className="t-exploration-evidence" key={item.id} href={item.screenshot} target="_blank" rel="noreferrer"><span>{item.action} · {item.path}</span>{item.screenshot && <img src={item.screenshot} alt={`Beobachtung: ${item.action}`} loading="lazy"/>}</a>)}</details></section>;
+  const result = job.result as { questions?: TestingExplorationQuestion[]; explored?: boolean; explanation?: string; openQuestions?: string[]; newKnowledge?: TestingKnowledgeDocument[]; evidence?: { id: string; action: string; path: string; screenshot?: string }[] };
+  return <section className="t-exploration-summary" aria-label="Erkundungsergebnis"><div><strong>{result.openQuestions?.length ? 'Das Wissen braucht noch eine Ergänzung' : result.explored ? 'Die Anwendung wurde untersucht' : 'Das vorhandene Wissen reicht für den Entwurf'}</strong><span>{result.newKnowledge?.length ?? 0} neue Wissensbelege · {result.evidence?.length ?? 0} Beobachtungen</span></div><ExplorationQuestions questions={result.questions} evidence={result.evidence}/><details><summary>Erkenntnisse und Belege ansehen</summary><p>{result.explanation}</p>{result.newKnowledge?.map(doc => <article key={doc.id}><h4>{doc.title}</h4><p>{doc.summary}</p></article>)}{result.evidence?.map((item, index) => <a className="t-exploration-evidence" key={item.id} href={item.screenshot} target="_blank" rel="noreferrer"><span>{explorationEvidenceLabel(item, index)}</span>{item.screenshot && <img src={item.screenshot} alt={explorationEvidenceLabel(item, index)} loading="lazy"/>}</a>)}</details></section>;
 }

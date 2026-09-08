@@ -20,6 +20,18 @@ Die Adresse des Testfalls, seine gespeicherte Revision und zugehörige Aufträge
 
 Ein beendeter KI-Aufruf ist kein bestandener Test. Die KI kann einen Vorschlag geliefert haben, der noch geprüft werden muss. Ebenso kann eine technische Planung eine fehlende Fähigkeit oder eine mögliche Wiederverwendung melden, ohne bereits einen Browserlauf auszuführen.
 
+## Fortschritt verstehen
+
+Beim ersten Entwurf arbeitet die KI der Reihe nach: vorhandenes Wissen prüfen, bei Bedarf die Anwendung erkunden und anschließend den Ablauf entwerfen. Der übergeordnete Auftrag verwaltet diese Schritte. Er zählt dabei nicht als zusätzlicher, parallel arbeitender Agent.
+
+In der technischen Vorbereitung können zwei Arbeiten gleichzeitig laufen: die Browseraktionen vorbereiten und die Bausteine mit bestehenden Definitionen vergleichen. Die Anzeige trennt diese Arbeitszweige und zeigt ihren jeweiligen Stand. Der Browserlauf folgt erst, wenn die dafür notwendigen Prüfungen abgeschlossen sind.
+
+Abgeschlossene Schritte und beobachtete Aktionen zeigen den Fortschritt. Sie sind keine Schätzung der verbleibenden Zeit. Die Erläuterungen enthalten öffentliche Statusmeldungen und Ergebnisse der einzelnen Schritte. Die Anzeige zählt protokollierte Werkzeugmeldungen im verfügbaren Verlauf; Browserbeobachtungen werden separat gezählt. Eine fehlende neue Modellmeldung bedeutet nicht automatisch, dass der Auftrag stehen geblieben ist.
+
+Für die Erkundung hält die KI ihre Prüffragen fest. Diese Liste bleibt über die einzelnen Modellaufrufe erhalten. So kann beispielsweise die Frage nach einer dritten Benutzerrolle nicht verschwinden, nachdem zwei andere Rollen geprüft wurden. Beantwortete Fragen verweisen auf ihre Belege; offene Fragen verhindern einen vollständigen Abschluss.
+
+Ein Zeitlimit, eine technische Unterbrechung und ein ausdrücklich angeforderter Abbruch sind unterschiedliche Ursachen. Die Anwendung darf einen technischen Abbruch nicht dem Menschen zuschreiben. Der gespeicherte Testfall bleibt auch nach einer Unterbrechung erhalten.
+
 ## Zustände und Nachweise
 
 | Zustand | Nächste Handlung |

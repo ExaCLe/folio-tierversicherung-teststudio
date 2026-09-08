@@ -6,6 +6,7 @@ import { basename, resolve } from 'node:path';
 import type { TestingAgentConfiguration, TestingAgentEvent, TestingModel } from '../../../shared/testing';
 
 import { DEFAULT_CODEX_MODELS, providerExecutable, resolveAgentConfiguration, validateExtraArgs } from './settings';
+import { AgentTerminationError, agentAbortError } from './termination';
 
 export const CODEX_MODELS = DEFAULT_CODEX_MODELS;
 export const AGENT_ARTIFACTS_ROOT = resolve(process.env.FOLIO_AGENT_ARTIFACTS_ROOT ?? '.local/testing/agents');
@@ -110,11 +111,11 @@ function claudeEventMessage(event: any): Pick<TestingAgentEvent, 'kind' | 'messa
 
 /** The CLI owns authentication. This adapter never reads or copies authentication files. */
 export async function invokeCodex(input: CodexInvocation): Promise<CodexResult> {
-  if (input.signal?.aborted) throw new Error('Agentenlauf wurde abgebrochen.');
+  if (input.signal?.aborted) throw agentAbortError(input.signal);
   const configured = { ...input, agentConfig: input.agentConfig ?? resolveAgentConfiguration(input.model) };
   await new Promise<void>((done, reject) => {
     const start = () => { input.signal?.removeEventListener('abort', cancel); activeCalls += 1; done(); };
-    const cancel = () => { const index = waitingCalls.indexOf(start); if (index >= 0) waitingCalls.splice(index, 1); reject(new Error('Agentenlauf wurde abgebrochen.')); };
+    const cancel = () => { const index = waitingCalls.indexOf(start); if (index >= 0) waitingCalls.splice(index, 1); reject(agentAbortError(input.signal)); };
     if (activeCalls < 2) start();
     else { waitingCalls.push(start); input.signal?.addEventListener('abort', cancel, { once: true }); input.onEvent?.({ id: randomUUID(), at: new Date().toISOString(), kind: 'status', message: 'Wartet auf einen der zwei lokalen Agentenplätze.' }); }
   });
@@ -125,7 +126,7 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   const configuration = input.agentConfig ?? resolveAgentConfiguration(input.model);
   const providerName = configuration.provider === 'claude' ? 'Claude Code' : 'Codex';
   if (!/^[a-zA-Z0-9_-]+$/.test(input.id)) throw new Error('Ungültige Agentenlauf-ID.');
-  if (input.signal?.aborted) throw new Error('Agentenlauf wurde abgebrochen.');
+  if (input.signal?.aborted) throw agentAbortError(input.signal);
   installHooks();
   const directory = resolve(AGENT_ARTIFACTS_ROOT, input.id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -163,15 +164,16 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       const message = claudeEventMessage(event); if (message && !(event.type === 'result' && resultError)) publish(message);
     } else { const message = eventMessage(event); if (message) publish(message); }
   };
-  if (input.signal?.aborted) throw new Error('Agentenlauf wurde vor dem CLI-Start abgebrochen.');
+  if (input.signal?.aborted) throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');
   await new Promise<void>((done, reject) => {
     const child = spawn(configuration.executable, args, { cwd: directory, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: { ...process.env } });
     processes.set(input.id, child);
     if (child.pid) writeFileSync(resolve(directory, 'process.json'), JSON.stringify({ pid: child.pid, ownerPid: process.pid, startedAt: new Date().toISOString(), provider: configuration.provider, executable: configuration.executable, ...(configuration.provider === 'claude' ? { sessionId } : {}) }), { mode: 0o600 });
-    let buffer = '', stderr = '', timedOut = false, cancelled = false, size = 0, overflow = false;
-    const cancel = () => { cancelled = true; killTree(child); };
+    let buffer = '', stderr = '', size = 0, overflow = false;
+    let stopped:AgentTerminationError|undefined;
+    const cancel = () => { stopped ??= agentAbortError(input.signal); killTree(child); };
     input.signal?.addEventListener('abort', cancel, { once: true });
-    const timer = setTimeout(() => { timedOut = true; killTree(child); }, codexTimeout());
+    const timer = setTimeout(() => { stopped ??= new AgentTerminationError('time_limit',`${providerName} hat das Zeitlimit von ${Math.round(codexTimeout() / 1000)} Sekunden überschritten.`,codexTimeout()); killTree(child); }, codexTimeout());
     child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       size += chunk.length;
@@ -191,9 +193,8 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       if (buffer.trim()) processLine(buffer);
       clearTimeout(timer); input.signal?.removeEventListener('abort', cancel); processes.delete(input.id);
       rmSync(resolve(directory, 'process.json'), { force: true });
-      if (cancelled) reject(new Error('Agentenlauf wurde vom Menschen abgebrochen.'));
-      else if (timedOut) reject(new Error(`${providerName} hat das Zeitlimit von ${Math.round(codexTimeout() / 1000)} Sekunden überschritten.`));
-      else if (overflow) reject(new Error(`${providerName} hat das zulässige Ausgabevolumen überschritten.`));
+      if (stopped) reject(stopped);
+      else if (overflow) reject(new AgentTerminationError('output_limit',`${providerName} hat das zulässige Ausgabevolumen überschritten.`));
       else if (code !== 0) reject(new Error(`${providerName} ist mit Fehlercode ${code ?? 'unbekannt'} beendet worden. ${resultError?.message || stderr.slice(-2500).trim() || 'Prüfen Sie die lokale Anmeldung und den Zugang zum gewählten Modell.'}`));
       else done();
     });

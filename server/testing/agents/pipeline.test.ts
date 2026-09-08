@@ -18,6 +18,7 @@ let settings = {}; try { settings = JSON.parse(input); } catch {}
 const started = Date.now();
 appendFileSync(process.env.FOLIO_CLI_TEST_LOG, JSON.stringify({type:'start',pid:process.pid,at:started,args})+'\\n');
 process.stdout.write(JSON.stringify({type:'thread.started'})+'\\n');
+if (process.env.FOLIO_DUPLICATE_DELAY && JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1],'utf8')).properties?.decisions) await new Promise(resolve=>setTimeout(resolve,Number(process.env.FOLIO_DUPLICATE_DELAY)));
 await new Promise(resolve => setTimeout(resolve, settings.delay ?? 150));
 if (!settings.noResult) {
  const schema = JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1], 'utf8'));
@@ -34,6 +35,7 @@ process.exit(settings.exitCode ?? 0);
 await chmod(executable, 0o700);
 process.env.FOLIO_CODEX_EXECUTABLE = executable;
 const { invokeCodex, redactCLIText } = await import('./cli');
+const { AgentTerminationError, agentTermination } = await import('./termination');
 const { getTestingCatalog } = await import('../catalog');
 const { createStarterBindings } = await import('../bindings/seed');
 const { validateTestingBinding } = await import('../bindings/validation');
@@ -74,6 +76,27 @@ test('Abbruch während der Kontextvorbereitung wird vor spawn erneut geprüft', 
   await assert.rejects(invokeCodex({ id: 'vor-spawn', model: 'sol', prompt: '{}', schema, files: { 'wissen.txt': 'Tierversicherung' }, signal: controller.signal,
     onEvent: event => { if (event.message.includes('wird als')) controller.abort(); } }), /vor dem CLI-Start abgebrochen/);
   const log = await readFile(process.env.FOLIO_CLI_TEST_LOG!, 'utf8'); assert(!log.includes('vor-spawn'));
+});
+test('Ein interner Budgetabbruch im laufenden CLI-Prozess bleibt Zeitlimit und behauptet keinen Nutzerabbruch',async()=>{
+  const controller=new AbortController(),reason=new AgentTerminationError('time_limit','Die Anwendungserkundung hat ihr Zeitlimit von 360 Sekunden erreicht.',360_000);
+  await assert.rejects(invokeCodex({id:'erkundungsbudget',model:'luna',prompt:'{"delay":3000}',schema,files:{},signal:controller.signal,onEvent:event=>{if(event.message==='Codex-Sitzung gestartet.')controller.abort(reason);}}),error=>{
+    assert.equal(error,reason);assert.equal(agentTermination(error)?.cause,'time_limit');assert.equal(agentTermination(error)?.limitMs,360_000);assert.doesNotMatch((error as Error).message,/Menschen|Nutzer/);return true;
+  });
+  await assert.rejects(readFile(resolve(temporary,'agents/erkundungsbudget/process.json')),/ENOENT/);
+  await assert.rejects(readFile(resolve(temporary,'agents/erkundungsbudget/result.json')),/ENOENT/);
+});
+test('Nur expliziter Nutzerabbruch wird als Nutzerabbruch bezeichnet; unbekanntes Signal bleibt neutral',async()=>{
+  for(const cause of ['user_cancelled','parent_cancelled','interrupted']as const){
+    const controller=new AbortController();const reason=cause==='interrupted'?undefined:new AgentTerminationError(cause,cause==='user_cancelled'?'Der Agentenlauf wurde vom Menschen abgebrochen.':'Der übergeordnete Auftrag wurde beendet.');
+    await assert.rejects(invokeCodex({id:`stopp-${cause}`,model:'luna',prompt:'{"delay":3000}',schema,files:{},signal:controller.signal,onEvent:event=>{if(event.message==='Codex-Sitzung gestartet.')controller.abort(reason);}}),error=>{
+      assert.equal(agentTermination(error)?.cause,cause);if(cause!=='user_cancelled')assert.doesNotMatch((error as Error).message,/Menschen|Nutzer/);return true;
+    });
+  }
+});
+test('Das interne CLI-Zeitlimit bleibt ein eigenständiger terminierter Fehler',async()=>{
+  const previous=process.env.FOLIO_CODEX_TIMEOUT_MS;process.env.FOLIO_CODEX_TIMEOUT_MS='5000';
+  try{await assert.rejects(call('cli-zeitlimit','{"delay":10000}'),error=>{assert.equal(agentTermination(error)?.cause,'time_limit');assert.equal(agentTermination(error)?.limitMs,5000);return true;});}
+  finally{if(previous===undefined)delete process.env.FOLIO_CODEX_TIMEOUT_MS;else process.env.FOLIO_CODEX_TIMEOUT_MS=previous;}
 });
 test('Ein alter Ergebnisstand wird bei leerer neuer CLI-Antwort nicht angenommen', async () => {
   await call('wiederholung');
@@ -260,9 +283,16 @@ test('Zwei Selbstvergleiche werden gemeinsam korrigiert; die echte Pipeline häl
   const initial={explanation:'Synthetische falsche Selbstauswahl, kein Modellnachweis.',decisions:subjects.map(definition=>({proposed:{id:definition.id,version:definition.version},decision:'reuse',chosen:{id:definition.id,version:definition.version},reason:'Synthetischer Selbstvergleich',compatible:true})),unresolved:[]};
   const correction={...initial,explanation:'Synthetische fachliche Überprüfung, noch keine automatische Übernahme.',decisions:[{...initial.decisions[0],decision:'extend',chosen:{id:base.id,version:base.version},compatible:false},{...initial.decisions[1],decision:'new',chosen:null,compatible:false}]};
   process.env.FOLIO_DUPLICATE_PLAN=resolve(temporary,'duplicate-plan.json');await writeFile(process.env.FOLIO_DUPLICATE_PLAN,JSON.stringify({initial,correction}));
+  process.env.FOLIO_DUPLICATE_DELAY='600';
   const beforeBindings=JSON.stringify(getTestingCatalog().bindings),beforeRuns=JSON.stringify(repository.listTestingRuns());
   try {
-    const started=orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna'}),finished=await orchestrator.waitTestingJob(started.id);
+    const started=orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna'});
+    const deadline=Date.now()+2500;
+    while(!orchestrator.getTestingJob(started.id).workStages?.some(stage=>stage.stage==='wiring'&&stage.status==='completed')&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+    const preparing=orchestrator.getTestingJob(started.id);
+    assert.equal(preparing.status,'running');assert.equal(preparing.workStages?.find(stage=>stage.stage==='wiring')?.status,'completed');
+    const waitingChild=orchestrator.getTestingJob(preparing.childJobIds![0]);assert.equal(waitingChild.status,'running');assert.equal(waitingChild.workStages?.find(stage=>stage.stage==='duplicates')?.status,'running');
+    const finished=await orchestrator.waitTestingJob(started.id);
     assert.equal(finished.status,'completed',finished.error);
     const result=finished.result as {needsBusinessReview:boolean;duplicateJobId:string;duplicateDecisions:unknown[];run?:unknown};
     assert.equal(result.needsBusinessReview,true);assert.equal(result.run,undefined);assert.deepEqual(result.duplicateDecisions,correction.decisions);
@@ -274,6 +304,6 @@ test('Zwei Selbstvergleiche werden gemeinsam korrigiert; die echte Pipeline häl
     for(const row of comparisons)assert(row.candidates.every((candidate:any)=>candidate.id!==row.proposed.id||candidate.version!==row.proposed.version));
     const first=JSON.parse(await readFile(resolve(temporary,`agents/${duplicate.id}/manifest.json`),'utf8')),retry=JSON.parse(await readFile(resolve(directory,'manifest.json'),'utf8'));assert.equal(first.model,retry.model);
     assert.deepEqual(repository.getTestingScenario(scenario.id),scenario);assert.equal(JSON.stringify(getTestingCatalog().bindings),beforeBindings);assert.equal(JSON.stringify(repository.listTestingRuns()),beforeRuns);
-  } finally { delete process.env.FOLIO_DUPLICATE_PLAN; }
+  } finally { delete process.env.FOLIO_DUPLICATE_PLAN;delete process.env.FOLIO_DUPLICATE_DELAY; }
 });
 test.after(async () => { await rm(temporary, { recursive: true, force: true }); });

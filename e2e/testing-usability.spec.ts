@@ -20,7 +20,7 @@ async function fixture(request: APIRequestContext, mutate?: (value: TestingScena
 async function expectEditor(page: Page, value: TestingScenario) {
   await expect(page).toHaveURL(new RegExp(`/testing/editor/${value.id}$`));
   await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue(value.title);
-  await expect(page.locator('.t-editor-title')).toContainText(`Revision ${value.revision}`);
+  await expect(page.locator('.t-workspace-context')).toContainText(`Revision ${value.revision}`);
 }
 async function openOutline(page: Page, value: TestingScenario) {
   await page.goto(`/testing/editor/${value.id}`);
@@ -268,7 +268,7 @@ test('Ein eigener Übersichtstab zeigt alle gespeicherten Testfälle und führt 
   for (const scenario of all) await expect(collection.locator('.t-saved-test').filter({ hasText: scenario.title }).first()).toBeVisible();
   await page.getByLabel('Testfälle durchsuchen', { exact: true }).fill(current.title);
   await expect(collection.locator('.t-saved-test')).toHaveCount(1);
-  await expect(collection.locator('.t-saved-test')).toContainText(`Revision ${current.revision}`);
+  await expect(collection.locator('.t-saved-test')).toHaveAttribute('data-scenario-revision', String(current.revision));
   await collection.locator('.t-saved-test').click();
   await expectEditor(page, current);
   await workspaceNavigation(page, 'Alle Testfälle');

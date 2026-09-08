@@ -9,16 +9,18 @@ import { BUSINESS_SCHEMA, decodeBusinessDraft } from './schemas';
 /** A failed schema or compiler check is fed back to the real model once. No local
  * template changes the model's business proposal. Both attempts stay on disk. */
 export async function planBusinessWithCodex(input: { id: string; model: TestingModel; request: string; catalog: TestingCatalog; scenario?: TestingScenario;
-  instanceId?: string; files?: Record<string,string>; signal?: AbortSignal; onEvent?: (event: TestingAgentEvent) => void }) {
+  instanceId?: string; files?: Record<string,string>; signal?: AbortSignal; onStage?:(stage:'planning'|'validating')=>void; onEvent?: (event: TestingAgentEvent) => void }) {
   const prompt = businessPrompt(input.request, input.scenario ? { scenarioId: input.scenario.id, instanceId: input.instanceId! } : undefined);
   const files = {...agentContext(input.catalog, undefined, input.scenario),...input.files};
   let previous: unknown, diagnostic = '';
   const attempts: { id: string; contextHash: string; valid: boolean; errors: string[] }[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
+    input.onStage?.('planning');
     const id = attempt === 0 ? input.id : `${input.id}-korrektur`;
     const result = await invokeCodex({ id, model: input.model, prompt: attempt === 0 ? prompt : `${prompt}\n\nDie vorherige Antwort steht in vorherige-antwort.json. Der lokale Schema-/Compilerprüfer hat diese konkreten Fehler gefunden: ${JSON.stringify(diagnostic)}. Korrigiere diese Fehler. Halte alle bereits korrekten fachlichen Werte unverändert. knowledgeRefs dürfen ausschließlich IDs aus wissen.json oder newKnowledge verwenden, niemals Dateinamen. Ein Rollen-Kontext enthält seine Schritte als children, ein leerer Kontext hat keine Wirkung. Jede Nutzererwartung braucht eine echte Assertion mit Eingabeschema; eine Note ist kein Test. Gib erneut das vollständige strukturierte Ergebnis zurück.`,
       schema: BUSINESS_SCHEMA, files: { ...files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
     previous = result.value;
+    input.onStage?.('validating');
     try {
       const draft = decodeBusinessDraft(result.value);
       const preview = previewTestingBusinessDraft(input.request, draft, input.model, input.catalog);

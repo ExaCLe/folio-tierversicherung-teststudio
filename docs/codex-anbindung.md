@@ -75,6 +75,10 @@ Die Erkundung ist begrenzt und abbrechbar. Aktionen und Beobachtungen dienen als
 
 Die aktuelle Browserbeobachtung und der benötigte Wissenskontext werden als abgegrenzte Daten direkt an die Modellanfrage übergeben. Dateien bleiben zusätzlich als Nachweis erhalten. Der nächste Browserzugriff hängt dadurch nicht von einem Dateilesewerkzeug des jeweiligen CLI-Modells ab.
 
+Auch frühere Beobachtungen müssen ihren relevanten sichtbaren Inhalt behalten. Nur eine Belegnummer und die besuchte Adresse reichen nicht aus, wenn beispielsweise ein deaktivierter Entscheidungsbutton für eine bestimmte Rolle nachgewiesen wurde. Wiederkehrende Zustände und fehlende neue Erkenntnisse führen zu einer abschließenden Auswertung der vorhandenen Belege. Nicht geklärte Fragen bleiben dabei ausdrücklich offen.
+
+Ein internes Zeitlimit wird als Zeitlimit erfasst. Nur ein ausdrücklich ausgelöster Nutzerabbruch darf als solcher angezeigt werden. Ein unspezifisches Abbruchsignal belegt keinen Nutzerabbruch. Öffentliche Arbeitsschritte und Erläuterungen stehen getrennt von technischen Prozessmeldungen zur Verfügung; die übergeordnete Koordination zählt nicht zusätzlich zu ihren arbeitenden Teilaufträgen.
+
 Der Testfall existiert bereits vor der ersten Modellantwort als gespeicherter Entwurf. Aufträge und Teilaufträge gehören zu diesem Testfall. Ergebnisse dürfen eine inzwischen geänderte Fassung nicht überschreiben. Ein abgebrochener erster Auftrag kann mit demselben Testfall fortgesetzt werden.
 
 ## Technik, Dubletten und Probelauf
@@ -138,6 +142,8 @@ Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindpr
 `server/testing/agents/exploration.test.ts` verwendet eine künstliche CLI, die den Kontext ausschließlich aus der Modellanfrage liest, und einen echten isolierten Portalbrowser. Die Tests prüfen Beobachtungen, Kundenanlage, Rollenwechsel, ungültige Belege, Kontextgrenzen und Abbruch. `business-lifecycle.test.ts` prüft die sofortige Speicherung, Wiederaufnahme, Revisionsschutz und die Trennung zwischen Browserergebnis und optionaler Analyse. `e2e/testing-workspace.spec.ts` prüft den geführten Arbeitsbereich mit vorbereiteten Agentenantworten und echten lokalen Speicheraktionen.
 
 Am 7. September 2026 wurde die Erkundung zusätzlich mit einem echten Luna-Aufruf und einem vollständig leeren synthetischen Katalog geprüft. Das Modell navigierte selbst zum Neukundenformular und belegte die Feldbezeichnung „Name des Kunden“ mit vier Browserbeobachtungen. Es erzeugte einen Wissensbeleg ohne offene Fragen und speicherte keine Portalobjekte. Dieser Nachweis gilt für die konkrete Erkundungsaufgabe, nicht für beliebige fachliche Anforderungen. Die lokalen Protokolle und Screenshots werden nicht veröffentlicht.
+
+Am 8. September 2026 wurde der Rollenvergleich mit Luna und ausschließlich dem öffentlichen Beispielkatalog geprüft. Sechs Browserbeobachtungen belegten am selben Vorgang, dass Vermittler und Sachbearbeiter eine noch offene Direktionsanfrage nicht entscheiden konnten und die Direktion sie anschließend mit Begründung erfolgreich freigab. Die Abnahme prüfte ausgewählte Rollen, den offenen Ausgangszustand, die gesperrte Schaltfläche und die tatsächliche Speicheraktion unabhängig von der Abschlussmeldung des Modells. Die Prüffragen waren vollständig beantwortet; es blieben keine offenen Fragen. Der private Ausgangsauftrag wurde für diese Probe weder übertragen noch verändert.
 
 Bei der lokalen Abnahme am 7. September 2026 wurde Claude Code zusätzlich mit einem künstlichen Prompt für `{ "ok": true }` und ohne Kontextdateien aufgerufen. Die CLI akzeptierte die Argumente, meldete aber „Not logged in“. Eine erfolgreiche strukturierte Modellantwort von Claude ist damit auf diesem Rechner noch nicht nachgewiesen. Die Anwendung zeigt diesen Anmeldefehler an. Eine Anmeldung in der eigenen Claude CLI ist vor dem ersten Auftrag erforderlich.
 

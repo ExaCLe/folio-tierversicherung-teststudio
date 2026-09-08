@@ -13,7 +13,7 @@ await writeFile(process.env.FOLIO_CODEX_EXECUTABLE,`#!/usr/bin/env node
 import{readFileSync,writeFileSync}from'node:fs';const args=process.argv.slice(2);for await(const chunk of process.stdin){}await new Promise(resolve=>setTimeout(resolve,100));
 if(process.env.FOLIO_BUSINESS_MODE==='fail')process.exit(1);
 const schema=JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1],'utf8'));let response;
-if(schema.properties.knowledgeIds){const docs=JSON.parse(readFileSync('wissen.json','utf8'));response={decision:'finish',explanation:'Synthetische Wissensprüfung, keine KI-Erkundung.',knowledgeIds:[docs[0].id],gaps:process.env.FOLIO_BUSINESS_MODE==='question'?['Welche zusätzliche fachliche Regel gilt?']:[],action:null,findings:[]};}
+if(schema.properties.knowledgeIds){const docs=JSON.parse(readFileSync('wissen.json','utf8'));const unanswered=process.env.FOLIO_BUSINESS_MODE==='question';response={decision:'finish',explanation:'Synthetische Wissensprüfung, keine KI-Erkundung.',knowledgeIds:[docs[0].id],gaps:unanswered?['Welche zusätzliche fachliche Regel gilt?']:[],questions:[{id:'anforderung-1',text:'Welche fachlichen Regeln gelten für die Anforderung?',requiresBrowser:false,status:'answered',answer:'Die synthetische Wissensprüfung verwendet die bereitgestellte Regel.',knowledgeIds:[docs[0].id],evidenceIds:[]},...(unanswered?[{id:'zusatzregel',text:'Welche zusätzliche fachliche Regel gilt?',requiresBrowser:false,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]}]:[])],action:null,findings:[]};}
 else response=JSON.parse(readFileSync(process.env.FOLIO_BUSINESS_FIXTURE,'utf8'));
 writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(response));
 `,{mode:0o700});
@@ -43,6 +43,10 @@ test('Anforderung existiert vor dem ersten Agentenergebnis und wird unter dersel
   assert.equal((completed.result as any).applied,true);assert.equal(completed.childJobIds!.length,1);
   const child=orchestrator.getTestingJob(completed.childJobIds![0]);assert.equal(child.parentJobId,completed.id);assert.equal(child.phase,'exploration');assert.equal(child.status,'completed');
   assert.deepEqual(child.agentConfig,completed.agentConfig);assert.equal((child.result as any).explored,false);assert.deepEqual((child.result as any).evidence,[]);
+  for(const stage of ['knowledge','planning','validating'])assert.equal(completed.workStages?.find(item=>item.stage===stage)?.status,'completed');
+  assert.equal(completed.workStages?.find(item=>item.stage==='exploring')?.status,'skipped');
+  assert.equal(child.progress?.status,'finished');assert.equal(child.progress?.observationCount,0);
+  assert.deepEqual((completed.result as any).questions,(child.result as any).questions);assert.equal((completed.result as any).questions[0].status,'answered');
   const state=lifecycle(scenario.id);assert.equal(state.phase,'review');assert.equal(state.currentJobId,initial.id);assert.equal(state.nextAction,'approve');
   const persisted=JSON.parse(await readFile(process.env.FOLIO_DATA_FILE!,'utf8'));assert(persisted.testingScenarioRevisions.some((row:any)=>row.id===`${scenario.id}@1`));
 });
@@ -52,10 +56,22 @@ test('Fehlgeschlagene und abgebrochene Planung lassen sich mit derselben gespeic
   assert.equal(repository.getTestingScenario(failed.scenarioId!).revision,1);assert.equal(lifecycle(failed.scenarioId!).nextAction,'retry-business');
   delete process.env.FOLIO_BUSINESS_MODE;const resumed=await request('POST',`/scenarios/${failed.scenarioId}/plan`,{revision:1,model:'luna'});assert.equal(resumed.data.scenarioId,failed.scenarioId);assert.equal((await orchestrator.waitTestingJob(resumed.data.id)).status,'completed');
   const cancelled=orchestrator.startBusinessJob({request:'Eine abgebrochene Planung bleibt als Anforderung erhalten.',model:'luna'});orchestrator.cancelTestingJob(cancelled.id);await orchestrator.waitTestingJob(cancelled.id);
+  assert.equal(orchestrator.getTestingJob(cancelled.id).termination?.cause,'user_cancelled');
   assert.equal(repository.getTestingScenario(cancelled.scenarioId!).revision,1);assert.equal(lifecycle(cancelled.scenarioId!).status,'cancelled');
   const retry=await request('POST',`/scenarios/${cancelled.scenarioId}/plan`,{revision:1,model:'luna'});assert.equal(retry.data.scenarioId,cancelled.scenarioId);assert.equal((await orchestrator.waitTestingJob(retry.data.id)).status,'completed');
 });
 
+test('Ein Nutzerabbruch kennzeichnet den Hauptauftrag und beendet den Unterauftrag mit eigenem Grund',async()=>{
+  const job=orchestrator.startBusinessJob({request:'Synthetische Prüfung der Abbruchzuordnung.',model:'luna'});
+  const deadline=Date.now()+2000;
+  while(!orchestrator.getTestingJob(job.id).childJobIds?.length&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,5));
+  const childId=orchestrator.getTestingJob(job.id).childJobIds?.[0];assert(childId);
+  orchestrator.cancelTestingJob(job.id);
+  const [parent,child]=await Promise.all([orchestrator.waitTestingJob(job.id),orchestrator.waitTestingJob(childId)]);
+  assert.equal(parent.status,'cancelled');assert.equal(parent.termination?.cause,'user_cancelled');
+  assert.equal(child.status,'cancelled');assert.equal(child.termination?.cause,'parent_cancelled');
+  assert.doesNotMatch(child.error??'',/vom Menschen/);assert.equal(repository.getTestingScenario(job.scenarioId!).blocks.length,0);
+});
 test('Änderungen während der Wissensprüfung werden nie durch ein asynchrones Ergebnis überschrieben',async()=>{
   const job=orchestrator.startBusinessJob({request:'Der Mensch bearbeitet die Anforderung während der Planung.',model:'luna'}),before=repository.getTestingScenario(job.scenarioId!);
   const edited=repository.saveTestingScenario({...before,intent:'Neue gespeicherte Anforderung des Menschen.',title:'Bewusste Änderung'},before.revision);
@@ -63,7 +79,7 @@ test('Änderungen während der Wissensprüfung werden nie durch ein asynchrones 
 });
 
 test('Offene Wissensfragen beenden die Erkundung sichtbar ohne erfundenen Entwurf',async()=>{
-  process.env.FOLIO_BUSINESS_MODE='question';try{const job=orchestrator.startBusinessJob({request:'Eine noch nicht dokumentierte Zusatzregel prüfen.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);assert.equal((done.result as any).needsKnowledge,true);assert.deepEqual(repository.getTestingScenario(job.scenarioId!).blocks,[]);assert.equal(lifecycle(job.scenarioId!).status,'attention');assert.equal(lifecycle(job.scenarioId!).phase,'exploration');await assert.rejects(readFile(join(directory,'agents',job.id,'result.json')),/ENOENT/);}finally{delete process.env.FOLIO_BUSINESS_MODE;}
+  process.env.FOLIO_BUSINESS_MODE='question';try{const job=orchestrator.startBusinessJob({request:'Eine noch nicht dokumentierte Zusatzregel prüfen.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);assert.equal((done.result as any).needsKnowledge,true);assert.deepEqual((done.result as any).questions.filter((question:any)=>question.status==='open').map((question:any)=>question.id),['zusatzregel']);assert.deepEqual((done.result as any).openQuestions,['Welche zusätzliche fachliche Regel gilt?']);assert.deepEqual(repository.getTestingScenario(job.scenarioId!).blocks,[]);assert.equal(lifecycle(job.scenarioId!).status,'attention');assert.equal(lifecycle(job.scenarioId!).phase,'exploration');await assert.rejects(readFile(join(directory,'agents',job.id,'result.json')),/ENOENT/);}finally{delete process.env.FOLIO_BUSINESS_MODE;}
 });
 
 test('Definition und neue Wissensbelege werden atomar mit Rückverweisen übernommen oder vollständig abgewiesen',async()=>{

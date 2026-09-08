@@ -111,6 +111,8 @@ Ein Druckauftrag enthält die konkrete Dokumentkennung und deren SHA-256. Frühe
 
 „Testfall erstellen“ führt durch einen zusammenhängenden Arbeitsbereich: Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Agentenaufträge erscheinen dort direkt mit ihrem aktuellen Arbeitsschritt. Unter „Alle Testfälle“ findest du auch begonnene Entwürfe und kannst sie an derselben Stelle fortsetzen. Bibliothek, Wissen und historische Nachweise sind über „Bibliothek & Wissen“ erreichbar.
 
+Die Fortschrittsanzeige zeigt erledigte Schritte, aktive Arbeitszweige und abrufbare Erläuterungen. Die Entwurfserstellung läuft nacheinander; technische Vorbereitung und Bausteinvergleich können parallel laufen. Ein Zeitlimit wird als technische Unterbrechung erklärt und nicht als Nutzerabbruch ausgegeben.
+
 Die KI wertet zuerst vorhandenes Wissen aus. Bei Lücken kann sie das Portal in einer separaten lokalen Umgebung mit eigenen Testdaten erkunden. Beobachtungen aus dieser Erkundung und offene Fragen fließen in den fachlichen Entwurf ein. Beim manuellen Definieren eines Blocks lässt sich fehlendes Wissen ebenfalls neu ergänzen.
 
 Das Studio verwendet `scratch-blocks` mit dem Scratch-Renderer. Verbundene Blöcke beschreiben die ausführbare Reihenfolge. Frei abgelegte Blöcke und ihre Bildschirmpositionen werden als Layout gespeichert. Sie ändern die fachliche Reihenfolge nicht.
