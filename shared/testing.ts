@@ -47,10 +47,21 @@ export interface TestingBlockInstance {
   overrides?: Record<string, Record<string, TestingValue>>;
   note?: string;
 }
+export interface TestingMatrixTarget { blockPath: string; inputPath: string }
+export interface TestingMatrixColumn {
+  id: string; label: string; target: TestingMatrixTarget;
+  /** UI metadata. The backend verifies this against the target definition. */
+  type: TestingValueType;
+}
+export interface TestingMatrixRow {
+  id: string; label: string; enabled: boolean; values: Record<string, TestingValue>;
+}
+export interface TestingMatrix { columns: TestingMatrixColumn[]; rows: TestingMatrixRow[] }
 export interface TestingScenario {
   id: string; title: string; intent: string; revision: number; blocks: TestingBlockInstance[];
   expectedOutcome: string; knowledgeRefs: string[]; createdAt: string; updatedAt: string;
   source: 'human' | 'agent' | 'seed'; model?: TestingModel; parameters?: Record<string, TestingValue>;
+  matrix?: TestingMatrix;
   naming?: {title:string;summary:string;tags:string[];titleSource:'user-request'|'agent'|'human';jobId:string};
 }
 export interface TestingScenarioLayout {
@@ -108,6 +119,7 @@ export interface TestingCompiledScenario {
   scenario: TestingScenario; definitions: TestingBlockDefinition[]; bindings: TestingTechnicalBinding[];
   knowledge: TestingKnowledgeDocument[]; steps: TestingCompiledStep[]; issues: TestingValidationIssue[];
   valid: boolean; executable: boolean; approval?: TestingApproval;
+  matrixOrigin?: { parentFingerprint: string; rowId: string; approval: TestingApproval };
 }
 export interface TestingDuplicateCandidate {
   definition: TestingVersionRef; name: string; score: number;
@@ -178,11 +190,21 @@ export interface TestingRun {
   compiled: TestingCompiledScenario; steps: TestingStepResult[]; error?: string;
   artifacts?: { trace?: string; source?: string; manifest?: string; directory?: string };
   outputs?: Record<string, TestingValue>; reuseSuggestions?: TestingReuseSuggestion[];
+  mode?: 'single' | 'matrix'; matrixRows?: TestingMatrixRowResult[];
+  summary?: { total: number; passed: number; failed: number; skipped: number };
+}
+export interface TestingMatrixRowResult {
+  rowId: string; rowLabel: string; index: number; status: 'queued' | 'running' | 'passed' | 'failed' | 'skipped';
+  values: Record<string, TestingValue>; startedAt?: string; finishedAt?: string; durationMs?: number;
+  compiled?: TestingCompiledScenario; steps?: TestingStepResult[]; error?: string;
+  outputs?: Record<string, TestingValue>; artifacts?: TestingRun['artifacts'];
 }
 export interface TestingBusinessDraft {
   title: string; expectedOutcome: string; blocks: TestingBlockInstance[]; knowledgeRefs: string[];
   newDefinitions: TestingBlockDefinition[]; newKnowledge: TestingKnowledgeDocument[];
   explanation: string; assumptions: string[]; openQuestions: string[];
+  matrix?: TestingMatrix;
+  matrixMode?: 'keep' | 'replace' | 'remove';
 }
 export interface TestingScenarioEditChange {
   kind: 'add' | 'remove' | 'move' | 'values' | 'metadata'; path: string; label: string;

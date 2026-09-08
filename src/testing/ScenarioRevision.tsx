@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { ArrowRight, Sparkles } from 'lucide-react';
-import type { TestingCatalog, TestingScenario } from '../../shared/testing';
+import type { TestingCatalog, TestingMatrix, TestingScenario } from '../../shared/testing';
 import { flattenBlocks, resolvedBlockInputs } from './model';
 import { buildReferenceIndex, describeReference, entryStep } from './references';
 import { isTestingReference } from '../../shared/testing';
@@ -15,7 +15,9 @@ export function ScenarioRevisionDiff({ previous, next, catalog }: { previous: Te
   const before = flattenBlocks(previous.blocks, catalog), after = flattenBlocks(next.blocks, catalog);
   const beforeReferences = buildReferenceIndex(before, previous.parameters), afterReferences = buildReferenceIndex(after, next.parameters);
   const changes: { key: string; name: string; path?: string; before?: unknown; after?: unknown }[] = [];
+  const matrixSummary = (matrix?: TestingMatrix) => matrix ? `${matrix.columns.length} variable Felder · ${matrix.rows.filter(row => row.enabled).length} von ${matrix.rows.length} Testfällen aktiv` : 'Keine Testmatrix';
   for (const key of ['title', 'intent', 'expectedOutcome', 'parameters', 'knowledgeRefs'] as const) if (JSON.stringify(previous[key]) !== JSON.stringify(next[key])) changes.push({ key, name: ({ title: 'Titel', intent: 'Anforderung', expectedOutcome: 'Erwartetes Ergebnis', parameters: 'Ablaufparameter', knowledgeRefs: 'Fachwissen' })[key], before: previous[key], after: next[key] });
+  if (JSON.stringify(previous.matrix) !== JSON.stringify(next.matrix)) changes.push({ key: 'matrix', name: 'Testdaten und Kombinationen', before: matrixSummary(previous.matrix), after: matrixSummary(next.matrix) });
   for (const old of before) if (!after.some(item => item.path === old.path)) changes.push({ key: `remove:${old.path}`, name: 'Block entfernt', before: `Schritt ${entryStep(old, before)} · ${old.block.label || old.definition?.name || old.block.definition.id}` });
   for (const item of after) {
     const old = before.find(entry => entry.path === item.path);

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingCompiledStep, TestingDuplicateReport, TestingInput, TestingScenario, TestingTechnicalBinding, TestingValidationIssue, TestingValue, TestingValueType, TestingVersionRef } from '../../shared/testing';
 import { isTestingParameter, isTestingReference, testingVersionKey, testingValueTypeLabels } from '../../shared/testing';
+import { scenarioForTestingMatrixRow, validateTestingMatrix } from './matrix';
 
 export function stableTestingStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableTestingStringify).join(',')}]`;
@@ -57,6 +58,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   const fingerprint = testingFingerprint(scenario,catalog); let wired = true;
   const sources = new Map<string, { sourcePath: string; sourceLabel: string }>();
   const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:TestingValidationIssue['severity']='error',source?:{sourcePath:string;sourceLabel:string}) => issues.push({code,message,severity,instanceId:block?.id,path,field,...source});
+  issues.push(...validateTestingMatrix(scenario, catalog));
   const blockLabel = (block:TestingBlockInstance) => block.label ?? defs.get(testingVersionKey(block.definition))?.name ?? block.definition.id;
   const fieldLabel = (block:TestingBlockInstance,field:string) => {
     let inputs = defs.get(testingVersionKey(block.definition))?.inputs ?? []; const labels:string[]=[];
@@ -162,10 +164,33 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   }
   walk(scenario.blocks,'',scenario.parameters??{},globals,'Vermittler',[],[]);
   if(!steps.length) issue('SCENARIO_EMPTY','Der Testfall enthält noch keine ausführbaren fachlichen Schritte.');
+  if(scenario.matrix && !steps.some(step=>step.kind==='assertion')) issue('MATRIX_ASSERTION_REQUIRED','Eine Testmatrix braucht mindestens einen echten Prüfblock. Ohne Assertion kann keine Matrixzeile bestehen.');
+  if(scenario.matrix && !issues.some(item=>item.code.startsWith('MATRIX_'))) {
+    // A required template field may intentionally be supplied exclusively by every matrix row.
+    const covered=new Set(scenario.matrix.columns.map(column=>`${column.target.blockPath}::${column.target.inputPath}`));
+    for(let index=issues.length-1;index>=0;index--)if(issues[index].code==='INPUT_REQUIRED'&&covered.has(`${issues[index].path}::${issues[index].field}`))issues.splice(index,1);
+  }
+  if(scenario.matrix && !issues.some(item=>item.code.startsWith('MATRIX_'))) for(const row of scenario.matrix.rows.filter(item=>item.enabled)) {
+    const variant=compileTestingScenario(scenarioForTestingMatrixRow(scenario,catalog,row.id),catalog);
+    for(const rowIssue of variant.issues.filter(item=>item.severity==='error')) issues.push({...rowIssue,code:`MATRIX_ROW_${rowIssue.code}`,message:`${row.label}: ${rowIssue.message}`});
+    for(const rowIssue of variant.issues.filter(item=>['BINDING_MISSING','BINDING_INPUT_MISSING','BINDING_AMBIGUOUS','BINDING_MISMATCH'].includes(item.code))) {
+      wired=false; issues.push({...rowIssue,code:`MATRIX_ROW_${rowIssue.code}`,message:`${row.label}: ${rowIssue.message}`});
+    }
+  }
   const approved=!!approval && approval.scenarioId===scenario.id && approval.scenarioRevision===scenario.revision && approval.fingerprint===fingerprint;
   if(!approved) issue(approval?'APPROVAL_STALE':'APPROVAL_REQUIRED',approval?'Die fachliche Freigabe ist durch eine Änderung veraltet. Bitte den aktuellen Entwurf erneut prüfen.':'Bitte den fachlichen Entwurf vor der technischen Ausführung freigeben.',undefined,undefined,undefined,'warning');
   const valid=!issues.some(i=>i.severity==='error');
   return {scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,compiledAt:new Date().toISOString(),scenario:structuredClone(scenario),definitions:structuredClone(deps.definitions),bindings:structuredClone([...usedBindings.values()]),knowledge:structuredClone(deps.knowledge),steps,issues,valid,executable:valid&&wired&&approved,...(approval?{approval}: {})};
+}
+
+/** Authorizes a deterministic row from the exact frozen, human-approved parent snapshot without fabricating a row approval. */
+export function compileTestingMatrixRow(parent:TestingCompiledScenario,rowId:string,frozenCatalog:TestingCatalog):TestingCompiledScenario {
+  const row=parent.scenario.matrix?.rows.find(item=>item.id===rowId&&item.enabled);
+  if(!row||!parent.approval||parent.approval.fingerprint!==parent.fingerprint||!parent.executable)throw new Error('Die Matrixzeile gehört nicht zu einer ausführbaren, fachlich freigegebenen Matrixfassung.');
+  const scenario=scenarioForTestingMatrixRow(parent.scenario,frozenCatalog,rowId);
+  const compiled=compileTestingScenario(scenario,frozenCatalog);
+  const unwired=compiled.issues.some(item=>['BINDING_MISSING','BINDING_INPUT_MISSING','BINDING_AMBIGUOUS','BINDING_MISMATCH'].includes(item.code));
+  return {...compiled,executable:compiled.valid&&!unwired,approval:structuredClone(parent.approval),matrixOrigin:{parentFingerprint:parent.fingerprint,rowId,approval:structuredClone(parent.approval)}};
 }
 
 function schemaSignature(definition:TestingBlockDefinition):unknown {

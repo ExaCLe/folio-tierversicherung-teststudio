@@ -29,6 +29,8 @@ Für eine Anwendungserkundung startet die API vorübergehend eine eigene lokale 
 
 Der [deutsche Demoguide](docs/demo-walkthrough.md) führt durch Portalbearbeitung, Scratch-Blöcke, fachliche Freigabe und Browsernachweise.
 
+Die [Beispiele für Anforderungen und Testmatrizen](docs/testmatrix-beispiele.md) enthalten kopierfertige Schritt-1-Anforderungen für einen einzelnen Assertion-Test und für parametrisierte Läufe.
+
 ## Eine vorhandene Installation aktualisieren
 
 Den laufenden Entwicklungsserver mit `Ctrl+C` beenden und im Projektverzeichnis ausführen:

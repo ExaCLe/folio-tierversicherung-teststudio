@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { TestingCompiledScenario, TestingRun, TestingStepResult } from '../../shared/testing';
+import type { TestingCompiledScenario, TestingMatrixRow, TestingRun, TestingStepResult } from '../../shared/testing';
 import { createTestingExecutionState, executeTestingStep } from '../../e2e/helpers/agriculture-driver';
 
 export const TESTING_RUN_ROOT = resolve(process.env.FOLIO_TESTING_RUN_ROOT ?? '.local/testing/runs');
@@ -16,6 +16,9 @@ export async function stopTestingBrowsers() { await Promise.allSettled([...activ
 const artifact = (id: string, filename: string) => `/api/testing/runs/${encodeURIComponent(id)}/artifacts/${filename}`;
 export function generatedTestingSource(): string {
   return `import { test } from '@playwright/test';\nimport { readFileSync } from 'node:fs';\nimport { createTestingExecutionState, executeTestingStep } from '../../../../e2e/helpers/agriculture-driver';\nconst compiled = JSON.parse(readFileSync(new URL('./compiled.json', import.meta.url), 'utf8'));\n// Die Selektoren stehen einmal in der gespeicherten Bindungsrevision.\ntest(compiled.scenario.title, async ({ page }) => {\n  const state = createTestingExecutionState('wiederholung-' + Date.now());\n  for (const step of compiled.steps) {\n    const binding = compiled.bindings.find((item: any) => item.id === step.binding.id && item.revision === step.binding.revision);\n    await test.step(step.path + ': ' + step.label, () => executeTestingStep(page, step, binding, state));\n  }\n});\n`;
+}
+export function generatedTestingMatrixSource(): string {
+  return `import { test } from '@playwright/test';\nimport { readFileSync } from 'node:fs';\nimport { createTestingExecutionState, executeTestingStep } from '../../../../e2e/helpers/agriculture-driver';\nconst snapshot = JSON.parse(readFileSync(new URL('./compiled.json', import.meta.url), 'utf8'));\n// Jede Zeile ist ein eigener Playwright-Test und erhält damit eine frische Browserseite sowie einen eigenen Zustand.\ntest.describe(snapshot.parent.scenario.title, () => {\n  for (const variant of snapshot.rows) test(variant.row.label + ' [' + variant.row.id + ']', async ({ page }) => {\n    const compiled = variant.compiled;\n    const state = createTestingExecutionState('wiederholung-' + variant.row.id + '-' + Date.now());\n    for (const step of compiled.steps) {\n      const binding = compiled.bindings.find((item: any) => item.id === step.binding.id && item.revision === step.binding.revision);\n      await test.step(step.path + ': ' + step.label, () => executeTestingStep(page, step, binding, state));\n    }\n  });\n});\n`;
 }
 export async function executeTestingRun(compiled: TestingCompiledScenario, options: { id?: string; baseURL?: string; signal?: AbortSignal; onUpdate?: (run: TestingRun) => void } = {}): Promise<TestingRun> {
   if (!compiled.executable) throw new Error('Der fachlich freigegebene Testfall muss vollständig verdrahtet sein.');
@@ -84,4 +87,40 @@ export async function executeTestingRun(compiled: TestingCompiledScenario, optio
     run.finishedAt = new Date().toISOString(); await publish();
   }
   return run;
+}
+
+/** Each row delegates to the proven single-run executor, which gives it a fresh browser context and execution state. */
+export async function executeTestingMatrixRun(parent: TestingCompiledScenario, variants: { row: TestingMatrixRow; compiled: TestingCompiledScenario }[], options: { id: string; baseURL?: string; signal?: AbortSignal; onUpdate?: (run: TestingRun) => void }): Promise<TestingRun> {
+  const started = Date.now(), directory = resolve(TESTING_RUN_ROOT, options.id);
+  const run: TestingRun = { id: options.id, scenarioId: parent.scenarioId, scenarioTitle: parent.scenario.title, scenarioRevision: parent.scenarioRevision,
+    status: 'running', startedAt: new Date(started).toISOString(), compiled: structuredClone(parent), steps: [], mode: 'matrix',
+    matrixRows: variants.map(({ row }, index) => ({ rowId: row.id, rowLabel: row.label, index, status: 'queued', values: structuredClone(row.values) })),
+    summary: { total: variants.length, passed: 0, failed: 0, skipped: 0 }, artifacts: { source: artifact(options.id, 'generated.spec.ts'), manifest: artifact(options.id, 'manifest.json'), directory } };
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await writeFile(resolve(directory, 'compiled.json'), JSON.stringify({ parent, rows: variants }, null, 2));
+  await writeFile(resolve(directory, 'generated.spec.ts'), generatedTestingMatrixSource());
+  await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ runId: options.id, scenarioId: parent.scenarioId, scenarioRevision: parent.scenarioRevision,
+    businessFingerprint: parent.fingerprint, approval: parent.approval, matrixRows: variants.map(item => ({ id: item.row.id, label: item.row.label, values: item.row.values })),
+    browser: 'Chromium', createdAt: run.startedAt, replay: 'Jede Matrixzeile wird mit eigener Browserinstanz und eigenem Laufzustand ausgeführt.' }, null, 2));
+  let publishing=Promise.resolve();
+  const publish = () => publishing=publishing.then(async()=>{ run.summary = { total: run.matrixRows!.length, passed: run.matrixRows!.filter(row => row.status === 'passed').length, failed: run.matrixRows!.filter(row => row.status === 'failed').length, skipped: run.matrixRows!.filter(row => row.status === 'skipped').length }; await writeFile(resolve(directory, 'run.json'), JSON.stringify(run, null, 2)); options.onUpdate?.(structuredClone(run)); });
+  await publish();
+  const exposeRowSteps=(rowId:string,child:TestingRun)=>child.steps.map(step=>({...step,...(step.screenshot?{screenshot:step.screenshot.replace(`/api/testing/runs/${encodeURIComponent(child.id)}/artifacts/`,`/api/testing/runs/${encodeURIComponent(options.id)}/rows/${encodeURIComponent(rowId)}/artifacts/`)}:{})}));
+  const exposeRowArtifacts=(rowId:string,child:TestingRun):TestingRun['artifacts']=>child.artifacts&&Object.fromEntries(Object.entries(child.artifacts).map(([key,value])=>[key,typeof value==='string'&&value.startsWith('/api/testing/runs/')?value.replace(`/api/testing/runs/${encodeURIComponent(child.id)}/artifacts/`,`/api/testing/runs/${encodeURIComponent(options.id)}/rows/${encodeURIComponent(rowId)}/artifacts/`):value])) as TestingRun['artifacts'];
+  for (const [index, variant] of variants.entries()) {
+    const result = run.matrixRows![index];
+    if (options.signal?.aborted) { for (const pending of run.matrixRows!.slice(index)) { pending.status = 'skipped'; pending.error = 'Der Matrixlauf wurde vor dieser Zeile abgebrochen.'; } break; }
+    result.status = 'running'; result.startedAt = new Date().toISOString(); await publish();
+    const rowStart = Date.now();
+    try {
+      const child = await executeTestingRun(variant.compiled, { id: `${options.id}-zeile-${String(index + 1).padStart(3, '0')}`, baseURL: options.baseURL, signal: options.signal, onUpdate: update => {
+        result.status=update.status==='queued'?'running':update.status;result.compiled=update.compiled;result.steps=exposeRowSteps(result.rowId,update);result.error=update.error;result.outputs=update.outputs;result.artifacts=exposeRowArtifacts(result.rowId,update);void publish();
+      } });
+      result.status = child.status; result.compiled = child.compiled; result.steps = exposeRowSteps(result.rowId,child); result.error = child.error; result.outputs = child.outputs; result.artifacts = exposeRowArtifacts(result.rowId,child);
+    } catch (error) { result.status = 'failed'; result.error = error instanceof Error ? error.message : String(error); }
+    result.finishedAt = new Date().toISOString(); result.durationMs = Date.now() - rowStart; await publish();
+  }
+  run.status = run.matrixRows!.length > 0 && run.matrixRows!.every(row => row.status === 'passed') ? 'passed' : 'failed';
+  if (run.status === 'failed') run.error = run.matrixRows!.some(row => row.status === 'failed') ? `${run.matrixRows!.filter(row => row.status === 'failed').length} von ${run.matrixRows!.length} Matrixzeilen sind fehlgeschlagen.` : 'Der Matrixlauf wurde abgebrochen.';
+  run.finishedAt = new Date().toISOString(); await publish(); return run;
 }

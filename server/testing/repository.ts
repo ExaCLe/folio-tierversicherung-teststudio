@@ -6,6 +6,7 @@ import { isTestingParameter, isTestingReference, testingVersionKey } from '../..
 import { dataFile, db } from '../store';
 import { getTestingCatalog, loadTestingSeedScenarios } from './catalog';
 import { compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from './compiler';
+import { validateTestingMatrix } from './matrix';
 
 export class TestingModelError extends Error {
   constructor(message:string,public status=400,public code='TESTING_INVALID') {super(message);this.name='TestingModelError';}
@@ -109,14 +110,15 @@ export function previewTestingBusinessDraft(intent:string,draft:TestingBusinessD
   if(!draft||!draft.title||!Array.isArray(draft.blocks)||!Array.isArray(draft.newDefinitions)||!Array.isArray(draft.newKnowledge))throw new TestingModelError('Der fachliche Agent hat keinen vollständigen strukturierten Entwurf geliefert.');
   draft.newDefinitions.forEach(assertTestingDefinition);
   const augmented:TestingCatalog={...catalog,definitions:[...catalog.definitions,...draft.newDefinitions],knowledge:[...catalog.knowledge,...draft.newKnowledge]};
-  const scenario:TestingScenario={id:`testfall-${randomUUID()}`,title:draft.title,intent,revision:1,blocks:clone(draft.blocks),expectedOutcome:draft.expectedOutcome,knowledgeRefs:draft.knowledgeRefs,createdAt:now(),updatedAt:now(),source:'agent',model};
+  const scenario:TestingScenario={id:`testfall-${randomUUID()}`,title:draft.title,intent,revision:1,blocks:clone(draft.blocks),expectedOutcome:draft.expectedOutcome,knowledgeRefs:draft.knowledgeRefs,createdAt:now(),updatedAt:now(),source:'agent',model,...(draft.matrix?{matrix:clone(draft.matrix)}:{})};
   const compiled=compileTestingScenario(scenario,augmented);
   return {scenario,catalog:augmented,compiled,duplicateReports:draft.newDefinitions.map(definition=>findTestingDuplicates(definition,catalog))};
 }
 export function previewTestingScenarioEdit(existing:TestingScenario,draft:TestingBusinessDraft,model:TestingModel,catalog:TestingCatalog=getTestingCatalog()) {
   const preview=previewTestingBusinessDraft(existing.intent,draft,model,catalog);
   for(const document of draft.newKnowledge){assertKnowledge(document);if(document.definitionRefs.some(ref=>!preview.catalog.definitions.some(definition=>testingVersionKey(definition)===testingVersionKey(ref))))throw new TestingModelError(`„${document.title}“ verweist auf eine fehlende Definitionsversion.`);if(document.relatedKnowledge.some(id=>!preview.catalog.knowledge.some(item=>item.id===id)))throw new TestingModelError(`„${document.title}“ verweist auf fehlendes weiteres Wissen.`);}
-  const scenario:TestingScenario={...clone(existing),title:draft.title,blocks:clone(draft.blocks),expectedOutcome:draft.expectedOutcome,knowledgeRefs:clone(draft.knowledgeRefs)};
+  const base=clone(existing);if(draft.matrixMode==='remove')delete base.matrix;
+  const scenario:TestingScenario={...base,title:draft.title,blocks:clone(draft.blocks),expectedOutcome:draft.expectedOutcome,knowledgeRefs:clone(draft.knowledgeRefs),...(draft.matrixMode==='replace'&&draft.matrix?{matrix:clone(draft.matrix)}:{})};
   return {...preview,scenario,compiled:compileTestingScenario(scenario,preview.catalog)};
 }
 export function applyTestingScenarioEdit(id:string,draft:TestingBusinessDraft,model:TestingModel,expectedRevision:number,fingerprint:string):TestingScenario {
@@ -215,13 +217,18 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
   const knowledgeRefs=[...new Set(body.flatMap(b=>defs.get(testingVersionKey(b.definition))?.knowledgeRefs??[]))];
   const definition:TestingBlockDefinition={id:`ablauf.${randomUUID()}`,version:'1.0.0',name:request.name,description:request.description,kind:'workflow',category:'Wiederverwendung',semanticKey:`workflow.${request.name.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}]+/gu,'.')}`,inputs,outputs,body,exports,knowledgeRefs,preconditions:['Die erforderlichen Parameter sind belegt.'],postconditions:[request.description||request.name],status:'draft',createdAt:now(),origin:'human'};
   const duplicateReport=findTestingDuplicates(definition,catalog);
-  const selectedDefinition=duplicateReport.decision==='reuse'&&duplicateReport.chosen?defs.get(testingVersionKey(duplicateReport.chosen))!:saveTestingDefinition(definition);
+  const reusesExisting=duplicateReport.decision==='reuse'&&!!duplicateReport.chosen;
+  const selectedDefinition=reusesExisting?defs.get(testingVersionKey(duplicateReport.chosen!))!:definition;
   let saved=scenario;
   if(request.replaceSelection) {
     const replacement:TestingBlockInstance={id:`wiederverwendung-${randomUUID()}`,definition:{id:selectedDefinition.id,version:selectedDefinition.version},inputs:replacementInputs,outputs:Object.fromEntries([...localAliases.keys()].map((alias,index)=>[`ergebnis${index+1}`,alias]))};
     const replaced=[...siblings.slice(0,positions[0]),replacement,...siblings.slice(positions.at(-1)!+1)];
     if(parent)parent.children=replaced;else scenario.blocks=replaced;
-    saved=saveTestingScenario(scenario,scenario.revision);
+    const candidateCatalog=reusesExisting?getTestingCatalog():{...getTestingCatalog(),definitions:[...getTestingCatalog().definitions,definition]};
+    const matrixIssues=validateTestingMatrix(scenario,candidateCatalog);
+    if(matrixIssues.length)throw new TestingModelError(`Die Wiederverwendung würde Matrixziele ungültig machen. Ordne die betroffenen Matrixspalten zuerst neu zu: ${matrixIssues.map(item=>item.message).join(' ')}`,409,'MATRIX_TARGET_STALE');
   }
-  return {definition:selectedDefinition,scenario:saved,duplicateReport};
+  const persistedDefinition=reusesExisting?selectedDefinition:saveTestingDefinition(definition);
+  if(request.replaceSelection)saved=saveTestingScenario(scenario,scenario.revision);
+  return {definition:persistedDefinition,scenario:saved,duplicateReport};
 }

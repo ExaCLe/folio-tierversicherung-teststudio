@@ -109,6 +109,35 @@ test('Anforderung bleibt sofort gespeichert; Navigation, Reload und laufende Kin
   await page.screenshot({ path: testInfo.outputPath('linearer-entwurf-nach-wiederaufnahme.png'), fullPage: true });
 });
 
+test('Testdatenmatrix erzeugt und speichert typisierte Kombinationen aus lesbaren Ablauffeldern', async ({ page, request }) => {
+  const current = await scenarioFixture(request); await transport(page, { jobs: [], runs: [] });
+  await page.goto(`/testing/editor/${current.id}?step=3`);
+  const matrix = page.getByRole('region', { name: 'Mit Testdaten variieren', exact: true });
+  await expect(matrix).toBeVisible();
+  await matrix.getByRole('checkbox').first().check();
+  await matrix.getByRole('button', { name: 'Erste Spalte hinzufügen', exact: true }).click();
+  const firstField = matrix.getByLabel(/Feld für/).first();
+  const sumOption = await firstField.locator('option').filter({ hasText: 'Versicherungssumme in EUR' }).first().getAttribute('value');
+  expect(sumOption).toBeTruthy(); await firstField.selectOption(sumOption!);
+  await matrix.getByLabel('Werte für Versicherungssumme in EUR').fill('10.000\n10.001');
+  await matrix.getByRole('button', { name: 'Spalte hinzufügen', exact: true }).click();
+  const secondField = matrix.getByLabel(/Feld für/).nth(1);
+  const statusOption = await secondField.locator('option').filter({ hasText: 'Erwarteter Zustand' }).first().getAttribute('value');
+  expect(statusOption).toBeTruthy(); await secondField.selectOption(statusOption!);
+  await matrix.getByLabel('Werte für Erwarteter Zustand').fill('Direktionsprüfung');
+  await expect(matrix).toContainText('2 Kombinationen in der Vorschau');
+  await matrix.getByRole('button', { name: 'Kombinationen erzeugen', exact: true }).click();
+  await expect(matrix.getByRole('row')).toHaveCount(3);
+  await expect(matrix).toContainText('2 von 2 Testfällen werden ausgeführt');
+  await page.screenshot({ path: '.local/verification/matrix/testmatrix-tabelle.png', fullPage: true });
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
+  const saved = await readScenario(request, current.id);
+  expect(saved.matrix?.rows.map(row => row.values)).toEqual([
+    expect.objectContaining({ [saved.matrix!.columns[0].id]: 10000, [saved.matrix!.columns[1].id]: 'Direktionsprüfung' }),
+    expect.objectContaining({ [saved.matrix!.columns[0].id]: 10001, [saved.matrix!.columns[1].id]: 'Direktionsprüfung' }),
+  ]);
+});
+
 test('Offene Bausteinentscheidung zeigt keinen alten grünen Lauf als aktuelles Ergebnis', async ({ page, request }, testInfo) => {
   const current = await scenarioFixture(request);
   const compiled = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;

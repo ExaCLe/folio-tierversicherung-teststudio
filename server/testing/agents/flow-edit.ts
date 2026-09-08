@@ -10,8 +10,14 @@ import { reviewWithCodex } from './reviews';
 export const FLOW_EDIT_SCHEMA = JSON.parse(JSON.stringify(BUSINESS_SCHEMA));
 FLOW_EDIT_SCHEMA.$defs.instance.properties.childrenMode = { type: 'string', enum: ['inherit', 'replace'] };
 FLOW_EDIT_SCHEMA.$defs.instance.required.push('childrenMode');
+FLOW_EDIT_SCHEMA.properties.matrixMode = { type: 'string', enum: ['keep', 'replace', 'remove'], description: 'keep erhält die vorhandene Matrix, replace verwendet matrix, remove entfernt sie ausdrücklich.' };
+FLOW_EDIT_SCHEMA.required.push('matrixMode');
 export function decodeScenarioEdit(raw: unknown) {
   const source = structuredClone(raw) as any;
+  const matrixMode = source.matrixMode ?? 'keep';
+  if(!['keep','replace','remove'].includes(matrixMode))throw new Error('matrixMode muss keep, replace oder remove sein.');
+  if(matrixMode==='replace'&&!source.matrix)throw new Error('matrixMode replace braucht eine vollständige Matrix.');
+  delete source.matrixMode;
   const modes = new Map<object, { mode: string; children: any[] }>();
   const strip = (blocks: any[]) => {
     if (!Array.isArray(blocks)) return;
@@ -24,6 +30,7 @@ export function decodeScenarioEdit(raw: unknown) {
   };
   strip(source.blocks); for (const definition of source.newDefinitions ?? []) strip(definition.body);
   const draft = decodeBusinessDraft(source);
+  draft.matrixMode = matrixMode;
   const restore = (blocks: TestingBlockInstance[], wireBlocks: any[]) => blocks.forEach((block, index) => {
     const mode = modes.get(wireBlocks[index])!;
     if (mode.mode === 'replace') block.children ??= [];
@@ -70,7 +77,7 @@ export function scenarioEditChanges(before: TestingScenario, after: TestingScena
     const oldValue = comparable(old.block), newValue = comparable(entry.block);
     if (stableTestingStringify(oldValue) !== stableTestingStringify(newValue)) changes.push({ kind: 'values', path: entry.path, label: entry.label, before: oldValue, after: newValue });
   }
-  for (const [field, label] of [['title', 'Titel'], ['expectedOutcome', 'Erwartetes Ergebnis'], ['knowledgeRefs', 'Wissensquellen']] as const) {
+  for (const [field, label] of [['title', 'Titel'], ['expectedOutcome', 'Erwartetes Ergebnis'], ['knowledgeRefs', 'Wissensquellen'], ['matrix', 'Testmatrix']] as const) {
     if (stableTestingStringify(before[field]) !== stableTestingStringify(after[field])) changes.push({ kind: 'metadata', path: field, label, before: before[field], after: after[field] });
   }
   return changes;

@@ -25,10 +25,14 @@ const definition = object({ id: string, version: string, name: string, descripti
   operation: nullable(string), bindingId: nullable(string), body: array({ $ref: '#/$defs/instance' }), exports: array(object({ key: string, ref: string, type: typeSchema })) });
 const knowledge = object({ id: string, title: string, kind: { enum: ['concept', 'rule', 'procedure', 'technical'] }, summary: string, content: string,
   definitionRefs: array(ref), relatedKnowledge: strings, requiredFields: strings, preconditions: strings, postconditions: strings });
+const matrix = object({ columns: array(object({ id: identifier, label: string, blockPath: string, inputPath: string, type: typeSchema })),
+  rows: array(object({ id: identifier, label: string, enabled: boolean, values: pairs })) });
 
 /** Strict schema uses key/value rows for extensible maps, then validates decoded domain data. */
 export const BUSINESS_SCHEMA = { ...object({ title: string, expectedOutcome: string, blocks: array({ $ref: '#/$defs/instance' }), knowledgeRefs: strings,
   newDefinitions: array(definition), newKnowledge: array(knowledge), explanation: string, assumptions: strings, openQuestions: strings }), $defs: { instance } };
+BUSINESS_SCHEMA.properties.matrix = nullable({ ...matrix, description: 'Explizite Testmatrix oder null. Nur verwenden, wenn die Anforderung mehrere Datenkombinationen verlangt. blockPath und inputPath müssen exakt auf ein Eingabefeld im vorgeschlagenen Ablauf zeigen.' });
+BUSINESS_SCHEMA.required.push('matrix');
 const technicalIssue = object({
   kind: { enum: ['business-contract', 'technical-capability'], description: 'business-contract bei einer fachlich geforderten, mit dem sicheren UI-Rezept aber nicht beobachtbaren Prüfung; sonst technical-capability.' },
   summary: { type: 'string', description: 'Konkrete unbelegte Forderung und technische Grenze. Ein HTTP-Status ist nur durch capture am UI-Klick belegt, der diese Antwort auslöst. Ein deaktiviertes Element sendet keine Anfrage.' },
@@ -102,7 +106,10 @@ function decodeInstance(raw: any, depth = 0): TestingBlockInstance {
 }
 export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
   const value = z.object({ title: text.min(1), expectedOutcome: text.min(1), blocks: z.array(z.unknown()).max(100), knowledgeRefs: z.array(id),
-    newDefinitions: z.array(z.any()).max(30), newKnowledge: z.array(z.any()).max(30), explanation: text, assumptions: z.array(text), openQuestions: z.array(text) }).strict().parse(raw);
+    newDefinitions: z.array(z.any()).max(30), newKnowledge: z.array(z.any()).max(30), explanation: text, assumptions: z.array(text), openQuestions: z.array(text), matrix: z.object({
+      columns: z.array(z.object({ id, label: text.min(1), blockPath: text.min(1), inputPath: text.min(1), type: valueType }).strict()).min(1).max(20),
+      rows: z.array(z.object({ id, label: text.min(1), enabled: z.boolean(), values: z.array(pairZ) }).strict()).min(1).max(100),
+    }).strict().nullable().optional() }).strict().parse(raw);
   const newDefinitions: TestingBlockDefinition[] = value.newDefinitions.map(row => ({
     id: id.parse(row.id), version: id.parse(row.version), name: text.min(1).parse(row.name), description: text.parse(row.description),
     kind: z.enum(['action', 'assertion', 'workflow', 'context']).parse(row.kind), category: text.parse(row.category), semanticKey: text.min(1).parse(row.semanticKey),
@@ -122,7 +129,9 @@ export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
     summary: text.parse(row.summary), content: text.parse(row.content), definitionRefs: z.array(z.object({ id, version: id })).parse(row.definitionRefs),
     relatedKnowledge: z.array(id).parse(row.relatedKnowledge), requiredFields: z.array(text).parse(row.requiredFields), preconditions: z.array(text).parse(row.preconditions), postconditions: z.array(text).parse(row.postconditions), origin: 'agent',
   }));
-  return { ...value, blocks: value.blocks.map(block => decodeInstance(block)), newDefinitions, newKnowledge };
+  const { matrix: rawMatrix, ...draft } = value;
+  return { ...draft, blocks: value.blocks.map(block => decodeInstance(block)), newDefinitions, newKnowledge,
+    ...(rawMatrix ? { matrix: { columns: rawMatrix.columns.map(({ blockPath, inputPath, ...column }) => ({ ...column, target: { blockPath, inputPath } })), rows: rawMatrix.rows.map(row => ({ ...row, values: decodedPairs(row.values) })) } } : {}) };
 }
 export function decodeTechnicalPlan(raw: unknown) {
   const value = z.object({ explanation: text, reuseBindings: z.array(z.object({ id, revision: z.number().int().positive() }).strict()),

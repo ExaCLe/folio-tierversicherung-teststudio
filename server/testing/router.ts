@@ -15,6 +15,7 @@ import { applyScenarioEditJob, dismissScenarioEditJob, startScenarioEditJob, can
 import { deriveTestingLifecycle } from './lifecycle';
 import { TESTING_RUN_ROOT } from './runner';
 import { getTestingAgentSettings, resolveAgentConfiguration, saveTestingAgentSettings } from './agents/settings';
+import { generateTestingMatrix, validateTestingMatrix } from './matrix';
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown;
 const guard = (handler: Handler): Handler => (req, res, next) => { try { const result = handler(req, res, next); if (result && typeof (result as Promise<unknown>).catch === 'function') (result as Promise<unknown>).catch(next); } catch (error) { next(error); } };
@@ -58,6 +59,15 @@ export function createTestingRouter(): Router {
   router.get('/scenarios/:id/lifecycle',guard((req,res)=>res.json(deriveTestingLifecycle(getTestingScenario(req.params.id),getTestingCatalog(),listTestingJobs(),listTestingRuns(),getTestingApproval(req.params.id)))));
   router.post('/scenarios/:id/plan',guard((req,res)=>{const input=body(req),scenario=getTestingScenario(req.params.id);res.status(202).json(startBusinessJob({scenarioId:scenario.id,revision:revision(input.revision),request:scenario.intent,model:model(input.model)}));}));
   router.get('/scenarios/:id/compile', guard((req, res) => res.json(compileTestingScenario(getTestingScenario(req.params.id), getTestingCatalog(), getTestingApproval(req.params.id)))));
+  router.post('/scenarios/:id/matrix/generate', guard((req, res) => {
+    const input = body(req), scenario = getTestingScenario(req.params.id);
+    if (scenario.revision !== revision(input.revision)) throw new TestingModelError('Der Testfall wurde zwischenzeitlich geändert. Lade die aktuelle Fassung vor der Matrixerzeugung.', 409, 'REVISION_CONFLICT');
+    const columns = z.array(z.object({ id: z.string(), label: z.string(), target: z.object({ blockPath: z.string(), inputPath: z.string() }).strict(), type: z.enum(['text','number','money','boolean','date','choice','object','list','customer-ref','farm-ref','animal-ref','proposal-ref','referral-ref','contract-ref','policy-ref','document-ref']), values: z.array(z.unknown()).min(1) }).strict()).min(1).max(20, 'Eine Testmatrix darf höchstens 20 Spalten enthalten.').parse(input.columns) as any;
+    const matrix = generateTestingMatrix(columns), candidate = { ...scenario, matrix };
+    const issues = validateTestingMatrix(candidate, getTestingCatalog());
+    if (issues.length) throw new TestingModelError(issues.map(issue => issue.message).join(' '), 400, 'MATRIX_INVALID');
+    res.json({ matrix });
+  }));
   router.post('/scenarios/:id/approve', guard((req, res) => res.json(approveTestingScenario(req.params.id, revision(body(req).revision), 'Fachliche Prüfung durch den Menschen', body(req).comment))));
   router.get('/scenarios/:id/layout', guard((req, res) => { getTestingScenario(req.params.id); res.json(getTestingLayout(req.params.id)); }));
   router.put('/scenarios/:id/layout', guard((req, res) => { getTestingScenario(req.params.id); const input = body(req); res.json(saveTestingLayout({ ...input, id: req.params.id, scenarioId: req.params.id, collapsed: z.array(z.string()).parse(input.collapsed ?? []) } as TestingScenarioLayout)); }));
@@ -129,6 +139,11 @@ export function createTestingRouter(): Router {
   router.get('/runs', guard((_req, res) => res.json(listTestingRuns())));
   router.post('/runs/:id/reuse', guard(async (req, res) => res.status(202).json(await startReuseJob({ runId: req.params.id, model: model(body(req).model) }))));
   router.get('/runs/:id', guard((req, res) => res.json(getTestingRun(req.params.id))));
+  router.get('/runs/:id/rows/:rowId/artifacts/:filename', guard((req, res) => {
+    const run=getTestingRun(req.params.id),row=run.matrixRows?.find(item=>item.rowId===req.params.rowId);
+    if(!row)throw new TestingModelError('Diese Matrixzeile gehört nicht zu diesem Testlauf.',404,'RUN_ROW_NOT_FOUND');
+    const childId=`${run.id}-zeile-${String(row.index+1).padStart(3,'0')}`;sendArtifact(TESTING_RUN_ROOT,childId,req.params.filename,res);
+  }));
   router.get('/runs/:id/artifacts/:filename', guard((req, res) => { getTestingRun(req.params.id); sendArtifact(TESTING_RUN_ROOT, req.params.id, req.params.filename, res); }));
   router.post('/reuse/:id/dismiss', guard((req, res) => {
     const context = reuseContext(req.params.id); const ids = z.array(z.string()).parse(body(req).proposalIds);

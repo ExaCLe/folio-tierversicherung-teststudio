@@ -4,9 +4,9 @@ import { resolve } from 'node:path';
 import type { TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingScenarioEditProposal, TestingTechnicalPlan, TestingAgentStage, TestingAgentTermination } from '../../../shared/testing';
 import { db } from '../../store';
 import { getTestingCatalog } from '../catalog';
-import { compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from '../compiler';
+import { compileTestingMatrixRow, compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from '../compiler';
 import { applyTestingScenarioEdit, createTestingRequestDraft, completeTestingRequestDraft, createTestingScenarioFromDraft, getTestingApproval, getTestingRun, getTestingScenario, listTestingRuns, previewTestingBusinessDraft, saveTestingBinding, saveTestingRun, saveTestingScenario, TestingModelError } from '../repository';
-import { executeTestingRun } from '../runner';
+import { executeTestingMatrixRun, executeTestingRun } from '../runner';
 import { validateTestingBinding } from '../bindings/validation';
 import { invokeCodex, AGENT_ARTIFACTS_ROOT, recoverCodexJobProcesses } from './cli';
 import { agentContext, businessPrompt, duplicatePrompt, reusePrompt, technicalPrompt } from './prompts';
@@ -242,7 +242,15 @@ async function runCompiled(compiled: TestingCompiledScenario, model: TestingMode
   if(parentJobId)updateJob(parentJobId,{runId:id,stage:'running'});
   try {
     assertFresh(compiled.scenario, compiled.fingerprint);
-    const run = await executeTestingRun(compiled, { id, signal, onUpdate: update => { saveTestingRun(update); if (parentJobId) updateJob(parentJobId, { result: { ...((getTestingJob(parentJobId).result ?? {}) as object), run: update } }); } });
+    const matrix = compiled.scenario.matrix;
+    const variants = matrix?.rows.filter(row => row.enabled).map(row => {
+      const frozenCatalog = { revision: `run-${compiled.fingerprint}`, definitions: compiled.definitions, bindings: compiled.bindings, knowledge: compiled.knowledge };
+      const variant = compileTestingMatrixRow(compiled, row.id, frozenCatalog);
+      if (!variant.executable) throw new TestingModelError(`${row.label}: ${variant.issues.filter(issue => issue.severity === 'error' || issue.code === 'BINDING_MISSING').map(issue => issue.message).join(' ')}`, 400, 'MATRIX_ROW_INVALID');
+      return { row, compiled: variant };
+    });
+    const update = (value: TestingRun) => { saveTestingRun(value); if (parentJobId) updateJob(parentJobId, { result: { ...((getTestingJob(parentJobId).result ?? {}) as object), run: value } }); };
+    const run = variants ? await executeTestingMatrixRun(compiled, variants, { id, signal, onUpdate: update }) : await executeTestingRun(compiled, { id, signal, onUpdate: update });
     if (run.status !== 'passed') return { run };
     if (process.env.FOLIO_AUTO_REUSE === '0') return { run, reuseSkipped: 'Automatische KI-Nachprüfung ist für diese lokale Testserver-Konfiguration ausgeschaltet.' };
     if (signal?.aborted) return { run };
@@ -327,7 +335,7 @@ export function startDirectRun(input: { scenarioId: string; revision: number; mo
   const reuseModel = input.model ?? (settings.models.some(item => item.id === scenario.model) ? scenario.model : settings.defaultModel);
   const configuration = process.env.FOLIO_AUTO_REUSE === '0' ? undefined : resolveAgentConfiguration(reuseModel);
   const id = `testlauf-${randomUUID()}`;
-  const run: TestingRun = { id, scenarioId: scenario.id, scenarioRevision: scenario.revision, scenarioTitle: scenario.title, compiled, status: 'queued', startedAt: now(), steps: [] };
+  const run: TestingRun = { id, scenarioId: scenario.id, scenarioRevision: scenario.revision, scenarioTitle: scenario.title, compiled, status: 'queued', startedAt: now(), steps: [], ...(scenario.matrix ? { mode: 'matrix' as const, matrixRows: scenario.matrix.rows.filter(row => row.enabled).map((row, index) => ({ rowId: row.id, rowLabel: row.label, index, status: 'queued' as const, values: structuredClone(row.values) })), summary: { total: scenario.matrix.rows.filter(row => row.enabled).length, passed: 0, failed: 0, skipped: 0 } } : {}) };
   saveTestingRun(run);
   runningRuns.add(id);
   setImmediate(() => { const execute = () => runCompiled(compiled, reuseModel ?? settings.defaultModel, undefined, undefined, id); void (configuration ? withAgentConfiguration(configuration, execute) : execute()).catch(error => saveTestingRun({ ...getTestingRun(id), status: 'failed', finishedAt: now(), error: message(error) })); });

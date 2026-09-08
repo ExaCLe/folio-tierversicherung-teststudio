@@ -244,3 +244,4 @@ button.t-stage-card:active { transform: scale(.98); }
 .testing-app .t-exploration-questions p { margin: 7px 0; line-height: 1.6; }
 .t-exploration-questions small { display: block; color: #7a8870; font-size: 10px; margin-top: 5px; }
 .t-exploration-questions a { display: inline-block; margin: 8px 12px 0 0; font-size: 11px; }
+.t-matrix-tools::before { content: 'Höchstens 20 Felder'; font-size: 9px; color: #7d8976; }

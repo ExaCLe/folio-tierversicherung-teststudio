@@ -96,6 +96,39 @@ test('Kuh mit hoher Summe erreicht echte Direktionsanfrage und endet ohne Vertra
   const source = await (await request.get(result.artifacts!.source!)).text();
   expect(source).toContain('executeTestingStep'); expect(source).not.toContain('Kunde speichern');
 });
+test('Testmatrix führt Grenzwerte als isolierte Fälle aus und setzt nach einer Abweichung fort', async ({ page, request }) => {
+  const scenario = await variation(request, 'kuh-direktionsanfrage', item => { item.matrix = {
+    columns: [
+      { id: 'summe', label: 'Versicherungssumme', target: { blockPath: 'kuhvorschlag', inputPath: 'sumInsured' }, type: 'money' },
+      { id: 'erwartung', label: 'Erwarteter Zustand', target: { blockPath: 'pruefung', inputPath: 'expectedStatus' }, type: 'choice' },
+    ],
+    rows: [
+      { id: 'unter-grenze', label: 'Unter der Grenze', enabled: true, values: { summe: 9999, erwartung: 'Freigegeben' } },
+      { id: 'falsche-erwartung', label: 'Absichtliche Abweichung', enabled: true, values: { summe: 15000, erwartung: 'Freigegeben' } },
+      { id: 'auf-grenze', label: 'Genau auf der Grenze', enabled: true, values: { summe: 10000, erwartung: 'Freigegeben' } },
+      { id: 'ueber-grenze', label: 'Direkt über der Grenze', enabled: true, values: { summe: 10001, erwartung: 'Direktionsprüfung' } },
+    ],
+  }; });
+  await approve(request, scenario); const result = await run(request, scenario);
+  expect(result.mode).toBe('matrix'); expect(result.status).toBe('failed');
+  expect(result.summary).toEqual({ total: 4, passed: 3, failed: 1, skipped: 0 });
+  expect(result.matrixRows?.map(row => row.status)).toEqual(['passed', 'failed', 'passed', 'passed']);
+  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'kuhvorschlag/tier')?.inputs.sumInsured)).toEqual([9999, 15000, 10000, 10001]);
+  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'pruefung')?.inputs.expectedStatus)).toEqual(['Freigegeben', 'Freigegeben', 'Freigegeben', 'Direktionsprüfung']);
+  const customerReferences = result.matrixRows?.map(row => Object.entries(row.outputs ?? {}).find(([key]) => key.endsWith('::customer'))?.[1]);
+  expect(new Set(customerReferences).size).toBe(4);
+  expect(result.matrixRows?.[1].steps?.find(step => step.status === 'failed')?.path).toBe('pruefung');
+  for (const row of result.matrixRows ?? []) {
+    expect(row.artifacts?.trace).toBeTruthy(); expect((await request.get(row.artifacts!.trace!)).status()).toBe(200);
+    expect(row.artifacts?.source).toBeTruthy(); expect((await request.get(row.artifacts!.source!)).status()).toBe(200);
+    const screenshot = row.steps?.find(step => step.screenshot)?.screenshot;
+    expect(screenshot).toBeTruthy(); expect((await request.get(screenshot!)).status()).toBe(200);
+  }
+  await page.goto(`/testing/editor/${scenario.id}?step=5`);
+  await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toContainText('3 von 4 Testfällen bestanden');
+  await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toContainText('Absichtliche Abweichung');
+  await page.screenshot({ path: '.local/verification/matrix/testmatrix-ergebnis-mit-abweichung.png', fullPage: true });
+});
 test('Standardvertrag in Bayern hat neue Policenversion und exakten Sachbearbeiter-Drucknachweis', async ({ request }) => {
   const scenario = await variation(request, 'kuh-police-drucken'); await approve(request, scenario);
   const result = await run(request, scenario); expect(result.status, result.error).toBe('passed'); expect(result.steps).toHaveLength(10);
