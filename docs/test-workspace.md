@@ -15,10 +15,10 @@ Die Adresse des Testfalls, seine gespeicherte Revision und zugehörige Aufträge
 | Anforderung | Ein Eingabefeld, die Modellauswahl und der Start | Sobald der Wunsch beschrieben ist |
 | Wissen und Anwendung erkunden | Was bereits bekannt ist, welche Frage noch offen ist und woran die KI arbeitet | Sobald ein prüfbarer Entwurf oder eine konkrete offene Frage vorliegt |
 | Ablauf prüfen | Scratch-Blöcke mit editierbaren Werten | Nach fachlicher Prüfung und ausdrücklicher Freigabe |
-| Test vorbereiten und ausführen | Umsetzung, Vergleich mit anderen Bausteinen und Browserlauf als getrennte Arbeitsschritte | Nach einer erforderlichen Entscheidung oder abgeschlossenem Browserlauf |
+| Test vorbereiten und ausführen | Umsetzung, Vergleich mit anderen Bausteinen und Browserlauf als getrennte Arbeitsschritte | Die technische Vorbereitung startet nach der Freigabe automatisch. Danach folgt der Browserlauf, sobald die nötigen Entscheidungen vorliegen. |
 | Ergebnis | Bestanden oder fehlgeschlagen, mit den passenden Nachweisen | Der Test kann erneut ausgeführt oder überarbeitet werden |
 
-Bereits erreichte Schritte lassen sich über die Schrittleiste erneut ansehen. Der Wechsel zurück zur Erkundung zeigt die damaligen Agentenergebnisse; er startet keinen neuen Auftrag und verändert keine Freigabe.
+Bereits erreichte Schritte lassen sich über die Schrittleiste erneut ansehen. Nach der fachlichen Freigabe zeigt der technische Schritt nur seinen eigenen aktuellen Stand. Der alte fachliche Prüfschritt wird dort nicht nochmals als erledigt gezählt. Der Wechsel zurück zur Erkundung zeigt die damaligen Agentenergebnisse; er startet keinen neuen Auftrag und verändert keine Freigabe.
 
 Ein beendeter KI-Aufruf ist kein bestandener Test. Die KI kann einen Vorschlag geliefert haben, der noch geprüft werden muss. Ebenso kann eine technische Planung eine fehlende Fähigkeit oder eine mögliche Wiederverwendung melden, ohne bereits einen Browserlauf auszuführen.
 
@@ -28,7 +28,7 @@ Beim ersten Entwurf arbeitet die KI der Reihe nach: einen passenden Titel bestim
 
 In der technischen Vorbereitung können zwei Arbeiten gleichzeitig laufen: die Browseraktionen vorbereiten und die Bausteine mit bestehenden Definitionen vergleichen. Die Anzeige trennt diese Arbeitszweige und zeigt ihren jeweiligen Stand. Der Browserlauf folgt erst, wenn die dafür notwendigen Prüfungen abgeschlossen sind.
 
-Abgeschlossene Schritte und beobachtete Aktionen zeigen den Fortschritt. Sie sind keine Schätzung der verbleibenden Zeit. Der Button für Agentenerläuterungen öffnet einen Dialog mit verständlichen öffentlichen Meldungen und Ergebnissen. Reine Empfangsbestätigungen und technische Werkzeugereignisse gehören nicht in diese Erläuterungen. Benannte Wissensquellen und Browserbelege lassen sich von dort öffnen. Die Anzeige zählt protokollierte Werkzeugmeldungen im verfügbaren Verlauf; Browserbeobachtungen werden separat gezählt. Eine fehlende neue Modellmeldung bedeutet nicht automatisch, dass der Auftrag stehen geblieben ist.
+Abgeschlossene Schritte und beobachtete Aktionen zeigen den Fortschritt. Sie sind keine Schätzung der verbleibenden Zeit. Jede Agentenkarte öffnet ihr eigenes Dialogfenster mit dem tatsächlichen Ergebnis und den verständlichen öffentlichen Erläuterungen dieses Auftrags. Reine Empfangsbestätigungen und technische Werkzeugereignisse gehören nicht in diese Erläuterungen. Benannte Wissensquellen und Browserbelege lassen sich von dort öffnen. Die Anzeige zählt protokollierte Werkzeugmeldungen im verfügbaren Verlauf; Browserbeobachtungen werden separat gezählt. Eine fehlende neue Modellmeldung bedeutet nicht automatisch, dass der Auftrag stehen geblieben ist.
 
 Für die Erkundung hält die KI ihre Prüffragen fest. Diese Liste bleibt über die einzelnen Modellaufrufe erhalten. So kann beispielsweise die Frage nach einer dritten Benutzerrolle nicht verschwinden, nachdem zwei andere Rollen geprüft wurden. Beantwortete Fragen verweisen auf ihre Belege; offene Fragen verhindern einen vollständigen Abschluss.
 
@@ -41,13 +41,15 @@ Ein Zeitlimit, eine technische Unterbrechung und ein ausdrücklich angeforderter
 | Ein Auftrag läuft | Fortschritt ansehen oder abbrechen |
 | Lokale fachliche Änderungen | Speichern und erneut fachlich prüfen |
 | Offene Frage oder ungültiger fachlicher Ablauf | Die betroffene Angabe klären |
-| Gültiger Ablauf ohne aktuelle Freigabe | Fachlich freigeben |
-| Freigegeben, aber noch nicht ausgeführt | Technik vorbereiten und Probelauf starten |
+| Gültiger Ablauf ohne aktuelle Freigabe | Fachlich freigeben. Dadurch startet die technische Vorbereitung automatisch. |
+| Freigegeben, technische Vorbereitung läuft | Ergebnis der technischen Agenten abwarten oder die betroffene Karte öffnen |
 | Wiederverwendung oder Erweiterung vorgeschlagen | Den konkreten Vergleich beurteilen |
 | Zugeordneter Browserlauf fehlgeschlagen | Den fehlgeschlagenen Schritt prüfen |
 | Zugeordneter Browserlauf bestanden | Ergebnis ansehen; Wiederverwendung optional prüfen |
 
 Bei vorhandener Technik bleibt die direkte Ausführung die Hauptaktion. Für eine erneute technische Vorbereitung gibt es eine eigene Schaltfläche mit Modellauswahl im Dialog.
+
+Meldet die technische Vorbereitung eine nicht unterstützte Fähigkeit, zeigt der technische Schritt „Technische Fragen klären“ einen eigenen Abschnitt „Mit KI überarbeiten“. Dort wählst du das „Lokale Modell für die fachliche Überarbeitung“ und formulierst die gewünschte fachliche Änderung. Mit „Mit KI überarbeiten“ startest du den Vorschlag. Du prüfst ihn, übernimmst ihn bei Bedarf und gibst den neuen fachlichen Stand mit „Freigeben und technisch prüfen“ erneut frei. „Manuell im Ablauf bearbeiten“ bleibt möglich.
 
 Ein Ergebnis gehört zu einem konkreten Auftrag und dessen Fachstand. Ein alter grüner Lauf darf nicht als Ergebnis eines neueren, noch unvollständigen Auftrags erscheinen. Nach einer fachlichen Änderung bleiben ältere Nachweise in der Historie, gelten aber nicht als Nachweis für die Änderung.
 

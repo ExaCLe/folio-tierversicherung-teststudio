@@ -1,16 +1,36 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { CheckCircle2, Circle, LoaderCircle, AlertCircle, Minus } from 'lucide-react';
-import type { TestingAgentJob, TestingKnowledgeDocument } from '../../shared/testing';
+import type { TestingAgentJob, TestingCatalog, TestingKnowledgeDocument, TestingVersionRef } from '../../shared/testing';
 import { DetailsButton } from './DetailsButton';
 import { AgentFailure } from './AgentFailure';
 import { ExplorationQuestions } from './ExplorationQuestions';
 import { jobModelLabel } from './AgentModels';
 import { activityModel, branchEvents, meaningfulExplanation, waitsForAgent, type ActivityStageState } from './agentActivityModel';
+import { Modal } from './ui';
 const stateLabels: Record<ActivityStageState, string> = { waiting: 'Noch offen', running: 'In Bearbeitung', completed: 'Erledigt', skipped: 'Nicht nötig', failed: 'Unterbrochen' };
 function StageIcon({ state }: { state: ActivityStageState }) {
   return state === 'running' ? <LoaderCircle className="t-spin" size={16}/> : state === 'completed' ? <CheckCircle2 size={16}/> : state === 'skipped' ? <Minus size={16}/> : state === 'failed' ? <AlertCircle size={16}/> : <Circle size={16}/>;
 }
-export function InlineAgentActivity({ job, related = [], onCancel, children, knowledge = [] }: { job: TestingAgentJob; related?: TestingAgentJob[]; onCancel?: () => void; children?: ReactNode; knowledge?: TestingKnowledgeDocument[] }) {
+type Decision = { proposed: TestingVersionRef; chosen?: TestingVersionRef | null; decision: string; compatible: boolean; reason?: string };
+type PublicResult = { explanation?: string; unsupported?: Array<string | { summary?: string; message?: string }>; decisions?: Decision[]; duplicateDecisions?: Decision[]; plan?: PublicResult };
+function resultLines(stageId: string, job: TestingAgentJob, catalog?: TestingCatalog) {
+  const root = job.result as PublicResult | undefined;
+  const result = root?.plan ?? root;
+  const lines: string[] = [];
+  const add = (value?: string) => { const explanation = meaningfulExplanation(value); if (explanation && !lines.includes(explanation)) lines.push(explanation); };
+  add(result?.explanation);
+  for (const item of result?.unsupported ?? []) add(typeof item === 'string' ? item : item.summary ?? item.message);
+  if (stageId === 'duplicates') for (const item of root?.duplicateDecisions ?? root?.decisions ?? []) {
+    const name = (ref?: TestingVersionRef | null) => ref ? catalog?.definitions.find(definition => definition.id === ref.id && definition.version === ref.version)?.name ?? ref.id : undefined;
+    const proposed = `${name(item.proposed)} · Version ${item.proposed.version}`;
+    const chosen = item.chosen ? `${name(item.chosen)} · Version ${item.chosen.version}` : undefined;
+    const decision = item.decision === 'reuse' ? `Vorschlag: Vorhandenen Baustein wiederverwenden.${item.compatible ? '' : ' Fachliche Prüfung erforderlich.'}` : item.decision === 'extend' ? 'Vorschlag: Die vorhandene Fähigkeit fachlich erweitern.' : 'Vorschlag: Eigenen Baustein behalten.';
+    add(`${proposed}${chosen ? ` wurde mit ${chosen} verglichen.` : ' wurde als eigener Baustein geprüft.'} ${decision}${item.reason ? ` ${item.reason}` : ''}`);
+  }
+  return lines;
+}
+export function InlineAgentActivity({ job, related = [], onCancel, children, knowledge = [], catalog }: { job: TestingAgentJob; related?: TestingAgentJob[]; onCancel?: () => void; children?: ReactNode; knowledge?: TestingKnowledgeDocument[]; catalog?: TestingCatalog }) {
+  const [openStage, setOpenStage] = useState<string>();
   const model = activityModel(job, related);
   const toolLabel = `${model.toolCount} ${model.toolCount === 1 ? 'protokollierte Werkzeugmeldung' : 'protokollierte Werkzeugmeldungen'}`;
   const attention = !!(job.result as { needsBusinessReview?: boolean; needsKnowledge?: boolean } | undefined)?.needsBusinessReview || !!(job.result as { needsKnowledge?: boolean } | undefined)?.needsKnowledge;
@@ -20,7 +40,15 @@ export function InlineAgentActivity({ job, related = [], onCancel, children, kno
   return <section className={`t-inline-activity ${model.running ? 'running' : failed ? 'failed' : ''}`} aria-label="Aktueller Arbeitsstand">
     <div className="t-activity-heading"><span className="t-activity-symbol">{model.running ? <LoaderCircle className="t-spin" size={22}/> : failed ? <AlertCircle size={22}/> : <Circle size={22}/>}</span><div><span className="t-eyebrow">{model.running ? 'IN BEARBEITUNG' : failed || attention ? 'AUFMERKSAMKEIT NÖTIG' : cancelled ? 'ABGEBROCHEN' : 'ERGEBNIS PRÜFEN'}</span><h2>{model.heading}</h2></div>{model.running && onCancel && <button className="t-button small" onClick={onCancel}>Auftrag abbrechen</button>}</div>
     <div className="t-activity-metrics" aria-label="Fortschritt des Auftrags"><span>{model.activeJobs.length} {model.activeJobs.length === 1 ? 'aktiver KI-Agent' : 'aktive KI-Agenten'}</span><span>{model.completed} von {model.stages.length} Arbeitsschritten erledigt{model.skipped > 0 ? ` · ${model.skipped} nicht nötig` : ''}</span></div>
-    <ol className={`t-agent-stages ${job.phase === 'technical' ? 'parallel' : 'sequential'}`} aria-label="Arbeitsschritte der KI">{model.stages.map(stage => <li key={stage.id} data-stage={stage.id} data-state={stage.state}><StageIcon state={stage.state}/><span>{stage.label}</span><small>{stage.id === 'exploring' && stage.state === 'waiting' ? 'Bei Bedarf' : stage.job && waitsForAgent(stage.job) && stage.state === 'waiting' ? 'Wartet auf KI-Platz' : stage.job?.status === 'queued' && stage.state === 'waiting' ? 'Wartet auf Start' : stateLabels[stage.state]}</small>{job.phase === 'technical' && stage.job && stage.state !== 'waiting' && <div className="t-branch-details"><DetailsButton className="t-source-button" label={`Erläuterungen zu „${stage.label}“`}>{meaningfulExplanation(stage.summary) && <p>{stage.summary}</p>}{!meaningfulExplanation(stage.summary) && !branchEvents(stage.job, related, stage.id).length && <p>Für diesen Arbeitsschritt liegt noch keine fachliche Erläuterung vor.</p>}{branchEvents(stage.job, related, stage.id).map(event => <p key={event.id}>{event.message}</p>)}</DetailsButton></div>}</li>)}</ol>
+    <ol className={`t-agent-stages ${job.phase === 'technical' ? 'parallel' : 'sequential'}`} aria-label="Arbeitsschritte der KI">{model.stages.map(stage => {
+      const events = stage.job ? branchEvents(stage.job, related, stage.id) : [];
+      const details = stage.job ? resultLines(stage.id, stage.job, catalog) : [];
+      const summary = meaningfulExplanation(stage.summary);
+      const canOpen = !!stage.job && (!!summary || events.length > 0 || details.length > 0);
+      const status = stage.id === 'exploring' && stage.state === 'waiting' ? 'Bei Bedarf' : stage.job && waitsForAgent(stage.job) && stage.state === 'waiting' ? 'Wartet auf KI-Platz' : stage.job?.status === 'queued' && stage.state === 'waiting' ? 'Wartet auf Start' : stateLabels[stage.state];
+      const content = <><StageIcon state={stage.state}/><span>{stage.label}</span><small>{status}</small></>;
+      return <li key={stage.id} data-stage={stage.id} data-state={stage.state}>{canOpen ? <button type="button" className="t-stage-card" aria-label={`${stage.label}: Ergebnis und Erläuterungen ansehen`} onClick={() => setOpenStage(stage.id)}>{content}</button> : <div className="t-stage-card">{content}</div>}{openStage === stage.id && <Modal title={stage.label} subtitle="Ergebnis und Erläuterungen dieses Arbeitsschritts" onClose={() => setOpenStage(undefined)}>{summary && <section><h3>Ergebnis</h3><p>{summary}</p></section>}{details.map((line, index) => <p key={`result-${index}`}>{line}</p>)}{!!events.length && <section><h3>Meldungen</h3>{events.map(event => <p key={event.id}>{event.message}</p>)}</section>}</Modal>}</li>;
+    })}</ol>
     {model.running && <div className="t-activity-current" aria-live="polite">{model.current.length ? model.current.map(stage => <div key={stage.id}>{model.current.length > 1 && <strong>{stage.label}</strong>}<p>{(stage.job?.progress?.stage === stage.id && stage.job.progress.status !== 'finished' ? meaningfulExplanation(stage.job.progress.summary) : undefined) ?? meaningfulExplanation(stage.summary) ?? branchEvents(stage.job ?? job, related, stage.id).at(-1)?.message ?? 'Der nächste Arbeitsschritt wird vorbereitet.'}</p></div>) : <p>{model.waitingAgents ? 'Die Bearbeitung wartet auf einen freien lokalen KI-Platz.' : 'Der Auftrag wartet auf den nächsten Arbeitsschritt.'}</p>}<small>{job.phase === 'technical' ? 'Technische Vorbereitung und Bausteinvergleich können gleichzeitig arbeiten. Danach folgt der Probelauf.' : 'Die Schritte werden nacheinander bearbeitet. Ein Zwischenergebnis beendet den Auftrag noch nicht.'}</small></div>}
     {progress && <p className="t-exploration-counts">{progress.observationCount} {progress.observationCount === 1 ? 'Beobachtung' : 'Beobachtungen'} in der Anwendung · {progress.round} {progress.round === 1 ? 'Erkundungsrunde' : 'Erkundungsrunden'}</p>}
     {!related.some(item => item.phase === 'exploration' && ['completed', 'failed', 'cancelled'].includes(item.status) && item.result) && <ExplorationQuestions questions={progress?.questions} knowledge={knowledge}/>}

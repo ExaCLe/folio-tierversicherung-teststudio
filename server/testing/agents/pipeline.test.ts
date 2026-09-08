@@ -267,6 +267,7 @@ test('Änderung während technischem und Dublettenauftrag verhindert jede Übern
   repository.approveTestingScenario(scenario.id, scenario.revision);
   const bindingsBefore = JSON.stringify(getTestingCatalog().bindings);
   const job = orchestrator.startTechnicalJob({ scenarioId: scenario.id, revision: scenario.revision, model: 'luna' });
+  assert.throws(() => orchestrator.startTechnicalJob({ scenarioId: scenario.id, revision: scenario.revision, model: 'luna' }), /läuft bereits ein Auftrag/);
   repository.saveTestingScenario({ ...scenario, title: `${scenario.title} geändert` }, scenario.revision);
   const completed = await orchestrator.waitTestingJob(job.id);
   assert.equal(completed.status, 'failed'); assert.match(completed.error!, /geändert|veraltet/);

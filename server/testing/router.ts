@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { basename, resolve, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
-import type { TestingAgentJob, TestingApproval, TestingBlockInstance, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding } from '../../shared/testing';
+import type { TestingAgentJob, TestingApproval, TestingBlockInstance, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingTechnicalIssue } from '../../shared/testing';
 import { db } from '../store';
 import { getTestingCatalog } from './catalog';
 import { compileTestingScenario, testingFingerprint } from './compiler';
@@ -63,6 +63,17 @@ export function createTestingRouter(): Router {
   router.put('/scenarios/:id/layout', guard((req, res) => { getTestingScenario(req.params.id); const input = body(req); res.json(saveTestingLayout({ ...input, id: req.params.id, scenarioId: req.params.id, collapsed: z.array(z.string()).parse(input.collapsed ?? []) } as TestingScenarioLayout)); }));
   router.post('/scenarios/:id/interpret-override', guard((req, res) => { const input = body(req); res.status(202).json(startBusinessJob({ scenarioId: req.params.id, revision: revision(input.revision), instanceId: z.string().parse(input.instanceId), request: input.text, model: model(input.model) })); }));
   router.post('/scenarios/:id/interpret-revision', guard((req, res) => { const input = body(req); res.status(202).json(startScenarioEditJob({ scenarioId: req.params.id, revision: revision(input.revision), text: input.text, model: model(input.model) })); }));
+  router.post('/scenarios/:scenarioId/jobs/:id/revise-unsupported', guard((req, res) => {
+    const input = body(req), source = getTestingJob(req.params.id);
+    const result = source.result as { repairContext?: { scenarioId?: string; scenarioRevision?: number; fingerprint?: string; issues?: (string | TestingTechnicalIssue)[] } } | undefined;
+    if (source.phase !== 'technical' || source.status !== 'completed' || source.scenarioId !== req.params.scenarioId || result?.repairContext?.scenarioId !== req.params.scenarioId || !result.repairContext.scenarioRevision) throw new TestingModelError('Dieser Auftrag enthält für den angegebenen Testfall keine technische Lücke zur fachlichen Überarbeitung.', 409);
+    const index = z.number().int().nonnegative().parse(input.issueIndex ?? 0), issue = result.repairContext.issues?.[index];
+    const instruction = z.string().trim().min(3).max(15_000).optional().parse(input.instruction);
+    if (!issue || typeof issue === 'string' || issue.kind !== 'business-contract' || !issue.suggestedBusinessRevision) throw new TestingModelError('Diese technische Meldung enthält keinen fachlichen Überarbeitungsvorschlag.', 409);
+    const scenario = getTestingScenario(result.repairContext.scenarioId);
+    const context = `Technische Prüfung ${source.id} für Revision ${result.repairContext.scenarioRevision} mit Fingerprint ${result.repairContext.fingerprint}: ${issue.summary}\nBetroffene Blockpfade: ${issue.blockPaths.join(', ')}\nBetroffene Definitionen: ${issue.affectedDefinitionRefs.map(ref => `${ref.id}@${ref.version}`).join(', ')}\nBetroffene Eingaben: ${issue.affectedInputKeys.join(', ') || 'keine'}\nGewünschte fachliche Überarbeitung: ${issue.suggestedBusinessRevision}${instruction ? `\nZusätzliche Anweisung des Menschen: ${instruction}` : ''}\nErstelle den Änderungsvorschlag gegen die aktuelle gespeicherte Revision ${scenario.revision}; übernimm die historische technische Meldung nicht ungeprüft, falls sich der Ablauf inzwischen geändert hat.`;
+    res.status(202).json(startScenarioEditJob({ scenarioId: scenario.id, revision: scenario.revision, text: context, model: model(input.model) }));
+  }));
   router.post('/scenarios/:id/run', guard((req, res) => { const input = body(req); res.status(202).json(startDirectRun({ scenarioId: req.params.id, revision: revision(input.revision), ...(input.model ? { model: model(input.model) } : {}) })); }));
   router.post('/definitions', guard((req, res) => res.status(201).json(saveTestingDefinition(body(req).definition,body(req).newKnowledge??[]))));
   router.post('/knowledge', guard((req, res) => res.status(201).json(saveTestingKnowledge(body(req).document))));

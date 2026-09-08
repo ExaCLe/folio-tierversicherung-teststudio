@@ -101,7 +101,7 @@ test('Anforderung bleibt sofort gespeichert; Navigation, Reload und laufende Kin
     { ...child, status: 'completed', result: { explored: false, evidence: [], newKnowledge: [], openQuestions: [], explanation: 'Vorhandene fiktive Regeln reichen aus.' } }];
   await page.reload();
   await expect(nextHeading(page)).toHaveText('Passt dieser Ablauf zu deiner Anforderung?');
-  await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Freigeben und technisch prüfen', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Schritt 2: Erkundung & Entwurf', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Erkundungsergebnis', exact: true })).toContainText('Das vorhandene Wissen reicht');
   await page.getByRole('button', { name: 'Schritt 3: Fachlich prüfen', exact: true }).click();
@@ -168,7 +168,7 @@ test('Eine Wissenslücke bleibt sichtbar und lässt denselben gespeicherten Test
 test('Neues Fachwissen wird beim Definieren über die echte API gemeinsam mit dem Block gespeichert', async ({ page, request }, testInfo) => {
   const current = await scenarioFixture(request); await transport(page, { jobs: [], runs: [] });
   await page.goto(`/testing/editor/${current.id}`);
-  await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Freigeben und technisch prüfen', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
   await page.getByRole('button', { name: 'Neuen Block definieren', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Einen fachlichen Block definieren', exact: true });
@@ -216,6 +216,11 @@ test('Eine manuell gespeicherte neue Revision lässt sich trotz alter offener Ba
   const blocked = job(current, { phase: 'technical', stage: 'duplicates', status: 'completed', fingerprint: compiled.fingerprint,
     result: { needsBusinessReview: true, plan: { unsupported: ['Synthetische Entscheidung für den früheren Fachstand.'] } } });
   await transport(page, { jobs: [blocked], runs: [] });
+  const technicalRequests: unknown[] = [];
+  await page.route('**/api/testing/jobs/technical', async route => {
+    const payload = route.request().postDataJSON(); technicalRequests.push(payload);
+    await route.fulfill({ status: 202, json: job({ ...current, revision: payload.revision }, { phase: 'technical', stage: 'wiring', status: 'running', model: payload.model, fingerprint: undefined, result: undefined }) });
+  });
   await page.goto(`/testing/editor/${current.id}`);
   await expect(page.getByRole('button', { name: 'Vorschläge ansehen', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
@@ -227,10 +232,11 @@ test('Eine manuell gespeicherte neue Revision lässt sich trotz alter offener Ba
   expect(revised.revision).toBe(current.revision + 1);
   expect(revised.blocks).not.toEqual(current.blocks);
   await expect(page.getByRole('button', { name: 'Vorschläge ansehen', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Freigeben und technisch prüfen', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Aktueller Arbeitsstand' })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
-  await expect(nextHeading(page)).toHaveText('Bereit für die technische Prüfung');
+  await page.getByRole('button', { name: 'Freigeben und technisch prüfen', exact: true }).click();
+  await expect(nextHeading(page)).toHaveText('Die Anwendung wird vorbereitet und geprüft');
+  expect(technicalRequests).toEqual([{ scenarioId: current.id, revision: revised.revision, model: 'luna' }]);
   const approved = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;
   expect(approved.scenarioRevision).toBe(revised.revision);
   expect(approved.issues.some(item => ['APPROVAL_REQUIRED', 'APPROVAL_STALE'].includes(item.code))).toBe(false);
@@ -266,6 +272,54 @@ test('Schritt zwei zeigt nach technischer Vorbereitung die frühere Erkundung oh
   expect((await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json()).approval).toEqual(compiled.approval);
 });
 
+test('Eine technische Vertragsgrenze bietet eine angeleitete KI-Überarbeitung mit lokaler Modellwahl an', async ({ page, request }, testInfo) => {
+  const current = await scenarioFixture(request);
+  await request.post(`/api/testing/scenarios/${current.id}/approve`, { data: { revision: current.revision } });
+  const compiled = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;
+  const issue = { kind: 'business-contract' as const, summary: 'Der erwartete HTTP-Status kann an einem deaktivierten Bedienelement nicht beobachtet werden.', affectedDefinitionRefs: [current.blocks[0].definition], affectedInputKeys: ['expectedHttpStatus'], blockPaths: [current.blocks[0].id], suggestedBusinessRevision: 'Prüfe stattdessen die tatsächliche Bedienbarkeit des sichtbaren Elements.' };
+  const technical = job(current, { phase: 'technical', stage: 'wiring', status: 'completed', fingerprint: compiled.fingerprint, result: { plan: { explanation: 'Die technische Zuordnung wurde geprüft.', unsupported: [issue] }, repairContext: { sourceJobId: 'technical-contract-fixture', scenarioId: current.id, scenarioRevision: current.revision, fingerprint: compiled.fingerprint, issues: [issue] } } });
+  technical.id = 'technical-contract-fixture';
+  const state = { jobs: [technical], runs: [] }; await transport(page, state);
+  const repairs: unknown[] = [];
+  await page.route(`**/api/testing/scenarios/${current.id}/jobs/${technical.id}/revise-unsupported`, async route => {
+    repairs.push(route.request().postDataJSON());
+    await route.fulfill({ status: 202, json: job(current, { phase: 'business', status: 'running', parentJobId: undefined }) });
+  });
+  await page.goto(`/testing/editor/${current.id}`);
+  await expect(nextHeading(page)).toHaveText('Technische Fragen klären');
+  await expect(activity(page)).toContainText(issue.summary);
+  const repair = page.getByRole('region', { name: 'Technische Grenze mit KI überarbeiten', exact: true });
+  await repair.getByLabel('Lokales Modell für die fachliche Überarbeitung', { exact: true }).selectOption('sol');
+  await repair.getByLabel('Anweisung für den gesamten Ablauf', { exact: true }).fill('Ersetze die Statuscode-Erwartung durch eine fachliche Prüfung der Bedienbarkeit.');
+  await page.screenshot({ path: testInfo.outputPath('technische-grenze-mit-ki-ueberarbeiten.png'), fullPage: true });
+  await repair.getByRole('button', { name: 'Mit KI überarbeiten', exact: true }).click();
+  await expect.poll(() => repairs.length).toBe(1);
+  await expect(repair.getByRole('button', { name: 'Mit KI überarbeiten', exact: true })).toBeEnabled();
+  expect(repairs).toEqual([{ issueIndex: 0, model: 'sol', instruction: 'Ersetze die Statuscode-Erwartung durch eine fachliche Prüfung der Bedienbarkeit.' }]);
+});
+
+test('Eine alte gespeicherte technische Grenze bleibt über einen normalen KI-Vorschlag reparierbar', async ({ page, request }) => {
+  const current = await scenarioFixture(request);
+  await request.post(`/api/testing/scenarios/${current.id}/approve`, { data: { revision: current.revision } });
+  const compiled = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;
+  const technical = job(current, { phase: 'technical', stage: 'wiring', status: 'completed', fingerprint: compiled.fingerprint, result: { plan: { unsupported: ['Die gespeicherte Aktion braucht einen beobachtbaren Nachweis.'] } } });
+  await transport(page, { jobs: [technical], runs: [] });
+  const revisions: unknown[] = [];
+  await page.route(`**/api/testing/scenarios/${current.id}/interpret-revision`, async route => {
+    revisions.push(route.request().postDataJSON());
+    await route.fulfill({ status: 202, json: job(current, { phase: 'business', status: 'running' }) });
+  });
+  await page.goto(`/testing/editor/${current.id}`);
+  const repair = page.getByRole('region', { name: 'Technische Grenze mit KI überarbeiten', exact: true });
+  await repair.getByLabel('Anweisung für den gesamten Ablauf', { exact: true }).fill('Formuliere eine fachlich beobachtbare Prüfung.');
+  await repair.getByRole('button', { name: 'Mit KI überarbeiten', exact: true }).click();
+  await expect.poll(() => revisions.length).toBe(1);
+  await expect(repair.getByRole('button', { name: 'Mit KI überarbeiten', exact: true })).toBeEnabled();
+  expect(revisions[0]).toMatchObject({ model: 'luna', revision: current.revision });
+  expect((revisions[0] as { text: string }).text).toContain(technical.id);
+  expect((revisions[0] as { text: string }).text).toContain('Die gespeicherte Aktion braucht einen beobachtbaren Nachweis.');
+});
+
 test('Ein verspäteter KI-Titel aktualisiert nur saubere Felder und bewahrt lokale Bearbeitung', async ({ page, request }) => {
   const current = await scenarioFixture(request, true);
   const parent = job(current); const state: TransportFixture = { jobs: [parent], runs: [] }; await transport(page, state);
@@ -297,7 +351,7 @@ test('Die fachliche Freigabe bündelt Hinweise und öffnet bei echten Fehlern de
   await page.goto(`/testing/editor/${current.id}`);
   await expect(page.getByRole('button', { name: '1 Information', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '0 Warnungen', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
+  await page.getByRole('button', { name: 'Freigeben und technisch prüfen', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Hinweise zum Testfall', exact: true });
   await expect(dialog).toBeVisible();
   await dialog.locator('.t-review-issue.error').filter({ hasText: customerName }).first().click();

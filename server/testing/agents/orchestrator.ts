@@ -181,6 +181,7 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
 
 export function startScenarioEditJob(input: { scenarioId: string; revision: number; text: string; model: TestingModel }) {
   if (typeof input.text !== 'string' || input.text.trim().length < 5 || input.text.length > 15_000) throw new TestingModelError('Bitte die gewünschte Ablaufänderung mit 5 bis 15.000 Zeichen beschreiben.');
+  if (listTestingJobs().some(job => job.scenarioId === input.scenarioId && !job.parentJobId && ['queued', 'running'].includes(job.status))) throw new TestingModelError('Für diesen Testfall läuft bereits ein Auftrag.', 409);
   const scenario = getTestingScenario(input.scenarioId), catalog = getTestingCatalog();
   if (scenario.revision !== input.revision) throw new TestingModelError('Der Änderungsvorschlag benötigt die aktuelle gespeicherte Testfallrevision.', 409, 'AGENT_REVISION_STALE');
   const fingerprint = testingFingerprint(scenario, catalog);
@@ -256,6 +257,7 @@ async function runCompiled(compiled: TestingCompiledScenario, model: TestingMode
   } finally { runningRuns.delete(id); }
 }
 export function startTechnicalJob(input: { scenarioId: string; revision: number; model: TestingModel; repairBindingId?: string }) {
+  if (listTestingJobs().some(job => job.scenarioId === input.scenarioId && !job.parentJobId && ['queued', 'running'].includes(job.status))) throw new TestingModelError('Für diesen Testfall läuft bereits ein Auftrag.', 409);
   const { scenario, catalog, compiled } = requireApproved(input.scenarioId, input.revision);
   const failedRun = listTestingRuns().find(run => run.scenarioId === scenario.id && run.compiled.fingerprint === compiled.fingerprint && run.status === 'failed');
   return launch('technical', input.model, input.repairBindingId ? `Technische Bindung ${input.repairBindingId} anhand des kleinsten fehlgeschlagenen Blocks reparieren.` : 'Freigegebenen Fachablauf technisch verdrahten, Dubletten prüfen und im Browser ausführen.', async (job, signal) => {
@@ -289,12 +291,18 @@ export function startTechnicalJob(input: { scenarioId: string; revision: number;
     }
     const reports = compiled.definitions.filter(item => item.origin !== 'seed').map(definition => findTestingDuplicates(definition, catalog));
     const reviewDuplicates = duplicateResult.decisions.filter(item => item.decision !== 'new');
-    const unsupported = [...technical.unsupported, ...duplicateResult.unresolved,
-      ...reviewDuplicates.map(item => `Fachliche Prüfung erforderlich: ${item.proposed.id} sollte ${item.decision === 'reuse' ? 'durch einen vorhandenen Block ersetzt' : 'als Erweiterung eines vorhandenen Blocks geprüft'} werden. ${item.reason}`)];
+    const duplicateIssue = (summary: string, proposed?: { id: string; version: string }) => {
+      const ref = proposed;
+      const affected = ref ? compiled.steps.filter(step => step.definition.id === ref.id && step.definition.version === ref.version) : [];
+      return { kind: 'duplicate-review' as const, summary, affectedDefinitionRefs: ref ? [ref] : [], affectedInputKeys: [], blockPaths: affected.map(step => step.path) };
+    };
+    const unsupported = [...technical.unsupported, ...duplicateResult.unresolved.map(summary => duplicateIssue(summary)),
+      ...reviewDuplicates.map(item => duplicateIssue(`Fachliche Prüfung erforderlich: ${item.proposed.id} sollte ${item.decision === 'reuse' ? 'durch einen vorhandenen Block ersetzt' : 'als Erweiterung eines vorhandenen Blocks geprüft'} werden. ${item.reason}`, item.proposed))];
     const plan: TestingTechnicalPlan = { scenarioId: scenario.id, fingerprint: compiled.fingerprint, bindings: newBindings,
       duplicateReports: reports, explanation: `${technical.explanation}\n\n${duplicateResult.explanation}`, unsupported };
     await writeFile(resolve(technicalResult.directory, 'validated-plan.json'), JSON.stringify({ plan, duplicateResult }, null, 2));
-    if (unsupported.length) return { plan, duplicateJobId: duplicate.job.id, needsBusinessReview: reviewDuplicates.length > 0, duplicateDecisions: duplicateResult.decisions };
+    if (unsupported.length) return { plan, duplicateJobId: duplicate.job.id, needsBusinessReview: reviewDuplicates.length > 0, duplicateDecisions: duplicateResult.decisions,
+      repairContext: { sourceJobId: job.id, scenarioId: scenario.id, scenarioRevision: scenario.revision, fingerprint: compiled.fingerprint, issues: unsupported } };
     assertFresh(scenario, compiled.fingerprint);
     if (signal.aborted) throw new Error('Die technische Übernahme wurde abgebrochen.');
     // Compile against exactly the revisions selected by this agent. A later global

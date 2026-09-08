@@ -76,7 +76,7 @@ Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebe
 
 Wähle das Modell und starte den Entwurf. Der Auftrag erscheint direkt im Arbeitsbereich. Der Testfall ist bereits gespeichert und unter „Alle Testfälle“ auffindbar, auch wenn noch kein fertiger Blockablauf vorliegt. Ein Klick auf den Testfall öffnet wieder denselben Arbeitsbereich.
 
-Der Fortschritt unterscheidet Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Bereits erreichte Schritte kannst du zur Ansicht erneut öffnen, ohne den Agenten neu zu starten. Erläuterungen und benannte Quellen öffnen sich über Buttons in Dialogen. Ein einzelnes KI-Ergebnis bedeutet noch nicht, dass der gesamte Auftrag abgeschlossen ist. Laufende Teilaufträge und offene Entscheidungen bleiben sichtbar.
+Der Fortschritt unterscheidet Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Nach der fachlichen Freigabe startet die technische Vorbereitung automatisch. Bereits erreichte Schritte kannst du zur Ansicht erneut öffnen, ohne den Agenten neu zu starten. Jede Agentenkarte öffnet ein Dialogfenster mit dem tatsächlichen Ergebnis und den öffentlichen Erläuterungen dieses Auftrags. Ein einzelnes KI-Ergebnis bedeutet noch nicht, dass der gesamte Auftrag abgeschlossen ist. Laufende Teilaufträge und offene Entscheidungen bleiben sichtbar.
 
 ## 6. Wissen und Anwendung erkunden
 
@@ -92,7 +92,7 @@ Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein autom
 2. Prüfe im Inspector die Werte, vor allem Versicherungssumme, Betriebsadresse, Tierart und Rollen.
 3. Öffne bei Bedarf die verknüpften Wissensgrundlagen und die enthaltenen Schritte eines zusammengesetzten Blocks.
 4. Ergänze fehlende Blöcke oder lasse die KI den gesamten Ablauf anhand einer neuen Anweisung überarbeiten.
-5. Speichere deine Änderungen und gib den fachlichen Stand ausdrücklich frei.
+5. Speichere deine Änderungen und gib den fachlichen Stand ausdrücklich frei. Danach startet die technische Vorbereitung automatisch.
 
 Der Scratch-Block zeigt seine wirksamen Abweichungen direkt als benannte Werte. Unveränderte Standardwerte bleiben dort ausgeblendet; in den Eigenschaften lassen sie sich weiterhin ansehen und ändern. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
 
@@ -104,7 +104,7 @@ Lose Scratch-Stapel gehören nicht zum ausführbaren Ablauf. Verbinde benötigte
 
 Bei einer neuen Definition beschreibst du Name, Blockart, Voraussetzungen und erwartete Wirkung. Eingaben erhalten jeweils einen Namen, Typ, eine Pflichtfeldangabe und bei Bedarf einen Standardwert. Technische Schlüssel und Versionen musst du nicht eingeben. Fehlt die Wissensgrundlage, kannst du sie beim Definieren selbst ergänzen. Du musst keinen unpassenden bestehenden Eintrag auswählen.
 
-Eine neue Fähigkeit kann zunächst ohne technische Bindung beschrieben werden. Die technische Phase muss anschließend klären, ob und wie sie im Portal ausgeführt werden kann. Ein fehlendes Produktmerkmal darf nicht durch einen erfundenen erfolgreichen Test ersetzt werden.
+Eine neue Fähigkeit kann zunächst ohne technische Bindung beschrieben werden. Die technische Phase muss anschließend klären, ob und wie sie im Portal ausgeführt werden kann. Ein fehlendes Produktmerkmal darf nicht durch einen erfundenen erfolgreichen Test ersetzt werden. Meldet die technische Vorbereitung eine nicht unterstützte Fähigkeit, zeigt Schritt 4 „Technische Fragen klären“ den Abschnitt „Mit KI überarbeiten“. Wähle dort das „Lokale Modell für die fachliche Überarbeitung“ und starte mit „Mit KI überarbeiten“ einen Vorschlag. Prüfe und übernimm ihn bei Bedarf. Gib den neuen Stand danach mit „Freigeben und technisch prüfen“ erneut frei. „Manuell im Ablauf bearbeiten“ bleibt möglich.
 
 ### Eine bestehende Verwendung ändern
 
@@ -116,9 +116,9 @@ Eine KI-Änderung ist ein Vorschlag. Prüfe die Unterschiede, bevor du sie über
 
 ## 8. Technik und Browserlauf
 
-Nach der fachlichen Freigabe startest du die technische Vorbereitung und den Probelauf im selben Arbeitsbereich. Der Fortschritt zeigt getrennt, ob die technische Umsetzung noch läuft, der Vergleich mit anderen Bausteinen eine Entscheidung verlangt oder der Browser bereits testet.
+Nach der fachlichen Freigabe startet die technische Vorbereitung im selben Arbeitsbereich. Der Fortschritt zeigt getrennt, ob die technische Umsetzung noch läuft, der Vergleich mit anderen Bausteinen eine Entscheidung verlangt oder der Browser bereits testet. Der fachliche Prüfschritt wird dabei nicht erneut als erledigt angezeigt.
 
-Ist bereits passende Technik vorhanden, kannst du den Test direkt damit ausführen. „Technik neu vorbereiten“ öffnet bei Bedarf einen Dialog mit der Modellauswahl für eine erneute Vorbereitung.
+Ist bereits passende Technik vorhanden, kannst du den Test direkt damit ausführen. „Technik neu vorbereiten“ öffnet bei Bedarf einen Dialog mit der Modellauswahl für eine erneute Vorbereitung. Meldet der technische Schritt eine nicht unterstützte Fähigkeit, erscheint dort der Abschnitt „Mit KI überarbeiten“. Nach der menschlichen Prüfung und erneuten Freigabe mit „Freigeben und technisch prüfen“ beginnt die technische Vorbereitung für den neuen Stand erneut.
 
 Bei einem Wiederverwendungsvorschlag prüfst du den vorgeschlagenen anderen Baustein, seine Übereinstimmungen und Unterschiede. Eine andere Version desselben Blocks wird nicht als eigenständige Dublette behandelt. Eine erforderliche Erweiterung ist eine fachliche Aufgabe und noch kein bestandener Browserlauf.
 

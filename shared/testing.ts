@@ -196,7 +196,15 @@ export interface TestingScenarioEditProposal {
 }
 export interface TestingTechnicalPlan {
   scenarioId: string; fingerprint: string; bindings: TestingTechnicalBinding[];
-  duplicateReports: TestingDuplicateReport[]; explanation: string; unsupported: string[];
+  duplicateReports: TestingDuplicateReport[]; explanation: string; unsupported: (string | TestingTechnicalIssue)[];
+}
+export interface TestingTechnicalIssue {
+  kind: 'business-contract' | 'technical-capability' | 'duplicate-review';
+  summary: string;
+  affectedDefinitionRefs: TestingVersionRef[];
+  affectedInputKeys: string[];
+  blockPaths: string[];
+  suggestedBusinessRevision?: string;
 }
 export interface TestingPromotionRequest {
   scenarioId: string; expectedRevision: number; instanceIds: string[]; parentPath?: string; name: string; description: string;

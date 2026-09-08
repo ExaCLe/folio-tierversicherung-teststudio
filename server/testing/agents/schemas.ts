@@ -29,8 +29,16 @@ const knowledge = object({ id: string, title: string, kind: { enum: ['concept', 
 /** Strict schema uses key/value rows for extensible maps, then validates decoded domain data. */
 export const BUSINESS_SCHEMA = { ...object({ title: string, expectedOutcome: string, blocks: array({ $ref: '#/$defs/instance' }), knowledgeRefs: strings,
   newDefinitions: array(definition), newKnowledge: array(knowledge), explanation: string, assumptions: strings, openQuestions: strings }), $defs: { instance } };
+const technicalIssue = object({
+  kind: { enum: ['business-contract', 'technical-capability'], description: 'business-contract bei einer fachlich geforderten, mit dem sicheren UI-Rezept aber nicht beobachtbaren Prüfung; sonst technical-capability.' },
+  summary: { type: 'string', description: 'Konkrete unbelegte Forderung und technische Grenze. Ein HTTP-Status ist nur durch capture am UI-Klick belegt, der diese Antwort auslöst. Ein deaktiviertes Element sendet keine Anfrage.' },
+  affectedDefinitionRefs: { ...array(ref), minItems: 1, description: 'Exakte betroffene definition-Paare aus freigegeben.json.steps.' },
+  affectedInputKeys: array(identifier),
+  blockPaths: { ...strings, minItems: 1, description: 'Exakte betroffene path-Werte aus freigegeben.json.steps.' },
+  suggestedBusinessRevision: nullable({ type: 'string', description: 'Konkreter deutscher Auftrag für eine neue, menschlich zu prüfende Fachrevision. Null, wenn keine Fachänderung nötig ist.' }),
+});
 export const TECHNICAL_SCHEMA = object({ explanation: string, reuseBindings: array(object({ id: string, revision: { type: 'integer' } })),
-  newBindings: array(object({ bindingJson: { type: 'string', description: 'Vollständiges TestingTechnicalBinding mit inputKeys, locators und deklarativem recipe; gültiges JSON, keine ausführbaren JS-/Shell-Zeichenketten. unlessVisible ist nur an click ohne capture erlaubt und benennt einen key aus denselben locators. Speicherklicks mit capture dürfen nicht übersprungen werden.' }, reason: string })), unsupported: strings });
+  newBindings: array(object({ bindingJson: { type: 'string', description: 'Vollständiges TestingTechnicalBinding mit inputKeys, locators und deklarativem recipe; gültiges JSON, keine ausführbaren JS-/Shell-Zeichenketten. unlessVisible ist nur an click ohne capture erlaubt und benennt einen key aus denselben locators. Speicherklicks mit capture dürfen nicht übersprungen werden.' }, reason: string })), unsupported: array(technicalIssue) });
 export const DUPLICATES_SCHEMA = object({ explanation: string, decisions: array(object({ proposed: ref, decision: { enum: ['reuse', 'extend', 'new'] },
   chosen: nullable(ref), reason: string, compatible: boolean })), unresolved: strings });
 export const REUSE_SCHEMA = object({ explanation: string, suggestions: array(object({ name: string, reason: string, instanceIds: array(identifier), parentPath: nullable(string),
@@ -118,8 +126,12 @@ export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
 }
 export function decodeTechnicalPlan(raw: unknown) {
   const value = z.object({ explanation: text, reuseBindings: z.array(z.object({ id, revision: z.number().int().positive() }).strict()),
-    newBindings: z.array(z.object({ bindingJson: text, reason: text }).strict()).max(40), unsupported: z.array(text) }).strict().parse(raw);
-  return { ...value, newBindings: value.newBindings.map(row => ({ binding: parseJson(row.bindingJson, 'Technische Bindung') as TestingTechnicalBinding, reason: row.reason })) };
+    newBindings: z.array(z.object({ bindingJson: text, reason: text }).strict()).max(40), unsupported: z.array(z.object({
+      kind: z.enum(['business-contract', 'technical-capability']), summary: text.min(1), affectedDefinitionRefs: z.array(z.object({ id, version: id }).strict()).min(1),
+      affectedInputKeys: z.array(id), blockPaths: z.array(text.min(1)).min(1), suggestedBusinessRevision: text.nullable(),
+    }).strict()) }).strict().parse(raw);
+  return { ...value, unsupported: value.unsupported.map(({ suggestedBusinessRevision, ...issue }) => ({ ...issue, ...(suggestedBusinessRevision ? { suggestedBusinessRevision } : {}) })),
+    newBindings: value.newBindings.map(row => ({ binding: parseJson(row.bindingJson, 'Technische Bindung') as TestingTechnicalBinding, reason: row.reason })) };
 }
 export const decodeDuplicates = (raw: unknown) => z.object({ explanation: text, decisions: z.array(z.object({ proposed: z.object({ id, version: id }), decision: z.enum(['reuse', 'extend', 'new']), chosen: z.object({ id, version: id }).nullable(), reason: text, compatible: z.boolean() })), unresolved: z.array(text) }).strict().parse(raw);
 export const decodeReuse = (raw: unknown) => z.object({ explanation: text, suggestions: z.array(z.object({ name: text.min(1), reason: text, instanceIds: z.array(id).min(1), parentPath: text.nullable().optional().transform(value => value || undefined), parameters: z.array(z.object({ key: id, label: text, instanceId: id, input: id })) })).max(12) }).strict().parse(raw);

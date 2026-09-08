@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TestingBlockDefinition, TestingCatalog, TestingCompiledScenario } from '../../../shared/testing';
-import { DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor } from './schemas';
+import { decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA } from './schemas';
 import { validateDuplicateReview } from './reviews';
 import { duplicateReviewContext } from './duplicate-context';
 import { duplicatePrompt } from './prompts';
@@ -88,4 +88,12 @@ test('Andere Versionen derselben Baustein-ID werden nicht als fachliche Dublette
   assert.throws(()=>validateDuplicateReview({explanation:'',decisions:[versionSwap],unresolved:[]},scenario,c),/andere Version desselben Bausteins, keine Dublette/);
   const context=JSON.parse(duplicateReviewContext(scenario,c)['vergleichskandidaten.json'])[0];
   assert.deepEqual(context.versions.map((item:any)=>item.version),['0.9.0']);assert(context.candidates.every((item:any)=>item.id!==subject.id));
+});
+
+test('Technische Lücken liefern genaue Revisionsdaten statt einer bloßen Meldung',()=>{
+  const issue={kind:'business-contract',summary:'Ein deaktivierter Button löst keine HTTP-Antwort aus.',affectedDefinitionRefs:[{id:subject.id,version:subject.version}],affectedInputKeys:['expectedRole'],blockPaths:['berechtigung'],suggestedBusinessRevision:'Entferne die nicht beobachtbare HTTP-Status-Erwartung und behalte die Bedienbarkeitsprüfung bei.'};
+  const decoded=decodeTechnicalPlan({explanation:'Nicht ausführbar.',reuseBindings:[],newBindings:[],unsupported:[issue]});
+  assert.deepEqual(decoded.unsupported,[issue]);
+  assert.equal(TECHNICAL_SCHEMA.properties.unsupported.items.properties.blockPaths.minItems,1);
+  assert.throws(()=>decodeTechnicalPlan({explanation:'Zu ungenau.',reuseBindings:[],newBindings:[],unsupported:['HTTP fehlt']}));
 });

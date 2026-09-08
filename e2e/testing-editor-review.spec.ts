@@ -48,8 +48,19 @@ async function compiled(request: APIRequestContext, id: string): Promise<Testing
   return response.json();
 }
 
+async function stubAutomaticTechnicalRun(page: Page, request: APIRequestContext) {
+  await page.route('**/api/testing/jobs/technical', async route => {
+    const payload = route.request().postDataJSON();
+    const response = await request.post(`/api/testing/scenarios/${payload.scenarioId}/run`, { data: { revision: payload.revision, model: payload.model } });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    const run = await response.json();
+    await route.fulfill({ status: 202, json: { id: `synthetic-technical-${randomUUID()}`, phase: 'technical', stage: 'running', model: payload.model, status: 'completed', prompt: 'Synthetische technische Vorbereitung mit echtem lokalem Probelauf.', scenarioId: payload.scenarioId, scenarioRevision: payload.revision, fingerprint: run.compiled.fingerprint, startedAt: run.startedAt, finishedAt: run.finishedAt, events: [], runId: run.id, result: { run } } });
+  });
+}
+
 test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigabe und Neuladen erhalten', async ({ page, request }, testInfo) => {
   const current = await copyScenario(request);
+  await stubAutomaticTechnicalRun(page, request);
   await openEditor(page, current);
   const money = page.getByLabel(/Versicherungssumme in EUR/);
   await money.fill('15.000,00');
@@ -70,9 +81,8 @@ test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigab
   const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
   expect(catalog.definitions.find(definition => definition.id === 'ablauf.kuh-vorschlag')?.inputs.find(input => input.key === 'state')?.default).toBe('Niedersachsen');
 
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
   await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^(Technik & Probelauf|Mit vorhandener Technik ausführen)$/ })).toBeVisible();
   await openDetails(page, '.t-editor-step');
   const approved = await compiled(request, current.id);
   expect(approved.approval).toBeTruthy();
@@ -83,12 +93,12 @@ test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigab
 
   await page.locator('.t-outline').getByRole('button', { name: /Kuhlebensversicherung vorbereiten/ }).click();
   await page.getByLabel(/Versicherungssumme in EUR/).fill('16.000,50');
-  await expect(page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ })).toBeVisible();
   await save(page, request, current.id);
   compilation = await compiled(request, current.id);
   expect(compilation.executable).toBeFalsy();
   expect(compilation.issues.some(issue => issue.code === 'APPROVAL_STALE')).toBeTruthy();
-  await expect(page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toHaveCount(0);
   expect(compilation.steps.find(step => step.definition.id === 'tier.anlegen')?.inputs.sumInsured).toBe(16000.5);
   await page.reload();
@@ -232,12 +242,13 @@ test('Ein neuer zusammengesetzter Baustein kann zunächst als leerer fachlicher 
   expect(definition?.kind).toBe('workflow');
   expect(definition?.body).toEqual([]);
   expect(result.issues.some(issue => issue.code === 'COMPOSITION_EMPTY' && issue.message.includes(name))).toBeTruthy();
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
   await expect(page.getByRole('dialog')).toContainText('enthält noch keine Schritte');
 });
 
 test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im echten Probelauf nicht ausgeführt', async ({ page, request }, testInfo) => {
   const current = await copyScenario(request);
+  await stubAutomaticTechnicalRun(page, request);
   await openEditor(page, current, false);
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
   const blockPath = page.locator('g[data-id="pruefung"] > path.blocklyPath[id]');
@@ -257,9 +268,9 @@ test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im ec
   await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-parked-warning')).toContainText('1 lose Blöcke');
   await expect(page.locator('g[data-id="pruefung"]')).toHaveCount(1);
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
-  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
-  await page.getByRole('button', { name: 'Mit vorhandener Technik ausführen', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
+  await expect(page.getByRole('button', { name: 'Schritt 5: Ergebnis', exact: true })).toBeVisible({ timeout: 90_000 });
+  await page.getByRole('button', { name: 'Schritt 5: Ergebnis', exact: true }).click();
   await expect(page.locator('.t-workspace-result')).toContainText('6 von 6 Schritten bestanden', { timeout: 90_000 });
   const runs = await (await request.get('/api/testing/runs')).json();
   const run = runs.find((entry: { scenarioId: string }) => entry.scenarioId === current.id);
@@ -273,6 +284,7 @@ test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im ec
 
 test('Native Scratch-Kopien behalten ihre Verbindungen und können unabhängig angedockt, rückgängig gemacht und ausgeführt werden', async ({ page, request }, testInfo) => {
   const current = await copyScenario(request);
+  await stubAutomaticTechnicalRun(page, request);
   await openEditor(page, current, false);
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
   const path = page.locator('g[data-id="kuhvorschlag"] > path.blocklyPath[id]');
@@ -325,9 +337,9 @@ test('Native Scratch-Kopien behalten ihre Verbindungen und können unabhängig a
   const proposalOutputs = result.steps.filter(step => step.definition.id === 'vorschlag.anlegen').map(step => step.outputs.proposal);
   expect(proposalOutputs).toHaveLength(2);
   expect(proposalOutputs[0]).not.toBe(proposalOutputs[1]);
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
-  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
-  await page.getByRole('button', { name: 'Mit vorhandener Technik ausführen', exact: true }).click();
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
+  await expect(page.getByRole('button', { name: 'Schritt 5: Ergebnis', exact: true })).toBeVisible({ timeout: 90_000 });
+  await page.getByRole('button', { name: 'Schritt 5: Ergebnis', exact: true }).click();
   await expect(page.locator('.t-workspace-result')).toContainText('14 von 14 Schritten bestanden', { timeout: 90_000 });
   await page.screenshot({ path: testInfo.outputPath('native-scratch-duplikation.png'), fullPage: true });
 });
@@ -340,7 +352,7 @@ test('Ungültige Geldangaben werden sichtbar beanstandet und können nicht freig
   const result = await compiled(request, current.id);
   expect(result.valid).toBeFalsy();
   expect(result.issues.some(issue => issue.severity === 'error' && issue.message.includes('Versicherungssumme'))).toBeTruthy();
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Versicherungssumme');
   await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toHaveCount(0);
 });

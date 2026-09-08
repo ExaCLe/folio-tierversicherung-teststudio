@@ -199,6 +199,14 @@
 .t-activity-metrics > span:first-child { background: #edf4e8; color: #3b663c; border-radius: 5px; padding: 5px 8px; }
 .t-agent-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .t-agent-stages li { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-content: start; align-items: start; gap: 5px 8px; border: 1px solid #e5eadd; border-radius: 7px; padding: 12px; color: #7e8874; }
+.t-agent-stages li:has(.t-stage-card) { display: block; padding: 0; }
+.t-stage-card { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-content: start; align-items: start; gap: 5px 8px; width: 100%; min-height: 100%; padding: 12px; border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; }
+button.t-stage-card { cursor: pointer; transition: background-color 150ms ease, transform 100ms ease; }
+button.t-stage-card:hover { background: #f5f8f1; }
+button.t-stage-card:focus-visible { outline: 2px solid var(--t-accent); outline-offset: 2px; }
+button.t-stage-card:active { transform: scale(.98); }
+.t-stage-card > svg { grid-row: span 2; }
+.t-stage-card > small { grid-column: 2; margin: 0; font-size: 10px; }
 .t-agent-stages li > svg { grid-row: span 2; }
 .t-agent-stages li > small { grid-column: 2; margin: 0; font-size: 10px; }
 .t-agent-stages li[data-state="running"] { background: #f0f6ea; border-color: #b4cba6; color: #375e32; }

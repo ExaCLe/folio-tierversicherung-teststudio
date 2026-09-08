@@ -22,7 +22,7 @@ writeFileSync(args[args.indexOf('-o') + 1], readFileSync(process.env.FOLIO_FLOW_
 const { db } = await import('../../store');
 const repository = await import('../repository');
 const { getTestingCatalog, loadTestingSeedScenarios } = await import('../catalog');
-const { testingFingerprint } = await import('../compiler');
+const { compileTestingScenario, testingFingerprint } = await import('../compiler');
 const { startScenarioEditJob, getTestingJob, applyScenarioEditJob, dismissScenarioEditJob } = await import('./orchestrator');
 const { decodeScenarioEdit, scenarioEditChanges, flowEntries } = await import('./flow-edit');
 const { createTestingRouter } = await import('../router');
@@ -82,6 +82,39 @@ test('Gesamter Ablaufvorschlag bleibt unveröffentlicht; Übernahme erhält Iden
   assert.deepEqual((db.find<any>('testingScenarioRevisions', `${scenario.id}@${scenario.revision}`)).scenario, scenario);
   assert.equal((getTestingJob(job.id).result as TestingScenarioEditProposal).reviewStatus, 'applied');
   assert.throws(() => applyScenarioEditJob(acceptance(job)), /bereits übernommen/);
+});
+
+test('Technische Fachlücke startet über die API einen geprüften Vorschlag auf der aktuellen Revision', async () => {
+  const original = fixture('flow-technical-repair');
+  const compiled = compileTestingScenario(original, getTestingCatalog());
+  const affected = compiled.steps.find(step => Object.keys(step.inputs).length > 0)!;
+  const issue = { kind: 'business-contract' as const, summary: 'Die freigegebene Erwartung kann im sicheren UI-Rezept nicht beobachtet werden.',
+    affectedDefinitionRefs: [affected.definition], affectedInputKeys: [Object.keys(affected.inputs)[0]], blockPaths: [affected.path],
+    suggestedBusinessRevision: 'Ersetze die nicht beobachtbare Erwartung durch eine fachlich gleichwertige sichtbare Prüfung.' };
+  const source: TestingAgentJob = { id: 'fixture-technical-repair-source', phase: 'technical', model: 'sol', status: 'completed', prompt: 'Synthetische technische Prüfung.',
+    scenarioId: original.id, scenarioRevision: original.revision, fingerprint: testingFingerprint(original, getTestingCatalog()), startedAt: original.createdAt, events: [],
+    result: { plan: { unsupported: [issue] }, repairContext: { sourceJobId: 'fixture-technical-repair-source', scenarioId: original.id, scenarioRevision: original.revision,
+      fingerprint: testingFingerprint(original, getTestingCatalog()), issues: [issue] } } };
+  db.upsert('testingAgentJobs', source);
+  const current = repository.saveTestingScenario({ ...original, title: 'Aktuelle fachliche Revision' }, original.revision);
+  await writeFile(process.env.FOLIO_FLOW_FIXTURE!, JSON.stringify(wireDraft(draftOf(current))));
+  const started = await request('POST', `/scenarios/${current.id}/jobs/${source.id}/revise-unsupported`, { issueIndex: 0, model: 'luna', instruction: 'Behalte die Rollenprüfung im Ablauf.' });
+  assert.equal(started.status, 202, JSON.stringify(started.data));
+  assert.equal(started.data.scenarioRevision, current.revision);
+  const done = await completed(started.data.id), proposal = done.result as TestingScenarioEditProposal;
+  assert.equal(done.status, 'completed', done.error); assert.equal(proposal.reviewStatus, 'pending'); assert.equal(proposal.applied, false);
+  assert.equal(done.scenarioRevision, current.revision); assert.deepEqual(repository.getTestingScenario(current.id), current);
+  assert.match(done.prompt, new RegExp(`Revision ${original.revision}`)); assert.match(done.prompt, new RegExp(`aktuelle gespeicherte Revision ${current.revision}`));
+  assert.match(done.prompt, /Behalte die Rollenprüfung/);
+
+  const other = fixture('flow-technical-repair-other');
+  assert.equal((await request('POST', `/scenarios/${other.id}/jobs/${source.id}/revise-unsupported`, { issueIndex: 0, model: 'luna' })).status, 409);
+  for (const [id, unsuitable] of [['legacy', 'Alte unstrukturierte Meldung'], ['capability', { ...issue, kind: 'technical-capability' }]] as const) {
+    const job: TestingAgentJob = { ...source, id: `fixture-technical-${id}`, result: { repairContext: { sourceJobId: `fixture-technical-${id}`, scenarioId: current.id,
+      scenarioRevision: current.revision, fingerprint: testingFingerprint(current, getTestingCatalog()), issues: [unsuitable] } } };
+    db.upsert('testingAgentJobs', job);
+    assert.equal((await request('POST', `/scenarios/${current.id}/jobs/${job.id}/revise-unsupported`, { issueIndex: 0, model: 'luna' })).status, 409);
+  }
 });
 
 test('Verschachtelte lokale Einfügung und Reihenfolge werden ohne Änderung der gemeinsamen Definition geprüft', async () => {

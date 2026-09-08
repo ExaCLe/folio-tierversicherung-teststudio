@@ -451,13 +451,9 @@ for (const phase of ['duplicates', 'technical'] as const) test(`Ein fehlgeschlag
   await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
   expect(submitted).toEqual([]);
   const current = await save(page, request, original.id);
-  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
-  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
-  await expect(page.getByRole('button', { name: /^(Technik & Probelauf|Mit vorhandener Technik ausführen)$/ })).toBeEnabled();
-  await page.getByRole('button', { name: 'Technik neu vorbereiten', exact: true }).click();
-  const restart = page.getByRole('dialog', { name: 'Technik neu vorbereiten', exact: true });
-  await restart.getByLabel('Modell für technische Vorbereitung', { exact: true }).selectOption('sol');
-  await restart.getByRole('button', { name: 'Technik & Probelauf', exact: true }).click();
+  await page.getByLabel('Lokales Modell für die technische Prüfung', { exact: true }).selectOption('sol');
+  await page.getByRole('button', { name: /^(?:Speichern, freigeben und technisch prüfen|Freigeben und technisch prüfen)$/ }).click();
+  await expect.poll(() => submitted.length).toBe(1);
   expect(submitted).toEqual([{ scenarioId: original.id, revision: current.revision, model: 'sol' }]);
   await page.getByRole('button', { name: 'Schritt 3: Fachlich prüfen', exact: true }).click();
   await page.getByRole('button', { name: 'Vorschläge ansehen', exact: true }).click();
