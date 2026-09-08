@@ -40,12 +40,13 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent');
   await expect(activity(page).locator('[data-stage="planning"]')).toHaveAttribute('data-state', 'waiting');
   await expect(activity(page).locator('.t-activity-current')).toContainText('Die vorhandene Regel zur Sonderfreigabe');
-  await expect(page.getByRole('region', { name: 'Anforderung und Modell', exact: true })).toContainText(current.intent);
-  await expect(page.getByLabel('Modell für KI-Aufträge', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Schritt 1: Anforderung', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Deine Anforderung', exact: true })).toContainText(current.intent);
+  await page.getByRole('button', { name: 'Schritt 2: Erkundung & Entwurf', exact: true }).click();
   await activity(page).getByText(/Erläuterungen und Verlauf ansehen/).click();
-  await expect(activity(page).locator('.t-activity-details > summary')).toContainText('1 protokollierte Werkzeugmeldung');
+  await expect(page.getByRole('dialog')).toContainText('1 protokollierte Werkzeugmeldung');
   await expect(activity(page)).not.toContainText('RAW_TOOL_COMMAND_MUST_STAY_HIDDEN');
-  await activity(page).getByText(/Erläuterungen und Verlauf ansehen/).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
 
   const questions: TestingExplorationQuestion[] = [
     { id: 'vermittler', text: 'Darf die Rolle Vermittler eine Sonderfreigabe erteilen?', requiresBrowser: true, status: 'answered', answer: 'Die Entscheidung ist für Vermittler gesperrt.', evidenceIds: ['beobachtung-vermittler'], knowledgeIds: [] },
@@ -58,11 +59,11 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent');
   const checklist = page.getByRole('region', { name: 'Erkundungsfragen', exact: true });
   await expect(checklist).toContainText('1 von 2 Erkundungsfragen beantwortet');
-  await checklist.locator('summary').click();
-  await expect(checklist).toContainText('Die Entscheidung ist für Vermittler gesperrt.');
-  await expect(checklist.getByText(questions[1].text, { exact: true })).toBeVisible();
-  await expect(checklist).toContainText('Noch offen');
-  await checklist.locator('summary').click();
+  await checklist.getByRole('button').click();
+  await expect(page.getByRole('dialog')).toContainText('Die Entscheidung ist für Vermittler gesperrt.');
+  await expect(page.getByRole('dialog').getByText(questions[1].text, { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('Noch offen');
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   await page.screenshot({ path: shot('business-erkundung.png') });
 
   const answeredQuestions: TestingExplorationQuestion[] = questions.map(question => question.status === 'answered' ? question : { ...question, status: 'answered', answer: 'Die Direktion kann eine Sonderfreigabe erteilen.', evidenceIds: ['beobachtung-direktion'] });
@@ -72,8 +73,11 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   await expect(activity(page).locator('.t-activity-current')).not.toContainText(progress.summary);
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('2 von 4 Arbeitsschritten erledigt');
   await expect(checklist).toContainText('2 von 2 Erkundungsfragen beantwortet');
-  await checklist.locator('summary').click();
-  await expect(checklist.getByRole('link', { name: 'Beleg 1: Auswahl ändern: Vermittler', exact: true })).toHaveAttribute('href', '/synthetic-evidence.png');
+  await checklist.getByRole('button').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Beleg 1: Auswahl ändern: Vermittler', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Beleg 1: Auswahl ändern: Vermittler', exact: true }).getByRole('link', { name: 'Bild separat öffnen' })).toHaveAttribute('href', '/synthetic-evidence.png');
+  await page.getByRole('dialog', { name: 'Beleg 1: Auswahl ändern: Vermittler', exact: true }).getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   await expect(checklist).not.toContainText('internal-target');
 
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent');
@@ -91,12 +95,13 @@ test('Technik zeigt zwei parallele Arbeitszweige, fertige Verdrahtung und warten
   await expect(activity(page).locator('[data-stage="running"]')).toHaveAttribute('data-state', 'waiting');
   await expect(activity(page).locator('.t-activity-current')).toContainText('Die Eingabefelder');
   await expect(activity(page).locator('.t-activity-current')).toContainText('Vorhandene Prüfbausteine');
-  await activity(page).locator('[data-stage="wiring"] summary').click();
-  await expect(activity(page).locator('[data-stage="wiring"]')).toContainText('Die Speicheraktion wird an das Formular gebunden.');
-  await expect(activity(page).locator('[data-stage="wiring"]')).not.toContainText('Dublettenprüfung:');
-  await activity(page).locator('[data-stage="wiring"] summary').click();
-  await activity(page).locator('[data-stage="duplicates"] summary').click();
-  await expect(activity(page).locator('[data-stage="duplicates"]')).toContainText('Vorhandene Prüfbausteine werden');
+  await activity(page).getByRole('button', { name: 'Erläuterungen zu „Technische Schritte vorbereiten“' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Die Speicheraktion wird an das Formular gebunden.');
+  await expect(page.getByRole('dialog')).not.toContainText('Dublettenprüfung:');
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  await activity(page).getByRole('button', { name: 'Erläuterungen zu „Bausteine vergleichen“' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Vorhandene Prüfbausteine werden');
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   await page.screenshot({ path: shot('technik-parallel.png') });
   state.jobs = [{ ...parent, workStages: [{ stage: 'wiring', status: 'completed', summary: 'Die technische Vorbereitung ist fertig.' }] }, child];
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent', { timeout: 15_000 });
@@ -129,6 +134,12 @@ test('Navigation ist ausgerichtet, Spinner bewegt sich und reduzierte Bewegung b
   const boxes = await controls.evaluateAll(elements => elements.map(element => { const rect = element.getBoundingClientRect(); return { height: rect.height, middle: rect.y + rect.height / 2 }; }));
   expect(Math.max(...boxes.map(box => box.middle)) - Math.min(...boxes.map(box => box.middle))).toBeLessThan(1);
   expect(new Set(boxes.map(box => box.height)).size).toBe(1);
+  await page.locator('.t-resource-menu > summary').click();
+  await page.locator('.t-brand').click();
+  await expect(page.locator('.t-resource-menu')).not.toHaveAttribute('open', '');
+  await page.locator('.t-resource-menu > summary').click();
+  await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
+  await expect(page.locator('.t-resource-menu')).not.toHaveAttribute('open', '');
   await page.screenshot({ path: shot('anforderung-navigation.png') });
   await page.goto(`/testing/editor/${current.id}`);
   const spinner = activity(page).locator('.t-activity-symbol .t-spin');

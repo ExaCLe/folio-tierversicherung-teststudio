@@ -3,11 +3,15 @@ import type { TestingAgentEvent, TestingAgentJob, TestingAgentWorkStage } from '
 export type ActivityStageState = 'waiting' | 'running' | 'completed' | 'skipped' | 'failed';
 export interface ActivityStage { id: string; label: string; state: ActivityStageState; job?: TestingAgentJob; summary?: string }
 type TrackedJob = TestingAgentJob;
-export const stageLabels: Record<string, string> = { knowledge: 'Fachwissen prüfen', exploring: 'Die Anwendung erkunden', planning: 'Den Ablauf entwerfen', validating: 'Entwurf prüfen', duplicates: 'Bausteine vergleichen', wiring: 'Technische Schritte vorbereiten', running: 'Den Test im Portal ausführen', reuse: 'Wiederverwendung untersuchen' };
-export const phaseLabels: Record<string, string> = { business: 'Fachlichen Ablauf entwerfen', duplicates: 'Bausteine vergleichen', technical: 'Technik vorbereiten und prüfen', reuse: 'Wiederverwendung untersuchen', exploration: 'Wissen und Anwendung erkunden' };
+export const stageLabels: Record<string, string> = { naming: 'Test benennen', knowledge: 'Fachwissen prüfen', exploring: 'Die Anwendung erkunden', planning: 'Den Ablauf entwerfen', validating: 'Entwurf prüfen', duplicates: 'Bausteine vergleichen', wiring: 'Technische Schritte vorbereiten', running: 'Den Test im Portal ausführen', reuse: 'Wiederverwendung untersuchen' };
+export const phaseLabels: Record<string, string> = { naming: 'Test benennen', business: 'Fachlichen Ablauf entwerfen', duplicates: 'Bausteine vergleichen', technical: 'Technik vorbereiten und prüfen', reuse: 'Wiederverwendung untersuchen', exploration: 'Wissen und Anwendung erkunden' };
 export const isWorking = (job?: TestingAgentJob) => !!job && ['running', 'queued'].includes(job.status);
+export function meaningfulExplanation(message?: string): string | undefined {
+  if (!message?.trim() || /^[\s]*[\[{]/.test(message) || /^(?:Codex-Sitzung|Claude-Code-Sitzung|Der Agent bearbeitet den Auftrag|Codex hat ein Ergebnis geliefert|Claude Code hat sein strukturiertes Ergebnis|Der Agent hat sein strukturiertes Ergebnis|Browserbeobachtung\s*\d+|Beobachtung\s*\d+|Wartet auf einen der zwei lokalen Agentenplätze)/i.test(message)) return;
+  return message;
+}
 export function publicEvents(job: TestingAgentJob): TestingAgentEvent[] {
-  return job.events.filter(event => ['status', 'message'].includes(event.kind) && event.message.trim() && !/^[\s]*[\[{]/.test(event.message));
+  return job.events.filter(event => ['status', 'message'].includes(event.kind) && meaningfulExplanation(event.message));
 }
 export function waitsForAgent(job: TestingAgentJob) {
   const state = job.events.filter(event => event.kind === 'status' && (event.message === 'Wartet auf einen der zwei lokalen Agentenplätze.' || /^(?:Codex-Sitzung gestartet\.|Claude-Code-Sitzung|Der Agent bearbeitet den Auftrag\.)/.test(event.message))).at(-1);
@@ -36,6 +40,7 @@ export function activityModel(job: TrackedJob, related: TrackedJob[]) {
     const outcome = job.result as { needsKnowledge?: boolean; scenario?: unknown; draft?: unknown } | undefined;
     const parentFinished = job.status === 'completed' && !running && !outcome?.needsKnowledge && !!(outcome?.scenario || outcome?.draft);
     stages = [
+      ...(children.some(item => item.phase === 'naming') || record(job, 'naming') ? [stage('naming', children.find(item => item.phase === 'naming') ?? job, 'waiting')] : []),
       stage('knowledge', exploration ?? job, childPastKnowledge ? 'completed' : exploration ? childState : job.stage === 'knowledge' ? currentState(job) : 'waiting'),
       stage('exploring', exploration, result?.explored === false ? 'skipped' : exploration?.stage === 'exploring' ? childState : result?.explored ? 'completed' : 'waiting'),
       stage('planning', job, parentFinished ? 'completed' : job.stage === 'planning' ? currentState(job) : 'waiting'),

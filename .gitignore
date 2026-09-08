@@ -11,3 +11,4 @@ playwright-report/
 coverage/
 .agents/
 .codex/
+*.tsbuildinfo

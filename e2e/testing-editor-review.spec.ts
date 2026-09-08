@@ -20,8 +20,17 @@ async function copyScenario(request: APIRequestContext, seedId = 'kuh-direktions
 async function openEditor(page: Page, current: TestingScenario, outline = true) {
   await page.goto(`/testing/editor/${current.id}`);
   await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue(current.title);
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
-  if (outline) await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  if (outline) { await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click(); await page.locator('.t-outline > button').first().click(); }
+}
+
+async function appendFromCatalog(page: Page, name: string) {
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Block hinzufügen', exact: true });
+  await picker.getByLabel('Block suchen', { exact: true }).fill(name);
+  await picker.getByRole('option').filter({ hasText: name }).first().click();
+  await picker.getByRole('button', { name: 'Am Ende anhängen', exact: true }).click();
 }
 
 async function save(page: Page, request: APIRequestContext, id: string) {
@@ -62,6 +71,7 @@ test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigab
   expect(catalog.definitions.find(definition => definition.id === 'ablauf.kuh-vorschlag')?.inputs.find(input => input.key === 'state')?.default).toBe('Niedersachsen');
 
   await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
   await expect(page.getByRole('button', { name: /^(Technik & Probelauf|Mit vorhandener Technik ausführen)$/ })).toBeVisible();
   await openDetails(page, '.t-editor-step');
   const approved = await compiled(request, current.id);
@@ -82,8 +92,10 @@ test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigab
   await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toHaveCount(0);
   expect(compilation.steps.find(step => step.definition.id === 'tier.anlegen')?.inputs.sumInsured).toBe(16000.5);
   await page.reload();
-  await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('16.000,5');
+  await openDetails(page, '.t-editor-step');
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  await page.locator('.t-outline > button').first().click();
+  await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('16.000,5');
   await page.locator('.t-outline').getByRole('button', { name: /Betrieb anlegen/ }).click();
   await expect(page.getByLabel(/Bundesland/)).toHaveValue('Bayern');
   await page.screenshot({ path: testInfo.outputPath('lokale-betriebsabweichung.png'), fullPage: true });
@@ -92,63 +104,71 @@ test('Deutsche Geldwerte und eine lokale Betriebsabweichung bleiben nach Freigab
 test('Menschen ergänzen eine fehlende Fähigkeit und erweitern ihr typisiertes Schema als neue Version', async ({ page, request }, testInfo) => {
   const current = await copyScenario(request);
   const name = `Tierärztliche Prüfung ${randomUUID().slice(0, 6)}`;
-  const semanticKey = `qa.tiernachweis.${randomUUID()}`;
   const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
   await openEditor(page, current);
-  await page.getByRole('button', { name: 'Neuen Block definieren und hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Neuen Block definieren', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name des Blocks', { exact: true }).fill(name);
-  await dialog.getByLabel('Fachliche Bedeutung', { exact: true }).fill('Eine neue fachliche Prüfung mit veränderbarer Summe. Die technische Zuordnung wird anschließend ergänzt.');
-  await dialog.getByLabel(/Fachlicher Schlüssel/).fill(semanticKey);
+  await dialog.getByLabel('Blockart', { exact: true }).selectOption('assertion');
+  await dialog.getByLabel('Was soll der Block bewirken?', { exact: true }).fill('Eine neue fachliche Prüfung mit veränderbarer Summe. Die technische Zuordnung wird anschließend ergänzt.');
   await dialog.getByRole('button', { name: 'Eingabe ergänzen', exact: true }).click();
-  await dialog.getByLabel('Schlüssel der Eingabe 1', { exact: true }).fill('limit');
   await dialog.getByLabel('Bezeichnung der Eingabe 1', { exact: true }).fill('Prüfwert');
   await dialog.getByLabel('Datentyp der Eingabe 1', { exact: true }).selectOption('money');
-  await openDetails(page, '.t-definition-knowledge > details');
-  await dialog.getByRole('checkbox', { name: 'Pflicht', exact: true }).check();
-  await openDetails(page, '.t-definition-knowledge > details');
-  await dialog.getByRole('checkbox', { name: catalog.knowledge[0].title, exact: true }).check();
-  await dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true }).click();
+  await dialog.getByLabel('Pflichteingabe 1', { exact: true }).check();
+  await dialog.getByRole('button', { name: 'Wissen hinzufügen', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Wissen hinzufügen', exact: true }).getByRole('checkbox', { name: catalog.knowledge[0].title, exact: true }).check();
+  await page.getByRole('button', { name: 'Auswahl übernehmen', exact: true }).click();
+  await dialog.getByRole('button', { name: /^Definieren und / }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('.t-inspector h3')).toHaveText(name);
+  await appendFromCatalog(page, name);
+  await expect(page.getByLabel(/Prüfwert/)).toHaveValue('');
   await page.getByLabel(/Prüfwert/).fill('15.000');
   await save(page, request, current.id);
   let result = await compiled(request, current.id);
   expect(result.valid).toBeTruthy();
   expect(result.executable).toBeFalsy();
   const added = result.steps.find(step => step.label === name)!;
-  expect(added.inputs.limit).toBe(15000);
+  expect(added.inputs.prufwert).toBe(15000);
   expect(added.binding).toBeUndefined();
   expect(result.issues.some(issue => issue.code === 'BINDING_MISSING' && issue.path === added.path)).toBeTruthy();
 
-  await page.getByLabel('Neuer Eingabeschlüssel', { exact: true }).fill('anzahlNachweise');
-  await page.getByRole('button', { name: 'Eingabeschlüssel hinzufügen', exact: true }).click();
-  await page.getByLabel(/anzahlNachweise/).fill('5');
-  await save(page, request, current.id);
+  // A historical unknown field remains repairable, but the normal editor no longer creates untyped keys.
+  const beforeSchema = await scenario(request, current.id);
+  const historicalBlocks = structuredClone(beforeSchema.blocks);
+  historicalBlocks.find(block => block.id === added.path)!.inputs.anzahlNachweise = 5;
+  expect((await request.put(`/api/testing/scenarios/${current.id}`, { data: { ...beforeSchema, blocks: historicalBlocks, expectedRevision: beforeSchema.revision } })).ok()).toBeTruthy();
+  await page.reload();
+  await openDetails(page, '.t-editor-step');
+  await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  await page.locator('.t-outline').getByRole('button', { name: new RegExp(name) }).click();
+  await expect(page.getByLabel(/anzahlNachweise/)).toHaveValue('5');
+  await expect(page.getByLabel('Neuer Eingabeschlüssel', { exact: true })).toHaveCount(0);
   expect((await compiled(request, current.id)).issues.some(issue => issue.code === 'INPUT_UNKNOWN' && issue.field === 'anzahlNachweise')).toBeTruthy();
-  await page.getByRole('button', { name: 'Blockdefinition bearbeiten', exact: true }).click();
+  await page.getByRole('button', { name: 'Weitere Eingabe definieren', exact: true }).click();
   await dialog.getByRole('button', { name: 'Eingabe ergänzen', exact: true }).click();
-  await dialog.getByLabel('Schlüssel der Eingabe 2', { exact: true }).fill('anzahlNachweise');
-  await dialog.getByLabel('Bezeichnung der Eingabe 2', { exact: true }).fill('Anzahl der Nachweise');
+  await dialog.getByLabel('Bezeichnung der Eingabe 2', { exact: true }).fill('Anzahl Nachweise');
   await dialog.getByLabel('Datentyp der Eingabe 2', { exact: true }).selectOption('number');
   await dialog.getByRole('button', { name: 'Definition speichern', exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await page.getByLabel(/Anzahl der Nachweise/).fill('5');
+  await page.getByLabel(/Anzahl Nachweise/).fill('5');
   await save(page, request, current.id);
   result = await compiled(request, current.id);
   expect(result.valid).toBeTruthy();
   expect(result.steps.find(step => step.label === name)?.definition.version).toBe('1.0.1');
   expect(result.steps.find(step => step.label === name)?.inputs.anzahlNachweise).toBe(5);
   const updatedCatalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
-  const versions = updatedCatalog.definitions.filter(definition => definition.semanticKey === semanticKey);
+  const versions = updatedCatalog.definitions.filter(definition => definition.id === added.definition.id);
   expect(versions).toHaveLength(2);
-  expect(versions.find(definition => definition.version === '1.0.0')?.inputs.map(input => input.key)).toEqual(['limit']);
+  expect(versions.find(definition => definition.version === '1.0.0')?.inputs.map(input => input.key)).toEqual(['prufwert']);
   const knowledge = updatedCatalog.knowledge.filter(doc => doc.id === catalog.knowledge[0].id).sort((left, right) => right.revision - left.revision)[0];
   expect(knowledge.definitionRefs.some(ref => ref.id === added.definition.id && ref.version === '1.0.1')).toBeTruthy();
   await page.reload();
+  await openDetails(page, '.t-editor-step');
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
   await page.locator('.t-outline').getByRole('button', { name: new RegExp(name) }).click();
-  await expect(page.getByLabel(/Anzahl der Nachweise/)).toHaveValue('5');
+  await expect(page.getByLabel(/Anzahl Nachweise/)).toHaveValue('5');
   await page.screenshot({ path: testInfo.outputPath('neue-fachliche-faehigkeit.png'), fullPage: true });
   await workspaceNavigation(page, 'Wissensbasis');
   await page.getByLabel('Wissensbasis durchsuchen', { exact: true }).fill(knowledge.title);
@@ -193,24 +213,27 @@ test('Ein neuer zusammengesetzter Baustein kann zunächst als leerer fachlicher 
   const name = `Eigener Tierablauf ${randomUUID().slice(0, 6)}`;
   const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
   await openEditor(page, current);
-  await page.getByRole('button', { name: 'Neuen Block definieren und hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Neuen Block definieren', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name des Blocks', { exact: true }).fill(name);
   await dialog.getByLabel('Blockart', { exact: true }).selectOption('workflow');
-  await dialog.getByLabel('Fachliche Bedeutung', { exact: true }).fill('Die enthaltenen Schritte werden im nächsten Bearbeitungsschritt zusammengestellt.');
-  await dialog.getByLabel(/Fachlicher Schlüssel/).fill(`qa.ablauf.${randomUUID()}`);
-  await openDetails(page, '.t-definition-knowledge > details');
-  await dialog.getByRole('checkbox', { name: catalog.knowledge[0].title, exact: true }).check();
-  await dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true }).click();
+  await dialog.getByLabel('Was soll der Block bewirken?', { exact: true }).fill('Die enthaltenen Schritte werden im nächsten Bearbeitungsschritt zusammengestellt.');
+  await dialog.getByRole('button', { name: 'Wissen hinzufügen', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Wissen hinzufügen', exact: true }).getByRole('checkbox', { name: catalog.knowledge[0].title, exact: true }).check();
+  await page.getByRole('button', { name: 'Auswahl übernehmen', exact: true }).click();
+  await dialog.getByRole('button', { name: /^Definieren und / }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator('.t-inspector h3')).toHaveText(name);
+  await appendFromCatalog(page, name);
   await save(page, request, current.id);
   const result = await compiled(request, current.id);
   const definition = result.definitions.find(item => item.name === name);
   expect(definition?.kind).toBe('workflow');
   expect(definition?.body).toEqual([]);
   expect(result.issues.some(issue => issue.code === 'COMPOSITION_EMPTY' && issue.message.includes(name))).toBeTruthy();
-  await expect(page.locator('.t-validation-strip')).toContainText('enthält noch keine Schritte');
+  await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('enthält noch keine Schritte');
 });
 
 test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im echten Probelauf nicht ausgeführt', async ({ page, request }, testInfo) => {
@@ -231,9 +254,11 @@ test('Ein mit der Maus gelöster Scratch-Block bleibt gespeichert und wird im ec
   await expect.poll(async () => (await (await request.get(`/api/testing/scenarios/${current.id}/layout`)).json()).parkedBlocks?.length).toBe(1);
   expect((await compiled(request, current.id)).steps).toHaveLength(6);
   await page.reload();
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-parked-warning')).toContainText('1 lose Blöcke');
   await expect(page.locator('g[data-id="pruefung"]')).toHaveCount(1);
   await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
   await page.getByRole('button', { name: 'Mit vorhandener Technik ausführen', exact: true }).click();
   await expect(page.locator('.t-workspace-result')).toContainText('6 von 6 Schritten bestanden', { timeout: 90_000 });
   const runs = await (await request.get('/api/testing/runs')).json();
@@ -272,6 +297,7 @@ test('Native Scratch-Kopien behalten ihre Verbindungen und können unabhängig a
   await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
   expect((await scenario(request, current.id)).revision).toBe(1);
   await page.reload();
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-parked-warning')).toContainText('4 lose Blöcke');
   await expect(topLevelBlocks).toHaveCount(2);
   expect((await compiled(request, current.id)).steps).toHaveLength(7);
@@ -300,6 +326,7 @@ test('Native Scratch-Kopien behalten ihre Verbindungen und können unabhängig a
   expect(proposalOutputs).toHaveLength(2);
   expect(proposalOutputs[0]).not.toBe(proposalOutputs[1]);
   await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
   await page.getByRole('button', { name: 'Mit vorhandener Technik ausführen', exact: true }).click();
   await expect(page.locator('.t-workspace-result')).toContainText('14 von 14 Schritten bestanden', { timeout: 90_000 });
   await page.screenshot({ path: testInfo.outputPath('native-scratch-duplikation.png'), fullPage: true });
@@ -314,7 +341,7 @@ test('Ungültige Geldangaben werden sichtbar beanstandet und können nicht freig
   expect(result.valid).toBeFalsy();
   expect(result.issues.some(issue => issue.severity === 'error' && issue.message.includes('Versicherungssumme'))).toBeTruthy();
   await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
-  await expect(page.getByRole('alert')).toContainText('fachliche Fehler');
+  await expect(page.getByRole('dialog')).toContainText('Versicherungssumme');
   await expect(page.getByRole('button', { name: 'Technik & Probelauf', exact: true })).toHaveCount(0);
 });
 
@@ -342,6 +369,7 @@ test('Enthaltene Schritte lassen sich über die Tastaturansicht umordnen, dupliz
   expect(customers[1].inputs.name).toBe('Zweiter Kunde im Block');
   expect((await compiled(request, current.id)).valid).toBeTruthy();
   await page.reload();
+  await openDetails(page, '.t-editor-step');
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
   await expect(page.locator('.t-outline').getByRole('button', { name: /Kunden anlegen/ })).toHaveCount(2);
   await page.locator('.t-outline').getByRole('button', { name: /Kunden anlegen/ }).nth(1).click();

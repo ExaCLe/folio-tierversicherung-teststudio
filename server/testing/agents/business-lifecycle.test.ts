@@ -13,7 +13,8 @@ await writeFile(process.env.FOLIO_CODEX_EXECUTABLE,`#!/usr/bin/env node
 import{readFileSync,writeFileSync}from'node:fs';const args=process.argv.slice(2);for await(const chunk of process.stdin){}await new Promise(resolve=>setTimeout(resolve,100));
 if(process.env.FOLIO_BUSINESS_MODE==='fail')process.exit(1);
 const schema=JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1],'utf8'));let response;
-if(schema.properties.knowledgeIds){const docs=JSON.parse(readFileSync('wissen.json','utf8'));const unanswered=process.env.FOLIO_BUSINESS_MODE==='question';response={decision:'finish',explanation:'Synthetische Wissensprüfung, keine KI-Erkundung.',knowledgeIds:[docs[0].id],gaps:unanswered?['Welche zusätzliche fachliche Regel gilt?']:[],questions:[{id:'anforderung-1',text:'Welche fachlichen Regeln gelten für die Anforderung?',requiresBrowser:false,status:'answered',answer:'Die synthetische Wissensprüfung verwendet die bereitgestellte Regel.',knowledgeIds:[docs[0].id],evidenceIds:[]},...(unanswered?[{id:'zusatzregel',text:'Welche zusätzliche fachliche Regel gilt?',requiresBrowser:false,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]}]:[])],action:null,findings:[]};}
+if(schema.properties.requestedTitleQuote){if(process.env.FOLIO_BUSINESS_MODE==='naming-fail')process.exit(1);const context=JSON.parse(readFileSync('anforderung.json','utf8'));const requested=context.request.includes('Titel: Gewünschter Fachtest');response={title:requested?'Gewünschter Fachtest':'Fachliche Anforderung nachvollziehbar prüfen',summary:'Synthetische Zusammenfassung der Testabsicht.',tags:['Fachprüfung'],titleSource:requested?'user-request':'agent',requestedTitleQuote:requested?'Gewünschter Fachtest':null};}
+else if(schema.properties.knowledgeIds){const docs=JSON.parse(readFileSync('wissen.json','utf8'));const unanswered=process.env.FOLIO_BUSINESS_MODE==='question';response={decision:'finish',explanation:'Synthetische Wissensprüfung, keine KI-Erkundung.',knowledgeIds:[docs[0].id],gaps:unanswered?['Welche zusätzliche fachliche Regel gilt?']:[],questions:[{id:'anforderung-1',text:'Welche fachlichen Regeln gelten für die Anforderung?',requiresBrowser:false,status:'answered',answer:'Die synthetische Wissensprüfung verwendet die bereitgestellte Regel.',knowledgeIds:[docs[0].id],evidenceIds:[]},...(unanswered?[{id:'zusatzregel',text:'Welche zusätzliche fachliche Regel gilt?',requiresBrowser:false,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]}]:[])],action:null,findings:[]};}
 else response=JSON.parse(readFileSync(process.env.FOLIO_BUSINESS_FIXTURE,'utf8'));
 writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(response));
 `,{mode:0o700});
@@ -23,6 +24,7 @@ const orchestrator=await import('./orchestrator');
 const {createTestingRouter}=await import('../router');
 const {deriveTestingLifecycle}=await import('../lifecycle');
 const {testingFingerprint,compileTestingScenario}=await import('../compiler');
+const {validateScenarioNaming}=await import('./naming');
 const router=createTestingRouter();
 const seed=loadTestingSeedScenarios().find(item=>item.id==='kuh-direktionsanfrage')!;
 const wire=(block:TestingBlockInstance):unknown=>({id:block.id,definition:block.definition,inputs:Object.entries(block.inputs).map(([key,value])=>({key,valueJson:JSON.stringify(value)})),outputs:Object.entries(block.outputs??{}).map(([key,name])=>({key,name})),children:(block.children??[]).map(wire),overrides:Object.entries(block.overrides??{}).map(([path,inputs])=>({path,inputs:Object.entries(inputs).map(([key,value])=>({key,valueJson:JSON.stringify(value)}))})),note:block.note??''});
@@ -39,11 +41,11 @@ test('Anforderung existiert vor dem ersten Agentenergebnis und wird unter dersel
   assert.equal((await request('POST',`/scenarios/${scenario.id}/plan`,{revision:1,model:'luna'})).status,409);
   assert.equal(lifecycle(scenario.id).status,'running');
   const completed=await orchestrator.waitTestingJob(initial.id);assert.equal(completed.status,'completed',completed.error);
-  const saved=repository.getTestingScenario(scenario.id);assert.equal(saved.revision,2);assert(saved.blocks.length);assert.equal(saved.intent,scenario.intent);
-  assert.equal((completed.result as any).applied,true);assert.equal(completed.childJobIds!.length,1);
-  const child=orchestrator.getTestingJob(completed.childJobIds![0]);assert.equal(child.parentJobId,completed.id);assert.equal(child.phase,'exploration');assert.equal(child.status,'completed');
+  const saved=repository.getTestingScenario(scenario.id);assert.equal(saved.revision,3);assert(saved.blocks.length);assert.equal(saved.intent,scenario.intent);
+  assert.equal((completed.result as any).applied,true);assert.equal(completed.childJobIds!.length,2);
+  const child=orchestrator.listTestingJobs().find(item=>item.parentJobId===completed.id&&item.phase==='exploration')!;assert.equal(child.parentJobId,completed.id);assert.equal(child.phase,'exploration');assert.equal(child.status,'completed');
   assert.deepEqual(child.agentConfig,completed.agentConfig);assert.equal((child.result as any).explored,false);assert.deepEqual((child.result as any).evidence,[]);
-  for(const stage of ['knowledge','planning','validating'])assert.equal(completed.workStages?.find(item=>item.stage===stage)?.status,'completed');
+  for(const stage of ['naming','knowledge','planning','validating'])assert.equal(completed.workStages?.find(item=>item.stage===stage)?.status,'completed');
   assert.equal(completed.workStages?.find(item=>item.stage==='exploring')?.status,'skipped');
   assert.equal(child.progress?.status,'finished');assert.equal(child.progress?.observationCount,0);
   assert.deepEqual((completed.result as any).questions,(child.result as any).questions);assert.equal((completed.result as any).questions[0].status,'answered');
@@ -59,6 +61,49 @@ test('Fehlgeschlagene und abgebrochene Planung lassen sich mit derselben gespeic
   assert.equal(orchestrator.getTestingJob(cancelled.id).termination?.cause,'user_cancelled');
   assert.equal(repository.getTestingScenario(cancelled.scenarioId!).revision,1);assert.equal(lifecycle(cancelled.scenarioId!).status,'cancelled');
   const retry=await request('POST',`/scenarios/${cancelled.scenarioId}/plan`,{revision:1,model:'luna'});assert.equal(retry.data.scenarioId,cancelled.scenarioId);assert.equal((await orchestrator.waitTestingJob(retry.data.id)).status,'completed');
+});
+test('Luna benennt den neutralen Entwurf und eine ausdrückliche Titelvorgabe bleibt auch nach Planung erhalten',async()=>{
+  const job=orchestrator.startBusinessJob({request:'Titel: Gewünschter Fachtest. Prüfe die fachlichen Rollen.',model:'luna'});
+  assert.equal(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');
+  const done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);
+  const saved=repository.getTestingScenario(job.scenarioId!);assert.equal(saved.title,'Gewünschter Fachtest');
+  assert.equal(saved.naming?.titleSource,'user-request');assert.equal(saved.naming?.summary,'Synthetische Zusammenfassung der Testabsicht.');
+  const naming=orchestrator.getTestingJob(saved.naming!.jobId);assert.equal(naming.phase,'naming');assert.equal(naming.agentConfig?.modelSlug,'gpt-5.6-luna');assert.equal(naming.parentJobId,done.id);
+  const renamed=repository.saveTestingScenario({...saved,title:'Vom Menschen nachträglich benannt'},saved.revision);assert.equal(renamed.naming?.title,renamed.title);assert.equal(renamed.naming?.titleSource,'human');assert.equal(renamed.naming?.jobId,naming.id);assert.equal(repository.listTestingScenarioRevisions().find(item=>item.id===saved.id&&item.revision===saved.revision)?.naming?.titleSource,'user-request');
+});
+test('Wiederaufnahme eines benannten oder von Menschen betitelten Entwurfs ruft keinen neuen Benennungsagenten auf',async()=>{
+  const initial=repository.createTestingRequestDraft('Eine gespeicherte manuelle Benennung bleibt beim Planen erhalten.','luna');
+  const saved=repository.saveTestingScenario({...initial,title:'Mein bewusst gewählter Titel'},initial.revision);
+  const job=orchestrator.startBusinessJob({request:saved.intent,scenarioId:saved.id,revision:saved.revision,model:'luna'}),done=await orchestrator.waitTestingJob(job.id);
+  assert.equal(done.status,'completed',done.error);assert.equal(repository.getTestingScenario(saved.id).title,saved.title);
+  assert(!orchestrator.listTestingJobs().some(child=>child.parentJobId===done.id&&child.phase==='naming'));
+});
+test('Ausfall der optionalen Luna-Benennung lässt den vorhandenen Titel und die fachliche Planung benutzbar',async()=>{
+  process.env.FOLIO_BUSINESS_MODE='naming-fail';
+  try{const job=orchestrator.startBusinessJob({request:'Auch ohne Benennung soll ein fachlicher Entwurf entstehen.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);assert((done.result as any).namingError);const saved=repository.getTestingScenario(job.scenarioId!);assert.equal(saved.title,'Neuer Testfall');assert(saved.blocks.length);assert.equal(saved.naming,undefined);}
+  finally{delete process.env.FOLIO_BUSINESS_MODE;}
+});
+test('Eine ergänzte Anforderung aktualisiert Metadaten, ohne einen vorhandenen menschlichen Titel umzubenennen',async()=>{
+  const initial=repository.createTestingRequestDraft('Prüfe zunächst eine einzelne fachliche Regel.','luna');
+  const saved=repository.saveTestingScenario({...initial,title:'Mein dauerhaft gewählter Testtitel'},initial.revision);
+  const job=orchestrator.startBusinessJob({request:saved.intent+' Ergänze die Rollenprüfung.',scenarioId:saved.id,revision:saved.revision,model:'luna'}),done=await orchestrator.waitTestingJob(job.id);
+  assert.equal(done.status,'completed',done.error);
+  const result=repository.getTestingScenario(saved.id);assert.equal(result.title,saved.title);assert.equal(result.naming?.title,result.title);assert.equal(result.naming?.titleSource,'human');assert(result.naming?.summary);
+});
+test('Ohne eingerichtetes Luna-Profil bleibt die gewählte Planung mit neutralem Titel möglich',async()=>{
+  const settings=await import('./settings');const original=settings.getTestingAgentSettings();
+  const other=original.models.find(model=>model.slug!=='gpt-5.6-luna')!;
+  settings.saveTestingAgentSettings({...original,defaultModel:other.id,models:original.models.filter(model=>model.slug!=='gpt-5.6-luna')});
+  try{
+    const job=orchestrator.startBusinessJob({request:'Der Benutzer kann einen anderen Planungsagenten ohne Luna verwenden.',model:other.id}),done=await orchestrator.waitTestingJob(job.id);
+    assert.equal(done.status,'completed',done.error);assert.equal(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');assert.match((done.result as any).namingError,/kein Luna-Modell/);
+    assert(!orchestrator.listTestingJobs().some(child=>child.parentJobId===job.id&&child.phase==='naming'));assert.equal(done.workStages?.find(stage=>stage.stage==='naming')?.status,'failed');
+  }finally{settings.saveTestingAgentSettings({...original,revision:settings.getTestingAgentSettings().revision});}
+});
+test('Eine behauptete menschliche Titelvorgabe braucht ein wortgetreues Zitat aus der Anforderung',()=>{
+  const value={title:'Erfundener Titel',summary:'Zusammenfassung',tags:[],titleSource:'user-request',requestedTitleQuote:'Erfundener Titel'};
+  assert.throws(()=>validateScenarioNaming(value,'Prüfe eine fachliche Regel.'),/wortgetreu/);
+  assert.throws(()=>validateScenarioNaming({...value,title:'Umformulierter Titel'},'Titel: Erfundener Titel'),/wortgetreu/);
 });
 
 test('Ein Nutzerabbruch kennzeichnet den Hauptauftrag und beendet den Unterauftrag mit eigenem Grund',async()=>{
@@ -140,5 +185,5 @@ test('Fehler einer optionalen Einzelanalyse verändern einen belegten Browsererf
 test('Ein erster fachlich fehlerhafter Entwurf bleibt editierbar und bekommt keine Freigabe',async()=>{
   const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),invalid=JSON.parse(previous);invalid.blocks.at(-1).inputs.find((input:any)=>input.key==='proposalId').valueJson=JSON.stringify({ref:'nicht-angelegter-vorschlag'});
   await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,JSON.stringify(invalid));
-  try{const job=orchestrator.startBusinessJob({request:'Die erste Planung enthält noch eine zu korrigierende Referenz.',model:'luna'}),completed=await orchestrator.waitTestingJob(job.id);assert.equal(completed.status,'completed',completed.error);const scenario=repository.getTestingScenario(job.scenarioId!);assert.equal(scenario.revision,2);assert(scenario.blocks.length);assert.equal((completed.result as any).compiled.valid,false);assert.equal(repository.getTestingApproval(scenario.id),undefined);assert.equal(lifecycle(scenario.id).phase,'review');assert.equal(lifecycle(scenario.id).nextAction,'review');}finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}
+  try{const job=orchestrator.startBusinessJob({request:'Die erste Planung enthält noch eine zu korrigierende Referenz.',model:'luna'}),completed=await orchestrator.waitTestingJob(job.id);assert.equal(completed.status,'completed',completed.error);const scenario=repository.getTestingScenario(job.scenarioId!);assert.equal(scenario.revision,3);assert(scenario.blocks.length);assert.equal((completed.result as any).compiled.valid,false);assert.equal(repository.getTestingApproval(scenario.id),undefined);assert.equal(lifecycle(scenario.id).phase,'review');assert.equal(lifecycle(scenario.id).nextAction,'review');}finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}
 });

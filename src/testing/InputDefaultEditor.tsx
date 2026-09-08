@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import type { TestingInput, TestingValue } from '../../shared/testing';
 import { isTestingParameter, isTestingReference } from '../../shared/testing';
-import { defaultsForInput, formatGermanNumber, parseGermanNumber } from './model';
+import { formatGermanNumber, parseGermanNumber } from './model';
 
 function defaultIssue(input: TestingInput): string | undefined {
   const value = input.default;
@@ -38,13 +38,14 @@ function valueText(value: TestingValue | undefined): string {
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
 
-export function InputDefaultEditor({ input, onChange }: { input: TestingInput; onChange: (value: TestingValue | undefined) => void }) {
+export function InputDefaultEditor({ input, onChange, compact = false }: { input: TestingInput; compact?: boolean; onChange: (value: TestingValue | undefined) => void }) {
   const id = useId();
   const value = input.default;
   const label = input.label || input.key || 'diese Eingabe';
   const numeric = input.type === 'number' || input.type === 'money';
   const structured = input.type === 'object' || input.type === 'list';
-  const mode = value === undefined ? 'none' : value === null ? 'null' : isTestingParameter(value) ? 'parameter' : isTestingReference(value) ? 'reference' : 'literal';
+  const [chosenMode,setChosenMode] = useState('none');
+  const mode = value === undefined ? chosenMode : value === null ? 'null' : isTestingParameter(value) ? 'parameter' : isTestingReference(value) ? 'reference' : 'literal';
   const [text, setText] = useState(() => valueText(value));
   useEffect(() => {
     // Preserve partially typed German decimals and JSON formatting. Display
@@ -58,22 +59,21 @@ export function InputDefaultEditor({ input, onChange }: { input: TestingInput; o
   const issue = defaultIssue(input);
   const inputProps = { id: `${id}-value`, 'aria-label': `Standardwert für ${label}`, 'aria-invalid': !!issue, 'aria-describedby': issue ? `${id}-error` : undefined };
   function changeMode(next: string) {
+    setChosenMode(next);
     if (next === 'none') onChange(undefined);
-    else if (next === 'parameter') onChange({ param: '' });
-    else if (next === 'reference') onChange({ ref: '', ...(input.type.endsWith('-ref') ? { type: input.type } : {}) });
-    else if (next === 'null') onChange(null);
-    else onChange(defaultsForInput({ ...input, default: undefined }));
+    else if (next === 'literal') onChange(input.type === 'list' ? [] : undefined);
   }
   let control;
-  if (mode === 'parameter' && isTestingParameter(value)) {
-    control = <><input {...inputProps} value={value.param} placeholder="Name des übergeordneten Parameters" onChange={event => onChange({ ...value, param: event.target.value })} /><p>Der Wert wird beim Verwenden aus dem übergeordneten Baustein gelesen.</p></>;
-  } else if (mode === 'reference' && isTestingReference(value)) {
-    control = <><input {...inputProps} value={value.ref} placeholder="Zum Beispiel: vorschlag" onChange={event => onChange({ ref: event.target.value, ...(input.type.endsWith('-ref') ? { type: input.type } : value.type ? { type: value.type } : {}) })} /><p>Die Referenz muss im jeweiligen Ablauf durch einen früheren Schritt erzeugt werden.</p></>;
+  if (mode === 'parameter' || mode === 'reference') {
+    control = <p>Der gespeicherte Standardwert verwendet {mode === 'parameter' ? 'einen Wert aus dem übergeordneten Baustein' : 'das Ergebnis eines früheren Schritts'}. Er bleibt erhalten. Wähle die konkrete Zuordnung beim Verwenden im Testfall.</p>;
   } else if (mode === 'literal') {
-    if (input.type === 'boolean') control = <select {...inputProps} value={String(value)} onChange={event => onChange(event.target.value === 'true')}><option value="true">Ja</option><option value="false">Nein</option></select>;
+    if (input.type === 'boolean') control = <select {...inputProps} value={value === undefined ? '' : String(value)} onChange={event => onChange(event.target.value === 'true')}><option value="" disabled>Bitte auswählen</option><option value="true">Ja</option><option value="false">Nein</option></select>;
     else if (input.type === 'choice' && input.options?.length) control = <select {...inputProps} value={typeof value === 'string' ? value : ''} onChange={event => onChange(event.target.value)}>{!input.options.some(option => option.value === value) && <option value={typeof value === 'string' ? value : ''}>{typeof value === 'string' && value ? `${value} (bisheriger Wert)` : 'Bitte auswählen'}</option>}{input.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>;
-    else if (structured) control = <><textarea {...inputProps} rows={3} value={text} onChange={event => { const raw = event.target.value; setText(raw); try { onChange(JSON.parse(raw) as TestingValue); } catch { onChange(raw); } }} /><p>{input.type === 'list' ? 'Die Liste wird als JSON gespeichert, zum Beispiel ["Rind", "Pferd"].' : 'Wertepaare werden als JSON gespeichert. Einzelne Unterfelder können zusätzlich eigene Standardwerte erhalten.'}</p></>;
-    else control = <div className="t-value-with-unit"><input {...inputProps} type={input.type === 'date' ? 'date' : 'text'} inputMode={numeric ? 'decimal' : undefined} value={numeric ? text : typeof value === 'string' ? value : valueText(value)} onChange={event => { if (numeric) { setText(event.target.value); onChange(parseGermanNumber(event.target.value) ?? event.target.value); } else onChange(event.target.value); }} onBlur={() => { if (numeric && typeof value === 'number') setText(formatGermanNumber(value)); }} />{input.type === 'money' && <span>EUR</span>}</div>;
+    else if (input.type === 'list' && (!value || Array.isArray(value) && value.every(item => ['string','number','boolean'].includes(typeof item)))) {
+      const items = Array.isArray(value) ? value : [];
+      control = <div className="t-default-list">{items.map((item,index) => <div key={index}>{typeof item === 'boolean' ? <select aria-label={`${label}: Standardwert ${index+1}`} value={String(item)} onChange={event => onChange(items.map((old,i) => i===index ? event.target.value==='true' : old))}><option value="true">Ja</option><option value="false">Nein</option></select> : <input aria-label={`${label}: Standardwert ${index+1}`} value={String(item)} onChange={event => onChange(items.map((old,i) => i===index ? typeof item==='number' ? parseGermanNumber(event.target.value) ?? event.target.value : event.target.value : old))}/>}<button type="button" aria-label={`${label}: Standardwert ${index+1} entfernen`} onClick={() => onChange(items.filter((_,i) => i!==index))}>Entfernen</button></div>)}<button type="button" className="t-button small" onClick={() => onChange([...items,''])}>Wert hinzufügen</button></div>;
+    } else if (structured) control = <p>Die gespeicherten {input.type==='object'?'Werte der Unterfelder':'zusammengesetzten Listenwerte'} bleiben erhalten. Bearbeite konkrete Werte beim Verwenden im Testfall. Für neue Unterfelder kannst du unten eigene Standardwerte festlegen.</p>;
+    else control = <div className="t-value-with-unit"><input {...inputProps} type={input.type === 'date' ? 'date' : 'text'} inputMode={numeric ? 'decimal' : undefined} value={numeric ? text : typeof value === 'string' ? value : valueText(value)} onChange={event => { if (numeric) { setText(event.target.value); onChange(event.target.value.trim() ? parseGermanNumber(event.target.value) ?? event.target.value : undefined); } else onChange(event.target.value); }} onBlur={() => { if (numeric && typeof value === 'number') setText(formatGermanNumber(value)); }} />{input.type === 'money' && <span>EUR</span>}</div>;
   }
-  return <div className="t-schema-default"><div className="t-field"><label htmlFor={`${id}-mode`}>Standardwert<small>{label}</small></label><select id={`${id}-mode`} aria-label={`Art des Standardwerts für ${label}`} value={mode} onChange={event => changeMode(event.target.value)}><option value="none">Kein Standardwert</option><option value="literal" disabled={input.type.endsWith('-ref')}>Fester Wert</option><option value="parameter">Wert aus übergeordnetem Baustein</option><option value="reference">Ergebnis eines früheren Schritts</option>{value === null && <option value="null">Leerwert (null)</option>}</select></div>{control && <div className="t-field"><label htmlFor={`${id}-value`}>{mode === 'parameter' ? 'Parametername' : mode === 'reference' ? 'Ergebnisreferenz' : `Standardwert für ${label}`}</label>{control}{issue && <p id={`${id}-error`} role="alert">{issue}</p>}</div>}</div>;
+  return <div className={`t-schema-default ${compact ? 'compact' : ''}`}><div className="t-field"><label htmlFor={`${id}-mode`}>Standardwert{!compact && <small>{label}</small>}</label><select id={`${id}-mode`} disabled={!input.type} aria-label={`Art des Standardwerts für ${label}`} value={mode} onChange={event => changeMode(event.target.value)}><option value="none">Kein Standardwert</option><option value="literal" disabled={input.type.endsWith('-ref') || input.type==='object'}>Fester Wert</option>{mode==='parameter' && <option value="parameter">Übergeordneter Wert (gespeichert)</option>}{mode==='reference' && <option value="reference">Früheres Ergebnis (gespeichert)</option>}{value === null && <option value="null">Leerwert (gespeichert)</option>}</select>{input.type.endsWith('-ref') && value===undefined && <p>Das Ergebnis wählst du beim Verwenden im Testfall.</p>}{input.type==='object' && value===undefined && <p>Standardwerte kannst du für die einzelnen Unterfelder festlegen.</p>}</div>{control && <div className="t-field t-default-control"><label htmlFor={`${id}-value`}>{compact ? 'Wert' : `Standardwert für ${label}`}</label>{control}{issue && <p id={`${id}-error`} role="alert">{issue}</p>}</div>}</div>;
 }

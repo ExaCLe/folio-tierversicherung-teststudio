@@ -18,18 +18,34 @@ async function fixture(request: APIRequestContext, mutate?: (value: TestingScena
   return response.json() as Promise<TestingScenario>;
 }
 async function expectEditor(page: Page, value: TestingScenario) {
-  await expect(page).toHaveURL(new RegExp(`/testing/editor/${value.id}$`));
+  await expect(page).toHaveURL(new RegExp(`/testing/editor/${value.id}(?:\\?step=\\d+)?$`));
   await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue(value.title);
-  await expect(page.locator('.t-workspace-context')).toContainText(`Revision ${value.revision}`);
+
 }
 async function openOutline(page: Page, value: TestingScenario) {
-  await page.goto(`/testing/editor/${value.id}`);
+  await page.goto(`/testing/editor/${value.id}?step=3`);
   await expectEditor(page, value);
   if (!value.blocks.length) await page.getByRole('button', { name: 'Ablauf selbst erstellen', exact: true }).click();
   await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  if (value.blocks.length) await page.locator('.t-outline > button').first().click();
 }
+
+async function selectFirst(page: Page) {
+  await openDetails(page, '.t-editor-step');
+  if (!await page.locator('.t-outline').isVisible()) await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  await page.locator('.t-outline > button').first().click();
+}
+async function chooseBlock(page: Page, name: string, within = false, placement = 'Am Ende anhängen') {
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Block hinzufügen', exact: true });
+  await picker.getByLabel('Block suchen', { exact: true }).fill(name);
+  await picker.getByRole('option').filter({ hasText: name }).first().click();
+  if (within) await picker.getByLabel('Einfügestelle', { exact: true }).selectOption('within');
+  await picker.getByRole('button', { name: placement, exact: true }).click();
+}
+
 async function save(page: Page, request: APIRequestContext, id: string) {
   const previous = await readScenario(request, id);
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
@@ -84,6 +100,7 @@ test('Direktlink, Browser zurück und vorwärts wechseln Testfälle und erhalten
   await expect(page).toHaveURL(/\/testing\/scenarios$/);
   await page.goBack();
   await expectEditor(page, a);
+  await selectFirst(page);
   await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
   await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
   await page.goForward(); await page.goForward();
@@ -93,6 +110,7 @@ test('Direktlink, Browser zurück und vorwärts wechseln Testfälle und erhalten
   page.once('dialog', dialog => dialog.accept());
   await page.reload();
   await expectEditor(page, a);
+  await selectFirst(page);
   await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
   await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
   expect((await readScenario(request, a.id)).revision).toBe(a.revision);
@@ -100,66 +118,70 @@ test('Direktlink, Browser zurück und vorwärts wechseln Testfälle und erhalten
   expect(saved.blocks[0].inputs.sumInsured).toBe(17654.32);
   await page.reload();
   await expectEditor(page, saved);
+  await selectFirst(page);
   await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
   await page.screenshot({ path: testInfo.outputPath('zurueck-und-vorwaerts.png'), fullPage: true });
 });
 
-test('Eine völlig neue Fähigkeit wird unter einem leeren Ablauf definiert, direkt eingefügt und mit typisierten Werten gespeichert', async ({ page, request }, testInfo) => {
+test('Ein neuer Block beginnt ohne erfundene Pflichtwerte und bleibt lose gespeichert, bis er verbunden wird', async ({ page, request }, testInfo) => {
   const current = await fixture(request, value => { value.blocks = []; });
   const name = `Tiernachweis ${randomUUID().slice(0, 8)}`;
   await openOutline(page, current);
-  await page.getByRole('button', { name: 'Neuen Block definieren und hinzufügen', exact: true }).click();
-  const dialog = page.getByRole('dialog');
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Neuen Block definieren', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Einen fachlichen Block definieren', exact: true });
   await dialog.getByLabel('Name des Blocks', { exact: true }).fill(name);
-  await dialog.getByLabel('Fachliche Bedeutung', { exact: true }).fill('Prüft einen neuen tierärztlichen Nachweis anhand fachlicher Werte.');
-  await expect(dialog.getByLabel(/Fachlicher Schlüssel/)).not.toHaveValue('');
-  const generatedKey = await dialog.getByLabel(/Fachlicher Schlüssel/).inputValue();
-  const inputs = [{ key: 'limit', label: 'Nachweisbetrag', type: 'money' }, { key: 'anzahl', label: 'Nachweisanzahl', type: 'number' }, { key: 'geprueft', label: 'Nachweis geprüft', type: 'boolean' }];
+  await dialog.getByLabel('Blockart', { exact: true }).selectOption('assertion');
+  await dialog.getByLabel('Was soll der Block bewirken?', { exact: true }).fill('Prüft einen tierärztlichen Nachweis anhand fachlicher Werte.');
+  const inputs = [{ label: 'Nachweisbetrag', type: 'money' }, { label: 'Nachweisanzahl', type: 'number' }, { label: 'Nachweis geprüft', type: 'boolean' }];
   for (const [index, input] of inputs.entries()) {
     await dialog.getByRole('button', { name: 'Eingabe ergänzen', exact: true }).click();
-    await dialog.getByLabel(`Schlüssel der Eingabe ${index + 1}`, { exact: true }).fill(input.key);
     await dialog.getByLabel(`Bezeichnung der Eingabe ${index + 1}`, { exact: true }).fill(input.label);
     await dialog.getByLabel(`Datentyp der Eingabe ${index + 1}`, { exact: true }).selectOption(input.type);
+    await dialog.getByLabel(`Pflichteingabe ${index + 1}`, { exact: true }).check();
   }
-  await openDetails(page, '.t-definition-knowledge > details');
-  await dialog.getByRole('checkbox').last().check();
-  await dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Wissen hinzufügen', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Wissen hinzufügen', exact: true }).getByRole('checkbox').first().check();
+  await page.getByRole('button', { name: 'Auswahl übernehmen', exact: true }).click();
+  await dialog.getByRole('button', { name: /^Definieren und / }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('.t-outline > button')).toHaveCount(1);
   await expect(page.locator('.t-inspector h3')).toHaveText(name);
+  for (const input of inputs) await expect(page.getByLabel(new RegExp(input.label))).toHaveValue('');
+  const layoutURL = `/api/testing/scenarios/${current.id}/layout`;
+  await expect.poll(async () => (await (await request.get(layoutURL)).json()).parkedStacks?.length).toBe(1);
+  let layout = await (await request.get(layoutURL)).json();
+  expect(layout.parkedStacks[0][0].inputs).toEqual({});
+  expect((await readScenario(request, current.id)).blocks).toEqual([]);
   await page.getByLabel(/Nachweisbetrag/).fill('9.876,54');
   await page.getByLabel(/Nachweisanzahl/).fill('7');
   await page.getByLabel(/Nachweis geprüft/).selectOption('true');
-  const saved = await save(page, request, current.id);
-  expect(saved.blocks).toHaveLength(1);
-  expect(saved.blocks[0].inputs).toMatchObject({ limit: 9876.54, anzahl: 7, geprueft: true });
-  const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
-  expect(catalog.definitions.find(definition => definition.id === saved.blocks[0].definition.id)).toMatchObject({ name, semanticKey: generatedKey });
+  // Reload immediately: layout persistence may still be debounced, but the local workspace must survive.
   await page.reload();
+  await openDetails(page, '.t-editor-step');
+  layout = await (await request.get(layoutURL)).json();
+  const block = page.locator(`g[data-id="${layout.parkedStacks[0][0].id}"]`);
+  await expect(block).toContainText('9.876,54');
+  await expect(block).toContainText('Nachweisanzahl');
+  await expect(block).toContainText('Ja');
+  await expect(page.locator('.t-inspector')).toHaveCount(0);
+  const path = block.locator(':scope > path.blocklyPath[id]');
+  const box = (await path.boundingBox())!;
+  await page.mouse.click(box.x + 24, box.y + 10);
   await expect(page.getByLabel(/Nachweisbetrag/)).toHaveValue('9.876,54');
-  await expect(page.getByLabel(/Nachweisanzahl/)).toHaveValue('7');
-  await expect(page.getByLabel(/Nachweis geprüft/)).toHaveValue('true');
-  await page.screenshot({ path: testInfo.outputPath('neue-faehigkeit-direkt-im-test.png'), fullPage: true });
+  expect((await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json()).steps).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('neuer-block-lose-mit-eigenen-werten.png'), fullPage: true });
 });
 
 test('Vorhandene Blöcke lassen sich sichtbar ans Ende und in einen ausgewählten Baustein einfügen', async ({ page, request }) => {
   const current = await fixture(request);
   await openOutline(page, current);
-  const add = async () => {
-    await page.getByRole('button', { name: 'Vorhandenen Block hinzufügen', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'Vorhandenen Block hinzufügen', exact: true });
-    // Runtime tests may add another definition with the same display name.
-    await dialog.getByLabel('Block suchen', { exact: true }).fill('kunde.anlegen');
-    await dialog.getByRole('button').filter({ hasText: 'Kunden anlegen' }).click();
-  };
-  await add();
+  await chooseBlock(page, 'Kunden anlegen');
   await page.getByLabel(/Name des Kunden/).fill('Kunde am Ablaufende');
   const appended = await save(page, request, current.id);
   expect(appended.blocks.at(-1)?.definition.id).toBe('kunde.anlegen');
   expect(appended.blocks.at(-1)?.inputs.name).toBe('Kunde am Ablaufende');
   await page.locator('.t-outline > button').first().click();
-  await page.getByLabel('Einfügestelle', { exact: true }).selectOption('within');
-  await add();
+  await chooseBlock(page, 'Kunden anlegen', true);
   await page.getByLabel(/Name des Kunden/).fill('Kunde im Baustein');
   const nested = await save(page, request, current.id);
   expect(nested.blocks).toHaveLength(appended.blocks.length);
@@ -201,6 +223,7 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
   const current = await fixture(request);
   await page.goto(`/testing/editor/${current.id}`);
   await expectEditor(page, current);
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   const selectScratchBlock = async (id = 'kuhvorschlag') => {
     await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
@@ -236,9 +259,11 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
   await expect(money).toHaveValue('18.765,43');
   await selectScratchBlock();
   const workspace = (await page.locator('.t-scratch-workspace .blocklySvg').boundingBox())!;
-  const blank = { x: workspace.x + workspace.width - 60, y: workspace.y + 40 };
+  const blank = { x: workspace.x + 12, y: workspace.y + workspace.height - 90 };
   expect(await page.evaluate(point => document.elementFromPoint(point.x, point.y)?.classList.contains('blocklyMainBackground'), blank)).toBeTruthy();
   await page.mouse.click(blank.x, blank.y);
+  await expect(inspector).toHaveCount(0);
+  await selectScratchBlock();
   await expect(money).toHaveValue('18.765,43');
   await money.fill('18.765,44');
   const saved = await save(page, request, current.id);
@@ -247,7 +272,7 @@ test('Echte Scratch-Auswahl bleibt beim Bearbeiten, Tabwechsel und Klick außerh
   await selectScratchBlock('pruefung');
   await expect(inspector.locator('h3')).toHaveText('Zustand des Vorschlags prüfen');
   await page.getByRole('button', { name: 'Block löschen', exact: true }).click();
-  await expect(inspector.locator('.t-inspector-empty')).toBeVisible();
+  await expect(inspector).toHaveCount(0);
   await expect(inspector.getByRole('tablist')).toHaveCount(0);
   const deleted = await save(page, request, current.id);
   expect(deleted.blocks.some(block => block.id === 'pruefung')).toBeFalsy();
@@ -300,37 +325,37 @@ test('Abweichungen zeigen wirksame Workflowwerte und klappen geänderte Schritte
   expect(layoutResponse.ok()).toBeTruthy();
   await page.goto(`/testing/editor/${current.id}`);
   await expectEditor(page, current);
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
-  const deviations = page.getByRole('region', { name: 'Abweichungen vom Standard', exact: true });
-  await expect(deviations).toBeVisible();
-  await openDetails(page, '.t-value-changes > details');
-  const farm = deviations.locator('.t-value-change').filter({ hasText: 'Schritt 1.2' }).filter({ hasText: 'Bundesland' });
-  await expect(farm.locator('del')).toHaveText('Niedersachsen');
-  await expect(farm.locator('ins')).toHaveText('Bayern');
-  const animal = deviations.locator('.t-value-change').filter({ hasText: 'Schritt 1.3' }).filter({ hasText: 'Versicherungssumme' });
-  await expect(animal.locator('del')).toHaveText('3.500 EUR');
-  await expect(animal.locator('ins')).toHaveText('15.000 EUR');
+  await selectFirst(page);
+  await expect(page.getByRole('region', { name: 'Abweichungen vom Standard', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Scratch-Blöcke', exact: true }).click();
   const tier = page.locator('g[data-id="kuhvorschlag/tier"]');
-  await expect(tier.getByText('Tierart', { exact: true })).toBeHidden();
-  await deviations.getByRole('button', { name: 'Geänderte Schritte aufklappen', exact: true }).click();
-  await expect(tier.getByText('Tierart', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Geänderte Schritte zeigen', exact: true }).click();
+  await expect(tier.getByText('Tierart', { exact: true })).toHaveCount(0);
   await expect(page.locator('g[data-id="kuhvorschlag/kunde"]')).toContainText('QA Kundin mit Abweichung');
-  await expect(tier).toContainText('15.000 EUR');
+  await expect(page.locator('g[data-id="kuhvorschlag/betrieb"]')).toContainText('Bayern');
+  await expect(tier).toContainText('15.000');
+  await expect(tier).toContainText('Versicherungssumme');
+  await expect(page.locator('.t-scratch-workspace .blocklyBlockCanvas').first()).not.toContainText('Standardwerte');
+  await expect(page.locator('.t-scratch-workspace .blocklyBlockCanvas').first()).not.toContainText('Geändert ·');
   await expect.poll(async () => (await (await request.get(layoutURL)).json()).collapsed).toEqual([]);
   expect(await readScenario(request, current.id)).toEqual(current);
   await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
   await page.reload();
   await expectEditor(page, current);
+  await selectFirst(page);
+  await page.getByRole('button', { name: 'Scratch-Blöcke', exact: true }).click();
   await expect(tier).toBeVisible();
   await page.getByLabel(/Versicherungssumme in EUR/).fill('16.000,50');
   const saved = await save(page, request, current.id);
   expect(saved.blocks[0].inputs.sumInsured).toBe(16000.5);
   expect(saved.blocks[0].children).toBeUndefined();
   await expect(tier).toBeVisible();
-  await expect(tier).toContainText('16.000,5 EUR');
+  await expect(tier).toContainText('16.000,5');
   await page.screenshot({ path: testInfo.outputPath('workflow-abweichungen-aufgeklappt.png'), fullPage: true });
-  await openDetails(page, '.t-value-changes > details');
-  await farm.getByRole('button', { name: 'Geänderten Schritt zeigen · Schritt 1.2', exact: true }).click();
+  await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
+  await page.locator('.t-outline').getByRole('button', { name: /Betrieb anlegen/ }).click();
   await expect(page.locator('.t-inspector h3')).toHaveText('Betrieb anlegen');
   await expect(page.getByLabel(/Bundesland/)).toHaveValue('Bayern');
   await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
@@ -344,6 +369,7 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   });
   await page.goto(`/testing/editor/${current.id}`);
   await expectEditor(page, current);
+  await openDetails(page, '.t-editor-step');
   await expect(page.locator('.t-scratch-workspace .blocklySvg')).toBeVisible();
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
   await page.locator('.t-canvas').scrollIntoViewIfNeeded();
@@ -369,6 +395,7 @@ test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldände
   await expect.poll(async () => (await (await request.get(layoutURL)).json()).parkedBlocks?.find((block: { id: string }) => block.id === 'park-kunde')?.inputs).toEqual(parkedValues);
   await save(page, request, current.id);
   await page.reload();
+  await openDetails(page, '.t-editor-step');
   await expect(parked()).toContainText(parkedValues.name);
   await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
   await page.locator('.t-canvas').scrollIntoViewIfNeeded();
@@ -407,26 +434,113 @@ for (const phase of ['duplicates', 'technical'] as const) test(`Ein fehlgeschlag
   await page.reload();
   await openDetails(page, '.t-overview-history');
   await page.getByRole('region', { name: 'Bisherige Agentenaufträge', exact: true }).getByRole('button').filter({ hasText: original.title }).click();
-  const dialog = page.locator('.t-inline-activity');
+  await selectFirst(page);
+  await page.getByRole('button', { name: 'Früheren Auftrag ansehen', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Früheren Auftrag ansehen', exact: true });
   await expect(dialog.getByRole('alert')).toContainText('Die KI hat keinen gültigen Vergleich geliefert');
   await expect(dialog.getByRole('alert')).toContainText('Dieses Ergebnis wurde nicht übernommen');
   await expect(dialog.getByText(rawError, { exact: true })).not.toBeVisible();
   await dialog.getByText('Technische Fehlerdetails anzeigen', { exact: true }).click();
-  await expect(dialog.locator('pre').filter({ hasText: rawError })).toBeVisible();
+  await expect(dialog.locator('.t-agent-failure pre').filter({ hasText: rawError })).toBeVisible();
   await dialog.getByText('Technische Fehlerdetails anzeigen', { exact: true }).click();
   await page.screenshot({ path: testInfo.outputPath('bausteinvergleich-verstaendlicher-fehler.png') });
+  await dialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   await expectEditor(page, original);
+  await selectFirst(page);
   await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('17.654,32');
   await expect(page.locator('.t-editor-title')).toContainText('Ungespeicherte Änderungen');
   expect(submitted).toEqual([]);
   const current = await save(page, request, original.id);
   await page.getByRole('button', { name: /^(?:Speichern und fachlich freigeben|Fachlich freigeben)$/ }).click();
+  await page.getByRole('button', { name: 'Schritt 4: Technik & Prüfen', exact: true }).click();
   await expect(page.getByRole('button', { name: /^(Technik & Probelauf|Mit vorhandener Technik ausführen)$/ })).toBeEnabled();
-  await openDetails(page, '.t-workspace-context');
-  await page.getByLabel('Modell für KI-Aufträge', { exact: true }).selectOption('sol');
-  await page.getByRole('button', { name: /^(Technik & Probelauf|Technik neu vorbereiten)$/ }).click();
+  await page.getByRole('button', { name: 'Technik neu vorbereiten', exact: true }).click();
+  const restart = page.getByRole('dialog', { name: 'Technik neu vorbereiten', exact: true });
+  await restart.getByLabel('Modell für technische Vorbereitung', { exact: true }).selectOption('sol');
+  await restart.getByRole('button', { name: 'Technik & Probelauf', exact: true }).click();
   expect(submitted).toEqual([{ scenarioId: original.id, revision: current.revision, model: 'sol' }]);
+  await page.getByRole('button', { name: 'Schritt 3: Fachlich prüfen', exact: true }).click();
+  await page.getByRole('button', { name: 'Vorschläge ansehen', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Vorhandene Fähigkeiten bewusst wiederverwenden', exact: true })).toBeVisible();
   await expect(page.locator('.t-agent-failure')).toHaveCount(0);
   await expect(page.locator('.t-duplicate-review')).toContainText('Die Definition muss fachlich überarbeitet werden');
+});
+
+test('Die Arbeitsfläche blendet echte Defaults aus und vergrößert sich im Vollbild ohne Zoomänderung', async ({ page, request }, testInfo) => {
+  const current = await fixture(request, value => { value.blocks[0].inputs = {}; delete value.blocks[0].overrides; });
+  await page.goto(`/testing/editor/${current.id}`);
+  await openDetails(page, '.t-editor-step');
+  await expect(page.locator('.blocklyToolbox')).toHaveCount(0);
+  await expect(page.locator('.t-inspector')).toHaveCount(0);
+  const root = page.locator('g[data-id="kuhvorschlag"]');
+  await expect(root.getByText('Versicherungssumme in EUR', { exact: true })).toHaveCount(0);
+  await selectFirst(page);
+  await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('3.500');
+  await page.getByLabel(/Versicherungssumme in EUR/).fill('12.345,67');
+  await page.getByRole('button', { name: 'Scratch-Blöcke', exact: true }).click();
+  await expect(root).toContainText('12.345,67');
+  await expect(root.getByText('Versicherungssumme in EUR', { exact: true }).first()).toBeVisible();
+  await page.getByLabel(/Versicherungssumme in EUR/).fill('3.500');
+  await expect(root.getByText('Versicherungssumme in EUR', { exact: true })).toHaveCount(0);
+  // Returning to the actual definition default remains a valid explicit value.
+  const saved = await save(page, request, current.id);
+  const workbench = page.locator('.t-workbench');
+  const before = (await workbench.boundingBox())!;
+  const zoom = await page.locator('.blocklyBlockCanvas').first().getAttribute('transform');
+  const scale = (text: string | null) => text?.match(/scale\(([^)]+)\)/)?.[1];
+  await page.getByRole('button', { name: 'Arbeitsfläche vergrößern', exact: true }).click();
+  await expect(workbench).toHaveClass(/is-fullscreen/);
+  const expanded = (await workbench.boundingBox())!;
+  const viewport = page.viewportSize()!;
+  const visibleArea = (rect: typeof before) => Math.max(0, Math.min(viewport.width, rect.x + rect.width) - Math.max(0, rect.x)) * Math.max(0, Math.min(viewport.height, rect.y + rect.height) - Math.max(0, rect.y));
+  expect(visibleArea(expanded)).toBeGreaterThan(visibleArea(before));
+  expect(expanded.x).toBeLessThanOrEqual(13);
+  expect(expanded.y).toBeLessThanOrEqual(13);
+  expect(scale(await page.locator('.blocklyBlockCanvas').first().getAttribute('transform'))).toBe(scale(zoom));
+  await expect(page.getByLabel(/Versicherungssumme in EUR/)).toHaveValue('3.500');
+  await page.screenshot({ path: testInfo.outputPath('volle-arbeitsflaeche-ohne-defaultwerte.png') });
+  await page.keyboard.press('Escape');
+  await expect(workbench).not.toHaveClass(/is-fullscreen/);
+  expect(await readScenario(request, current.id)).toEqual(saved);
+});
+
+test('Verschachtelte Wertepaare zeigen nur geänderte fachliche Unterfelder statt technischer JSON-Werte', async ({ page, request }) => {
+  const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
+  const seed = catalog.definitions.find(item => item.id === 'pruefung.vorschlagsstatus')!;
+  const definition = { ...seed, id: `qa.wertepaare.${randomUUID()}`, name: 'Nachweiswerte prüfen', semanticKey: `qa.${randomUUID()}`, operation: undefined, bindingId: undefined, inputs: [{ key: 'evidenceDetails', label: 'Nachweis', type: 'object', fields: [{ key: 'insuredAmount', label: 'Nachweisbetrag', type: 'money' }, { key: 'accepted', label: 'Fachlich bestätigt', type: 'boolean' }, { key: 'regionCode', label: 'Gebiet', type: 'text' }], default: { insuredAmount: 3500, accepted: false, regionCode: 'Nord' } }], outputs: [] };
+  expect((await request.post('/api/testing/definitions', { data: { definition } })).ok()).toBeTruthy();
+  const workflow = { ...seed, id: `qa.werteworkflow.${randomUUID()}`, name: 'Nachweise vorbereiten', semanticKey: `qa.${randomUUID()}`, operation: undefined, bindingId: undefined, kind: 'workflow', inputs: [], outputs: [], body: [{ id: 'nachweis', definition: { id: definition.id, version: definition.version }, inputs: {} }] };
+  expect((await request.post('/api/testing/definitions', { data: { definition: workflow } })).ok()).toBeTruthy();
+  const current = await fixture(request, value => { value.blocks = [{ id: 'vorbereitung', definition: { id: workflow.id, version: workflow.version }, inputs: {}, overrides: { nachweis: { evidenceDetails: { insuredAmount: 12345.67, accepted: true, regionCode: 'Nord' } } } }]; });
+  await page.goto(`/testing/editor/${current.id}`);
+  await openDetails(page, '.t-editor-step');
+  const nested = page.locator('g[data-id="vorbereitung/nachweis"]');
+  await expect(nested).toContainText('Nachweisbetrag: 12.345,67');
+  await expect(nested).toContainText('Fachlich bestätigt: Ja');
+  await expect(nested).not.toContainText('insuredAmount');
+  await expect(nested).not.toContainText('regionCode');
+  await expect(nested).not.toContainText('Nord');
+  await expect(nested).not.toContainText('{');
+  expect(await readScenario(request, current.id)).toEqual(current);
+});
+
+test('Ein direkt im Scratch-Block zurückgesetzter Default lässt sich nativ rückgängig machen und wiederholen', async ({ page, request }) => {
+  const current = await fixture(request);
+  await page.goto(`/testing/editor/${current.id}`);
+  await openDetails(page, '.t-editor-step');
+  const root = page.locator('g[data-id="kuhvorschlag"]');
+  await page.getByRole('button', { name: 'Alle Blöcke ins Bild setzen', exact: true }).click();
+  await root.locator(':scope > g.blocklyEditableField').getByText('15.000', { exact: true }).dblclick();
+  const input = page.locator('input.blocklyHtmlInput');
+  await expect(input).toBeVisible();
+  await input.fill('3.500');
+  await input.press('Enter');
+  await expect(root.getByText('Versicherungssumme in EUR', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Rückgängig', exact: true }).click();
+  await expect(root).toContainText('15.000');
+  await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'Wiederholen', exact: true }).click();
+  await expect(root.getByText('Versicherungssumme in EUR', { exact: true })).toHaveCount(0);
+  const saved = await save(page, request, current.id);
+  expect(saved.blocks[0].inputs.sumInsured).toBe(3500);
 });

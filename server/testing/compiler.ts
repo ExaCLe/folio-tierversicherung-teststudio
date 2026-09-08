@@ -56,7 +56,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   const declaredByScope = new WeakMap<Map<string,{key:string;type:TestingValueType}>,Set<string>>();
   const fingerprint = testingFingerprint(scenario,catalog); let wired = true;
   const sources = new Map<string, { sourcePath: string; sourceLabel: string }>();
-  const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:'error'|'warning'='error',source?:{sourcePath:string;sourceLabel:string}) => issues.push({code,message,severity,instanceId:block?.id,path,field,...source});
+  const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:TestingValidationIssue['severity']='error',source?:{sourcePath:string;sourceLabel:string}) => issues.push({code,message,severity,instanceId:block?.id,path,field,...source});
   const blockLabel = (block:TestingBlockInstance) => block.label ?? defs.get(testingVersionKey(block.definition))?.name ?? block.definition.id;
   const fieldLabel = (block:TestingBlockInstance,field:string) => {
     let inputs = defs.get(testingVersionKey(block.definition))?.inputs ?? []; const labels:string[]=[];
@@ -143,10 +143,10 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
         else if(ids.length===1) binding=latestTestingBinding({...catalog,bindings:candidates},ids[0]);
       }
       if(binding && (!binding.definitionRefs.some(ref=>testingVersionKey(ref)===key)||binding.operation!==effectiveTestingOperation(definition))) {issue('BINDING_MISMATCH',`Die technische Bindung passt nicht zu „${definition.name}“.`,block,path,undefined,'warning');binding=undefined;}
-      if(!binding||binding.status!=='ready') {wired=false;issue('BINDING_MISSING',`„${definition.name}“ ist fachlich beschrieben. Die technische Verdrahtung fehlt noch.`,block,path,undefined,'warning');}
+      if(!binding||binding.status!=='ready') {wired=false;issue('BINDING_MISSING',`„${definition.name}“ ist fachlich beschrieben. Die technische Verdrahtung fehlt noch.`,block,path,undefined,'info');}
       if(binding) {
         usedBindings.set(`${binding.id}@${binding.revision}`,binding);
-        if(binding.status==='ready') for(const inputKey of Object.keys(inputs)) if(!(binding.inputKeys??[]).includes(inputKey)) {wired=false;issue('BINDING_INPUT_MISSING',`Die technische Bindung verwendet das Feld „${inputKey}“ noch nicht.`,block,path,inputKey,'warning');}
+        if(binding.status==='ready') for(const inputKey of Object.keys(inputs)) if(!(binding.inputKeys??[]).includes(inputKey)) {wired=false;issue('BINDING_INPUT_MISSING',`Für „${definition.name}“ muss die technische Umsetzung der Eingabe „${fieldLabel(block,inputKey)}“ noch ergänzt werden.`,block,path,inputKey,'info');}
       }
       const outputs:Record<string,string>={};
       for(const output of definition.outputs) {const qualified=`${path}::${output.key}`;sources.set(qualified,{sourcePath:path,sourceLabel:blockLabel(block)});outputs[output.key]=qualified;bindOutput(block,output.key,{key:qualified,type:output.type},scope,path);}

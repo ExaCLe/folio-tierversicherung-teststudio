@@ -115,6 +115,10 @@ Die Fortschrittsanzeige zeigt erledigte Schritte, aktive Arbeitszweige und abruf
 
 Die KI wertet zuerst vorhandenes Wissen aus. Bei Lücken kann sie das Portal in einer separaten lokalen Umgebung mit eigenen Testdaten erkunden. Beobachtungen aus dieser Erkundung und offene Fragen fließen in den fachlichen Entwurf ein. Beim manuellen Definieren eines Blocks lässt sich fehlendes Wissen ebenfalls neu ergänzen.
 
+Die fachliche Prüfung beginnt mit einer großen Scratch-Arbeitsfläche. Blockeigenschaften öffnen sich bei Auswahl als Overlay; veränderte Werte stehen direkt im Block. „Block hinzufügen“ führt zuerst zum Katalog und von dort bei Bedarf zur neuen Definition. Technische Schlüssel werden automatisch verwaltet. Die KI-Überarbeitung steht unter der Arbeitsfläche, mit ihrer eigenen Modellauswahl.
+
+Bereits erreichte Schritte lassen sich ohne Neustart eines Agenten erneut ansehen. Agentenerläuterungen, benannte Quellen und Freigabehinweise öffnen sich in Dialogen. Die Freigabe unterscheidet Informationen, Warnungen und Fehler; eine noch fehlende technische Umsetzung ist während des fachlichen Entwurfs eine Information.
+
 Das Studio verwendet `scratch-blocks` mit dem Scratch-Renderer. Verbundene Blöcke beschreiben die ausführbare Reihenfolge. Frei abgelegte Blöcke und ihre Bildschirmpositionen werden als Layout gespeichert. Sie ändern die fachliche Reihenfolge nicht.
 
 Eine Definition beschreibt die fachliche Bedeutung und die Eingaben eines Blocks. Eine Instanz verwendet diese Definition in einem Testfall. Eine separate technische Bindung legt die konkreten Browseraktionen fest. Wiederverwendbare Abläufe bestehen aus bestehenden Blöcken und können Parameter nach außen anbieten, etwa Versicherungssumme oder Bundesland.

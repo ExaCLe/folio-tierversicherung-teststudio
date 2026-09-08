@@ -1,6 +1,6 @@
 # Ein Arbeitsbereich pro Testfall
 
-Die Erstellung eines Testfalls folgt einer fachlichen Reihenfolge. Die Oberfläche zeigt den aktuellen Schritt, das Ergebnis des letzten Schritts und eine nächste Aktion. Protokolle, interne Kennungen und historische Nachweise sind zusätzliche Details.
+Die Erstellung eines Testfalls folgt einer fachlichen Reihenfolge. Die Oberfläche zeigt den aktuellen Schritt, das Ergebnis des letzten Schritts und eine nächste Aktion. Erläuterungen und Nachweise öffnen sich über beschriftete Buttons in Dialogen. Die Blockbearbeitung bleibt dadurch im Mittelpunkt.
 
 ## Einstieg und Wiederaufnahme
 
@@ -18,15 +18,17 @@ Die Adresse des Testfalls, seine gespeicherte Revision und zugehörige Aufträge
 | Test vorbereiten und ausführen | Umsetzung, Vergleich mit anderen Bausteinen und Browserlauf als getrennte Arbeitsschritte | Nach einer erforderlichen Entscheidung oder abgeschlossenem Browserlauf |
 | Ergebnis | Bestanden oder fehlgeschlagen, mit den passenden Nachweisen | Der Test kann erneut ausgeführt oder überarbeitet werden |
 
+Bereits erreichte Schritte lassen sich über die Schrittleiste erneut ansehen. Der Wechsel zurück zur Erkundung zeigt die damaligen Agentenergebnisse; er startet keinen neuen Auftrag und verändert keine Freigabe.
+
 Ein beendeter KI-Aufruf ist kein bestandener Test. Die KI kann einen Vorschlag geliefert haben, der noch geprüft werden muss. Ebenso kann eine technische Planung eine fehlende Fähigkeit oder eine mögliche Wiederverwendung melden, ohne bereits einen Browserlauf auszuführen.
 
 ## Fortschritt verstehen
 
-Beim ersten Entwurf arbeitet die KI der Reihe nach: vorhandenes Wissen prüfen, bei Bedarf die Anwendung erkunden und anschließend den Ablauf entwerfen. Der übergeordnete Auftrag verwaltet diese Schritte. Er zählt dabei nicht als zusätzlicher, parallel arbeitender Agent.
+Beim ersten Entwurf arbeitet die KI der Reihe nach: einen passenden Titel bestimmen, vorhandenes Wissen prüfen, bei Bedarf die Anwendung erkunden und anschließend den Ablauf entwerfen. Der übergeordnete Auftrag verwaltet diese Schritte. Er zählt dabei nicht als zusätzlicher, parallel arbeitender Agent.
 
 In der technischen Vorbereitung können zwei Arbeiten gleichzeitig laufen: die Browseraktionen vorbereiten und die Bausteine mit bestehenden Definitionen vergleichen. Die Anzeige trennt diese Arbeitszweige und zeigt ihren jeweiligen Stand. Der Browserlauf folgt erst, wenn die dafür notwendigen Prüfungen abgeschlossen sind.
 
-Abgeschlossene Schritte und beobachtete Aktionen zeigen den Fortschritt. Sie sind keine Schätzung der verbleibenden Zeit. Die Erläuterungen enthalten öffentliche Statusmeldungen und Ergebnisse der einzelnen Schritte. Die Anzeige zählt protokollierte Werkzeugmeldungen im verfügbaren Verlauf; Browserbeobachtungen werden separat gezählt. Eine fehlende neue Modellmeldung bedeutet nicht automatisch, dass der Auftrag stehen geblieben ist.
+Abgeschlossene Schritte und beobachtete Aktionen zeigen den Fortschritt. Sie sind keine Schätzung der verbleibenden Zeit. Der Button für Agentenerläuterungen öffnet einen Dialog mit verständlichen öffentlichen Meldungen und Ergebnissen. Reine Empfangsbestätigungen und technische Werkzeugereignisse gehören nicht in diese Erläuterungen. Benannte Wissensquellen und Browserbelege lassen sich von dort öffnen. Die Anzeige zählt protokollierte Werkzeugmeldungen im verfügbaren Verlauf; Browserbeobachtungen werden separat gezählt. Eine fehlende neue Modellmeldung bedeutet nicht automatisch, dass der Auftrag stehen geblieben ist.
 
 Für die Erkundung hält die KI ihre Prüffragen fest. Diese Liste bleibt über die einzelnen Modellaufrufe erhalten. So kann beispielsweise die Frage nach einer dritten Benutzerrolle nicht verschwinden, nachdem zwei andere Rollen geprüft wurden. Beantwortete Fragen verweisen auf ihre Belege; offene Fragen verhindern einen vollständigen Abschluss.
 
@@ -45,13 +47,29 @@ Ein Zeitlimit, eine technische Unterbrechung und ein ausdrücklich angeforderter
 | Zugeordneter Browserlauf fehlgeschlagen | Den fehlgeschlagenen Schritt prüfen |
 | Zugeordneter Browserlauf bestanden | Ergebnis ansehen; Wiederverwendung optional prüfen |
 
+Bei vorhandener Technik bleibt die direkte Ausführung die Hauptaktion. Für eine erneute technische Vorbereitung gibt es eine eigene Schaltfläche mit Modellauswahl im Dialog.
+
 Ein Ergebnis gehört zu einem konkreten Auftrag und dessen Fachstand. Ein alter grüner Lauf darf nicht als Ergebnis eines neueren, noch unvollständigen Auftrags erscheinen. Nach einer fachlichen Änderung bleiben ältere Nachweise in der Historie, gelten aber nicht als Nachweis für die Änderung.
+
+## Blöcke bearbeiten und freigeben
+
+Im Prüfschritt steht die Scratch-Arbeitsfläche oben. Ein Klick auf einen Block öffnet dessen Eigenschaften als Overlay. Ein Klick auf die freie Arbeitsfläche schließt es wieder. Die Vollbildansicht vergrößert den Arbeitsbereich; sie soll die Blöcke nicht durch automatisches Herauszoomen verkleinern.
+
+Im Block stehen nur Werte, die von den Vorgaben seiner verwendeten Definition abweichen. Alle Eingaben bleiben in den Eigenschaften bearbeitbar. Auch bei verschachtelten Blöcken beziehen sich die Änderungen auf die tatsächlich wirksamen Werte.
+
+„Block hinzufügen“ öffnet den Katalog. Suche zuerst nach einer vorhandenen Fähigkeit. Ist keine passende vorhanden, lässt sich im Katalog eine neue Definition anlegen. Die normale Einfügung legt den Block frei in der Arbeitsfläche ab; „Am Ende anhängen“ fügt ihn direkt in den Ablauf ein. Freie Blöcke bleiben gespeichert, werden aber erst ausgeführt, wenn sie mit der Startkette verbunden sind.
+
+Unter der Arbeitsfläche steht die KI-Überarbeitung als eigener Abschnitt. Dort beschreibst du die gewünschte Änderung und wählst das Modell für diesen Auftrag. Der Vorschlag wird erst nach deiner Übernahme zum gespeicherten Ablauf.
+
+Die fachliche Freigabe zeigt getrennte Zähler für Informationen, Warnungen und Fehler. Ein Klick öffnet die zugehörigen Hinweise mit dem betroffenen Schritt oder Feld. Eine noch fehlende technische Bindung ist in dieser Phase eine Information: Die technische Umsetzung folgt später. Ungültige fachliche Eingaben verhindern dagegen die Freigabe.
 
 ## Wissen entsteht während der Arbeit
 
 Vorhandenes Wissen wird zuerst ausgewertet. Reicht es nicht aus, kann die KI die aktuelle Portaloberfläche in einer separaten lokalen Umgebung erkunden. Beobachtungen aus dieser Erkundung belegen, was die Oberfläche tatsächlich zeigt und welche Eingaben möglich waren. Sie ersetzen keine fachliche Bestätigung einer Versicherungsregel.
 
-Fehlendes Wissen darf auch ein Mensch beim Definieren eines Blocks ergänzen. Die neue Wissensbeschreibung und ihre Verbindung zum Block werden gemeinsam gespeichert. Es ist nicht nötig, einen beliebigen vorhandenen Wissenseintrag auszuwählen, nur um den Dialog abschließen zu können.
+Beim Definieren eines Blocks gibt der Mensch einen Namen, die Blockart und Eingaben an. Pro Eingabe stehen Name, Typ, Pflichtfeld und gegebenenfalls Standardwert zusammen. Interne Schlüssel und Versionen werden automatisch verwaltet. Voraussetzungen und erwartete Wirkung beschreiben für den Agenten, wann der Block verwendbar ist und was er erreichen soll.
+
+Über „Wissen hinzufügen“ lassen sich bestehende Quellen auswählen oder neue Wissensbeschreibungen ergänzen. Die neue Wissensbeschreibung und ihre Verbindung zum Block werden gemeinsam gespeichert. Es ist nicht nötig, einen beliebigen vorhandenen Wissenseintrag auszuwählen, nur um den Dialog abschließen zu können.
 
 ## Dubletten und Versionen
 

@@ -92,7 +92,7 @@ test('Anforderung bleibt sofort gespeichert; Navigation, Reload und laufende Kin
   await expect(nextHeading(page)).toHaveText('Wir bereiten deinen Test vor');
   await expect(page.getByRole('button', { name: 'Erkundung und Entwurf fortsetzen', exact: true })).toHaveCount(0);
   await expect(activity(page).getByLabel('Arbeitsschritte der KI')).toContainText('In Bearbeitung');
-  await expect(page.locator('.t-workflow-progress [aria-current="step"]')).toContainText('Erkundung & Entwurf');
+  await expect(page.locator('.t-workflow-progress li[aria-current="step"]')).toContainText('Erkundung & Entwurf');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   const template = await readScenario(request, 'kuh-direktionsanfrage');
@@ -102,7 +102,9 @@ test('Anforderung bleibt sofort gespeichert; Navigation, Reload und laufende Kin
   await page.reload();
   await expect(nextHeading(page)).toHaveText('Passt dieser Ablauf zu deiner Anforderung?');
   await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Schritt 2: Erkundung & Entwurf', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Erkundungsergebnis', exact: true })).toContainText('Das vorhandene Wissen reicht');
+  await page.getByRole('button', { name: 'Schritt 3: Fachlich prüfen', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('linearer-entwurf-nach-wiederaufnahme.png'), fullPage: true });
 });
@@ -121,10 +123,12 @@ test('Offene Bausteinentscheidung zeigt keinen alten grünen Lauf als aktuelles 
   await transport(page, { jobs: [blocked], runs: [old] });
   await page.goto(`/testing/editor/${current.id}`);
   await expect(nextHeading(page)).toHaveText('Über vorgeschlagene Bausteine entscheiden');
-  await expect(activity(page)).toContainText('Die fachliche Überschneidung muss zuerst geklärt werden.');
+  await page.getByRole('button', { name: 'Vorschläge ansehen', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Synthetische fachliche Überschneidung');
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Vorschläge ansehen', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toHaveCount(0);
-  await expect(page.locator('.t-workflow-progress [aria-current="step"]')).toContainText('Fachlich prüfen');
+  await expect(page.locator('.t-workflow-progress li[aria-current="step"]')).toContainText('Fachlich prüfen');
   await page.getByRole('link', { name: 'Alle Testfälle', exact: true }).click();
   const row = page.locator('.t-test-row').filter({ hasText: current.title });
   await expect(row).toContainText('Deine Entscheidung'); await expect(row).not.toContainText('Bestanden');
@@ -134,7 +138,7 @@ test('Offene Bausteinentscheidung zeigt keinen alten grünen Lauf als aktuelles 
 test('Eine Wissenslücke bleibt sichtbar und lässt denselben gespeicherten Test nach Ergänzung erneut planen', async ({ page, request }, testInfo) => {
   const current = await scenarioFixture(request, true);
   const question = 'Welche Rolle darf die fiktive Sonderfreigabe ausführen?';
-  const parent = job(current, { status: 'completed', result: { needsKnowledge: true, openQuestions: [question], explanation: 'Eine fachliche Angabe fehlt.' } });
+  const parent = job(current, { status: 'completed', result: { scenario: current, applied: false, needsKnowledge: true, openQuestions: [question], explanation: 'Eine fachliche Angabe fehlt.' } });
   const child = job(current, { phase: 'exploration', status: 'completed', parentJobId: parent.id,
     result: { explored: false, evidence: [], newKnowledge: [], openQuestions: [question], explanation: 'Keine belegte Rollenregel vorhanden.' } });
   parent.childJobIds = [child.id];
@@ -165,17 +169,20 @@ test('Neues Fachwissen wird beim Definieren über die echte API gemeinsam mit de
   const current = await scenarioFixture(request); await transport(page, { jobs: [], runs: [] });
   await page.goto(`/testing/editor/${current.id}`);
   await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Neuen Block definieren und hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Neuen Block definieren', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Einen fachlichen Block definieren', exact: true });
   const name = `Belegprüfung ${randomUUID().slice(0, 8)}`, title = `Regel zur ${name}`;
   await dialog.getByLabel('Name des Blocks', { exact: true }).fill(name);
-  await dialog.getByLabel('Fachliche Bedeutung', { exact: true }).fill('Prüft einen vollständig synthetischen Fachbeleg.');
-  await dialog.getByRole('button', { name: 'Neues Wissen beschreiben', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true })).toBeDisabled();
+  await dialog.getByLabel('Blockart', { exact: true }).selectOption('assertion');
+  await dialog.getByLabel('Was soll der Block bewirken?', { exact: true }).fill('Prüft einen vollständig synthetischen Fachbeleg.');
+  await dialog.getByRole('button', { name: 'Wissen hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Neue Wissensquelle hinzufügen', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Definieren und auf Arbeitsfläche platzieren', exact: true })).toBeDisabled();
   await dialog.getByLabel('Titel des Wissens', { exact: true }).fill(title);
   await dialog.getByLabel('Fachliche Beschreibung', { exact: true }).fill('Für diesen synthetischen Test gilt: Ein vorhandener Fachbeleg muss sichtbar geprüft werden.');
   const sent = page.waitForRequest(req => req.method() === 'POST' && new URL(req.url()).pathname === '/api/testing/definitions');
-  await dialog.getByRole('button', { name: 'Definieren und zum Ablauf hinzufügen', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Definieren und auf Arbeitsfläche platzieren', exact: true }).click();
   const payload = (await sent).postDataJSON();
   await expect(dialog).toHaveCount(0);
   expect(payload.newKnowledge).toHaveLength(1);
@@ -185,9 +192,16 @@ test('Neues Fachwissen wird beim Definieren über die echte API gemeinsam mit de
   const document = catalog.knowledge.find(item => item.id === payload.newKnowledge[0].id)!;
   expect(definition.name).toBe(name); expect(document.title).toBe(title);
   expect(document.definitionRefs).toContainEqual({ id: definition.id, version: definition.version });
+  await expect(page.locator('.t-inspector').getByRole('heading', { name, exact: true })).toBeVisible();
+  await expect.poll(async () => { const response = await request.get('/api/testing/bootstrap'); const data = await response.json(); return data.layouts.find((layout: { scenarioId: string }) => layout.scenarioId === current.id)?.parkedBlocks?.some((block: { definition: { id: string } }) => block.definition.id === definition.id); }).toBe(true);
+  expect((await readScenario(request, current.id)).blocks.some(item => item.definition.id === definition.id)).toBe(false);
+  // The new definition is available for explicit executable insertion too.
+  await page.getByRole('button', { name: 'Block hinzufügen', exact: true }).click();
+  await page.getByRole('option').filter({ hasText: name }).click();
+  await page.getByRole('button', { name: 'Am Ende anhängen', exact: true }).click();
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
-  expect((await readScenario(request, current.id)).blocks.some(item => item.definition.id === definition.id)).toBeTruthy();
+  expect((await readScenario(request, current.id)).blocks.some(item => item.definition.id === definition.id)).toBe(true);
   await page.reload();
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
   await page.locator('.t-outline > button').filter({ hasText: name }).click();
@@ -214,7 +228,7 @@ test('Eine manuell gespeicherte neue Revision lässt sich trotz alter offener Ba
   expect(revised.blocks).not.toEqual(current.blocks);
   await expect(page.getByRole('button', { name: 'Vorschläge ansehen', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Fachlich freigeben', exact: true })).toBeVisible();
-  await expect(page.getByText(`Früherer Auftrag · Revision ${current.revision}`, { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Aktueller Arbeitsstand' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
   await expect(nextHeading(page)).toHaveText('Bereit für die technische Prüfung');
   const approved = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;
@@ -223,4 +237,72 @@ test('Eine manuell gespeicherte neue Revision lässt sich trotz alter offener Ba
   await page.reload();
   await expect(nextHeading(page)).toHaveText('Bereit für die technische Prüfung');
   await expect(page.getByRole('button', { name: 'Vorschläge ansehen', exact: true })).toHaveCount(0);
+});
+
+test('Schritt zwei zeigt nach technischer Vorbereitung die frühere Erkundung ohne neue Aufträge oder Freigabeänderung', async ({ page, request }) => {
+  const current = await scenarioFixture(request);
+  await request.post(`/api/testing/scenarios/${current.id}/approve`, { data: { revision: current.revision } });
+  const compiled = await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json() as TestingCompiledScenario;
+  const business = job(current, { status: 'completed', startedAt: '2026-01-01T10:00:00Z', result: { scenario: current, applied: true } });
+  const child = job(current, { phase: 'exploration', parentJobId: business.id, status: 'completed', result: { explored: false, explanation: 'Die vorhandene Freigaberegel beantwortet die Anforderung.', newKnowledge: [], knowledgeIds: ['kuh-direktionsanfrage'], evidence: [], openQuestions: [] } });
+  business.childJobIds = [child.id];
+  const technical = job(current, { phase: 'technical', stage: 'wiring', status: 'completed', fingerprint: compiled.fingerprint, result: { plan: { unsupported: ['Die Speicheraktion braucht einen Nachweis.'] } } });
+  await transport(page, { jobs: [technical, business, child], runs: [] });
+  const mutations: string[] = [];
+  page.on('request', req => { if (req.method() === 'POST') mutations.push(req.url()); });
+  await page.goto(`/testing/editor/${current.id}`);
+  await page.getByRole('button', { name: 'Schritt 2: Erkundung & Entwurf', exact: true }).click();
+  await expect(nextHeading(page)).toHaveText('Erkundung und Entwurf ansehen');
+  await page.getByRole('region', { name: 'Erkundungsergebnis', exact: true }).getByRole('button', { name: 'Erkenntnisse und Quellen ansehen' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Die vorhandene Freigaberegel');
+  await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  await expect(activity(page)).not.toContainText('Technische Schritte vorbereiten');
+  await expect(page.getByRole('button', { name: 'Erkundung und Entwurf fortsetzen', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(nextHeading(page)).toHaveText('Erkundung und Entwurf ansehen');
+  await page.getByRole('button', { name: 'Schritt 3: Fachlich prüfen', exact: true }).click();
+  await expect(page.locator('.t-editor-step .blocklySvg')).toBeVisible();
+  expect(mutations).toEqual([]);
+  expect((await (await request.get(`/api/testing/scenarios/${current.id}/compile`)).json()).approval).toEqual(compiled.approval);
+});
+
+test('Ein verspäteter KI-Titel aktualisiert nur saubere Felder und bewahrt lokale Bearbeitung', async ({ page, request }) => {
+  const current = await scenarioFixture(request, true);
+  const parent = job(current); const state: TransportFixture = { jobs: [parent], runs: [] }; await transport(page, state);
+  await page.goto(`/testing/editor/${current.id}`);
+  await page.getByLabel('Name des Testfalls', { exact: true }).fill('Mein eigener fachlicher Titel');
+  const named = await persist(request, { ...current, title: 'Automatisch benannter Test', naming: { title: 'Automatisch benannter Test', summary: 'Eine fiktive Freigabe prüfen.', tags: ['Freigabe'], titleSource: 'agent', jobId: 'synthetic-naming' } });
+  state.jobs = [{ ...parent, scenarioRevision: named.revision, result: { scenario: named, applied: false } }];
+  await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue('Mein eigener fachlicher Titel');
+  await expect.poll(async () => page.evaluate(id => JSON.parse(sessionStorage.getItem(`folio-testing-draft:${id}`) ?? '{}').revision, current.id)).toBe(named.revision);
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
+  expect((await readScenario(request, current.id)).title).toBe('Mein eigener fachlicher Titel');
+  await page.reload();
+  await expect(page.getByLabel('Name des Testfalls', { exact: true })).toHaveValue('Mein eigener fachlicher Titel');
+});
+
+test('Die fachliche Freigabe bündelt Hinweise und öffnet bei echten Fehlern den genauen Block statt freizugeben', async ({ page, request }) => {
+  const source = await scenarioFixture(request);
+  const catalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;
+  const customerName = catalog.definitions.find(item => item.id === 'kunde.anlegen' && item.version === '1.0.0')!.name;
+  const definition = { ...catalog.definitions.find(item => item.kind === 'assertion')!, id: `synthetic-info-${randomUUID()}`, semanticKey: `synthetic-info-${randomUUID()}`, name: 'Eigene Nachweisprüfung', inputs: [], outputs: [], bindingId: undefined };
+  expect((await request.post('/api/testing/definitions', { data: { definition } })).ok()).toBe(true);
+  const current = await persist(request, { ...source, blocks: [...source.blocks,
+    { id: 'fehlender-kunde', definition: { id: 'kunde.anlegen', version: '1.0.0' }, inputs: { name: '' }, outputs: { customer: 'neuerkunde' } },
+    { id: 'manuelle-pruefung', definition: { id: definition.id, version: definition.version }, inputs: {} }] });
+  await transport(page, { jobs: [], runs: [] });
+  const requests: string[] = [];
+  page.on('request', req => { if (req.method() === 'POST' && req.url().endsWith('/approve')) requests.push(req.url()); });
+  await page.goto(`/testing/editor/${current.id}`);
+  await expect(page.getByRole('button', { name: '1 Information', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '0 Warnungen', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Fachlich freigeben', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Hinweise zum Testfall', exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.locator('.t-review-issue.error').filter({ hasText: customerName }).first().click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.t-inspector h3')).toHaveText(customerName);
+  await expect(page.locator('#testing-value-name')).toBeFocused();
+  expect(requests).toEqual([]);
 });

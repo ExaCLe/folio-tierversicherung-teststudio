@@ -19,6 +19,7 @@ import { getTestingAgentSettings, resolveAgentConfiguration, withAgentConfigurat
 import { planTechnicalWithCodex } from './technical';
 import { reviewWithCodex, validateDuplicateReview, validateReuseReview } from './reviews';
 import { AgentTerminationError, agentAbortError, agentTermination } from './termination';
+import { nameScenario } from './naming';
 
 const jobs = 'testingAgentJobs';
 const controls = new Map<string, AbortController>();
@@ -111,9 +112,33 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
   const isOverride=!!input.instanceId;
   if(isOverride&&(!existing||!findBlock(existing.blocks,input.instanceId!)))throw new TestingModelError('Die lokale Änderung braucht einen vorhandenen Zielblock.',409);
   if(existing&&!isOverride&&existing.blocks.length)throw new TestingModelError('Dieser Testfall enthält bereits einen Ablauf. Verwende die Ablaufüberarbeitung, um ihn gezielt zu ändern.',409);
-  const baseline=existing?(!isOverride&&input.request!==existing.intent?saveTestingScenario({...existing,intent:input.request},existing.revision):existing):createTestingRequestDraft(input.request,input.model),fingerprint=testingFingerprint(baseline,catalog);
+  let baseline=existing?(!isOverride&&input.request!==existing.intent?saveTestingScenario({...existing,intent:input.request},existing.revision):existing):createTestingRequestDraft(input.request,input.model),fingerprint=testingFingerprint(baseline,catalog);
+  const needsName=!isOverride&&(!existing||!existing.naming&&(existing.title==='Neuer Testfall'||existing.source==='agent'&&existing.title===existing.intent.trim().split('\n')[0].slice(0,100))||!!existing&&input.request!==existing.intent);
   return launch('business',input.model,input.request,async(job,signal)=>{
     let exploration:Awaited<ReturnType<typeof exploreBusinessKnowledge>>|undefined;
+    let namingError:string|undefined;
+    if(needsName){
+      let naming:ReturnType<typeof launch>|undefined;
+      try{
+        const namingModel=getTestingAgentSettings().models.find(model=>model.provider==='codex'&&model.slug==='gpt-5.6-luna');
+        if(namingModel)naming=launch('naming',namingModel.id,'Testtitel und Metadaten aus der Anforderung bestimmen.',async(child,childSignal)=>(await nameScenario({id:child.id,request:input.request,existingTitle:existing?.title,model:namingModel.id,signal:childSignal,onEvent:event=>addEvent(child.id,event)})).parsed,baseline,fingerprint,undefined,{parentJobId:job.id,stage:'naming'});
+        else namingError='Die automatische Benennung ist nicht verfügbar: Es ist kein Luna-Modell eingerichtet. Der Testfall bleibt mit seinem bisherigen Titel bearbeitbar.';
+      }catch(error){namingError=`Die automatische Benennung konnte nicht gestartet werden: ${message(error)} Der bisherige Titel bleibt bearbeitbar.`;}
+      if(naming){
+        const named=await naming.promise;
+        assertFresh(baseline,fingerprint);
+        if(signal.aborted)throw agentAbortError(signal);
+        if(named.status==='completed'){
+          const metadata=named.result as Awaited<ReturnType<typeof nameScenario>>['parsed'];
+          const preserveTitle=!!existing&&existing.title!=='Neuer Testfall'&&!(existing.source==='agent'&&!existing.naming&&existing.title===existing.intent.trim().split('\n')[0].slice(0,100))&&metadata.titleSource!=='user-request';
+          const title=preserveTitle?baseline.title:metadata.title;
+          baseline=saveTestingScenario({...baseline,title,naming:{title,summary:metadata.summary,tags:metadata.tags,titleSource:preserveTitle?(existing?.naming?.title===title?existing.naming.titleSource:'human'):metadata.titleSource,jobId:named.id}},baseline.revision);
+          fingerprint=testingFingerprint(baseline,getTestingCatalog());
+          updateJob(job.id,{scenarioRevision:baseline.revision,fingerprint,result:{scenario:baseline,applied:false,namingJobId:named.id}});
+        }else namingError=named.error??'Die automatische Benennung konnte nicht abgeschlossen werden.';
+      }
+      if(namingError){status(job.id,namingError);updateJob(job.id,{workStages:(getTestingJob(job.id).workStages??[]).map(stage=>stage.stage==='naming'?{...stage,status:'failed',finishedAt:now(),summary:namingError}:stage)});}
+    }
     if(!isOverride){
       updateJob(job.id,{stage:'knowledge'});
       const child=launch('exploration',input.model,'Vorhandenes Wissen prüfen und fehlende Fähigkeiten in einer isolierten Anwendung erkunden.',async(childJob,childSignal)=>{
@@ -129,7 +154,7 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
       exploration=completed.result as Awaited<ReturnType<typeof exploreBusinessKnowledge>>;
       const unanswered=(exploration.questions??[]).filter(question=>question.status==='open').map(question=>question.text);
       const openQuestions=[...new Set([...exploration.openQuestions,...unanswered])];
-      if(openQuestions.length)return {scenario:baseline,applied:false,needsKnowledge:true,explorationJobId:child.job.id,openQuestions,questions:exploration.questions??[],...(exploration.termination?{termination:exploration.termination}:{})};
+      if(openQuestions.length)return {scenario:baseline,applied:false,needsKnowledge:true,explorationJobId:child.job.id,openQuestions,questions:exploration.questions??[],...(namingError?{namingError}:{}),...(exploration.termination?{termination:exploration.termination}:{})};
       if(!exploration.explored){for(const id of [job.id,child.job.id]){const stages=getTestingJob(id).workStages??[];updateJob(id,{workStages:[...stages,{stage:'exploring',status:'skipped',finishedAt:now(),summary:'Das vorhandene Fachwissen reicht; kein Browser wurde geöffnet.'}]});}}
     }
     updateJob(job.id,{stage:'planning'});
@@ -148,9 +173,10 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
       draft.newKnowledge=[...exploration.newKnowledge,...draft.newKnowledge];
       draft.knowledgeRefs=[...new Set([...draft.knowledgeRefs,...ids])];
     }
+    draft.title=baseline.title;
     const scenario=completeTestingRequestDraft(baseline.id,draft,input.model,baseline.revision,fingerprint);
-    return {scenario,draft,compiled:compileTestingScenario(scenario,getTestingCatalog()),duplicateReports:preview.duplicateReports,applied:true,contextHash:result.contextHash,attempts,explorationJobId:getTestingJob(job.id).childJobIds?.[0],questions:exploration?.questions??[]};
-  },baseline,fingerprint,{scenario:baseline,applied:false},{stage:isOverride?'planning':'knowledge'}).job;
+    return {scenario,draft,compiled:compileTestingScenario(scenario,getTestingCatalog()),duplicateReports:preview.duplicateReports,applied:true,contextHash:result.contextHash,attempts,explorationJobId:listTestingJobs().find(child=>child.parentJobId===job.id&&child.phase==='exploration')?.id,questions:exploration?.questions??[],...(namingError?{namingError}:{})};
+  },baseline,fingerprint,{scenario:baseline,applied:false},{stage:isOverride?'planning':needsName?'naming':'knowledge'}).job;
 }
 
 export function startScenarioEditJob(input: { scenarioId: string; revision: number; text: string; model: TestingModel }) {

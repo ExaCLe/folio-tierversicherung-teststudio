@@ -76,7 +76,7 @@ Schweinebestände verwenden Bestandsversicherung. Einzeltiere verwenden Tierlebe
 
 Wähle das Modell und starte den Entwurf. Der Auftrag erscheint direkt im Arbeitsbereich. Der Testfall ist bereits gespeichert und unter „Alle Testfälle“ auffindbar, auch wenn noch kein fertiger Blockablauf vorliegt. Ein Klick auf den Testfall öffnet wieder denselben Arbeitsbereich.
 
-Der Fortschritt unterscheidet Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Ein einzelnes KI-Ergebnis bedeutet noch nicht, dass der gesamte Auftrag abgeschlossen ist. Laufende Teilaufträge und offene Entscheidungen bleiben sichtbar.
+Der Fortschritt unterscheidet Anforderung, Erkundung und Entwurf, fachliche Prüfung, technische Vorbereitung und Ergebnis. Bereits erreichte Schritte kannst du zur Ansicht erneut öffnen, ohne den Agenten neu zu starten. Erläuterungen und benannte Quellen öffnen sich über Buttons in Dialogen. Ein einzelnes KI-Ergebnis bedeutet noch nicht, dass der gesamte Auftrag abgeschlossen ist. Laufende Teilaufträge und offene Entscheidungen bleiben sichtbar.
 
 ## 6. Wissen und Anwendung erkunden
 
@@ -94,13 +94,15 @@ Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein autom
 4. Ergänze fehlende Blöcke oder lasse die KI den gesamten Ablauf anhand einer neuen Anweisung überarbeiten.
 5. Speichere deine Änderungen und gib den fachlichen Stand ausdrücklich frei.
 
-„Abweichungen vom Standard“ zeigt die wirksamen Änderungen gegenüber der verwendeten Blockversion. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
+Der Scratch-Block zeigt seine wirksamen Abweichungen direkt als benannte Werte. Unveränderte Standardwerte bleiben dort ausgeblendet; in den Eigenschaften lassen sie sich weiterhin ansehen und ändern. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
 
 Lose Scratch-Stapel gehören nicht zum ausführbaren Ablauf. Verbinde benötigte Schritte mit der Startkette. Das Layout selbst legt keine fachliche Reihenfolge fest.
 
 ### Einen fehlenden Block ergänzen
 
-Über „Vorhandenen Block hinzufügen“ suchst du nach einer bekannten Fähigkeit. „Neuen Block definieren und hinzufügen“ erlaubt eine neue fachliche Beschreibung mit typisierten Eingaben. Fehlt die Wissensgrundlage, kannst du sie beim Definieren selbst ergänzen. Du musst keinen unpassenden bestehenden Eintrag auswählen.
+„Block hinzufügen“ öffnet zuerst den durchsuchbaren Katalog. Dort kannst du einen vorhandenen Block einfügen oder eine neue Definition anlegen. Die normale Einfügung legt einen Block frei auf der Arbeitsfläche ab; „Am Ende anhängen“ verbindet ihn direkt mit dem Ablauf.
+
+Bei einer neuen Definition beschreibst du Name, Blockart, Voraussetzungen und erwartete Wirkung. Eingaben erhalten jeweils einen Namen, Typ, eine Pflichtfeldangabe und bei Bedarf einen Standardwert. Technische Schlüssel und Versionen musst du nicht eingeben. Fehlt die Wissensgrundlage, kannst du sie beim Definieren selbst ergänzen. Du musst keinen unpassenden bestehenden Eintrag auswählen.
 
 Eine neue Fähigkeit kann zunächst ohne technische Bindung beschrieben werden. Die technische Phase muss anschließend klären, ob und wie sie im Portal ausgeführt werden kann. Ein fehlendes Produktmerkmal darf nicht durch einen erfundenen erfolgreichen Test ersetzt werden.
 
@@ -108,11 +110,15 @@ Eine neue Fähigkeit kann zunächst ohne technische Bindung beschrieben werden. 
 
 Die verwendete Blockversion und ihre lokalen Werte sind getrennt. Eine andere Versicherungssumme oder ein Betrieb in Bayern können lokale Abweichungen sein. Die Veröffentlichung einer neuen Bibliotheksversion aktualisiert nicht still alle Testfälle.
 
+Die KI-Überarbeitung steht als eigener Abschnitt unter der Arbeitsfläche. Beschreibe dort die Änderung und wähle das Modell direkt für diesen Auftrag.
+
 Eine KI-Änderung ist ein Vorschlag. Prüfe die Unterschiede, bevor du sie übernimmst. Jede fachliche Änderung benötigt eine erneute Freigabe; ältere Nachweise bleiben ihrem damaligen Stand zugeordnet.
 
 ## 8. Technik und Browserlauf
 
 Nach der fachlichen Freigabe startest du die technische Vorbereitung und den Probelauf im selben Arbeitsbereich. Der Fortschritt zeigt getrennt, ob die technische Umsetzung noch läuft, der Vergleich mit anderen Bausteinen eine Entscheidung verlangt oder der Browser bereits testet.
+
+Ist bereits passende Technik vorhanden, kannst du den Test direkt damit ausführen. „Technik neu vorbereiten“ öffnet bei Bedarf einen Dialog mit der Modellauswahl für eine erneute Vorbereitung.
 
 Bei einem Wiederverwendungsvorschlag prüfst du den vorgeschlagenen anderen Baustein, seine Übereinstimmungen und Unterschiede. Eine andere Version desselben Blocks wird nicht als eigenständige Dublette behandelt. Eine erforderliche Erweiterung ist eine fachliche Aufgabe und noch kein bestandener Browserlauf.
 

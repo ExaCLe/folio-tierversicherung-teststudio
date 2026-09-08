@@ -1,14 +1,14 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowRight, Sparkles } from 'lucide-react';
 import type { TestingCatalog, TestingScenario } from '../../shared/testing';
 import { flattenBlocks, resolvedBlockInputs } from './model';
 import { buildReferenceIndex, describeReference, entryStep } from './references';
 import { isTestingReference } from '../../shared/testing';
 
-export function ScenarioInstruction({ scenarioId, dirty, busy, onSubmit }: { scenarioId: string; dirty: boolean; busy: boolean; onSubmit: (text: string) => Promise<void> }) {
+export function ScenarioInstruction({ scenarioId, dirty, busy, onSubmit, controls }: { controls?: ReactNode; scenarioId: string; dirty: boolean; busy: boolean; onSubmit: (text: string) => Promise<void> }) {
   const key = `folio-testing-instruction:${scenarioId}`;
   const [text, setText] = useState(() => { try { return sessionStorage.getItem(key) ?? ''; } catch { return ''; } });
-  return <section className="t-scenario-instruction" aria-label="Gesamten Ablauf mit KI überarbeiten"><div><Sparkles size={18} /><h2>Ablauf mit KI überarbeiten</h2></div><p>Beschreibe eine Änderung am gesamten Testfall. Du prüfst den Vorschlag, bevor du ihn übernimmst.</p><form onSubmit={event => { event.preventDefault(); if (text.trim() && !busy) void onSubmit(text); }}><label className="t-field">Anweisung für den gesamten Ablauf<textarea aria-label="Anweisung für den gesamten Ablauf" rows={2} value={text} onChange={event => { setText(event.target.value); try { sessionStorage.setItem(key, event.target.value); } catch { /* In-memory input remains usable. */ } }} placeholder="Füge nach der Antragseinreichung eine Prüfung der Direktionsberechtigung ein." /></label><div className="t-instruction-actions"><small>{dirty ? 'Deine lokalen Änderungen werden zuerst als neue Revision gespeichert.' : 'Der aktuelle gespeicherte Fachstand ist die Grundlage.'}</small><button className="t-button primary" disabled={busy || !text.trim()} type="submit"><Sparkles size={14} />{dirty ? 'Speichern und Vorschlag erstellen' : 'Änderungsvorschlag erstellen'}</button></div></form></section>;
+  return <section className="t-scenario-instruction" aria-label="Gesamten Ablauf mit KI überarbeiten"><div><Sparkles size={18} /><h2>Ablauf mit KI überarbeiten</h2></div><p>Beschreibe eine Änderung am gesamten Testfall. Du prüfst den Vorschlag, bevor du ihn übernimmst.</p><form onSubmit={event => { event.preventDefault(); if (text.trim() && !busy) void onSubmit(text); }}><label className="t-field">Anweisung für den gesamten Ablauf<textarea aria-label="Anweisung für den gesamten Ablauf" rows={2} value={text} onChange={event => { setText(event.target.value); try { sessionStorage.setItem(key, event.target.value); } catch { /* In-memory input remains usable. */ } }} placeholder="Füge nach der Antragseinreichung eine Prüfung der Direktionsberechtigung ein." /></label><div className="t-instruction-actions">{controls}<small>{dirty ? 'Deine lokalen Änderungen werden zuerst als neue Revision gespeichert.' : 'Der aktuelle gespeicherte Fachstand ist die Grundlage.'}</small><button className="t-button primary" disabled={busy || !text.trim()} type="submit"><Sparkles size={14} />{dirty ? 'Speichern und Vorschlag erstellen' : 'Änderungsvorschlag erstellen'}</button></div></form></section>;
 }
 
 export function ScenarioRevisionDiff({ previous, next, catalog }: { previous: TestingScenario; next: TestingScenario; catalog: TestingCatalog }) {

@@ -1,0 +1,43 @@
+/* The canvas keeps its full width; selected details sit above it. */
+.testing-app .t-workbench { position: relative; display: block; height: min(78dvh, 980px); min-height: 620px; isolation: isolate; }
+.testing-app .t-workbench .t-canvas-panel { width: 100%; height: 100%; border-right: 0; }
+.testing-app .t-workbench .t-inspector { position: absolute; z-index: 8; top: 58px; right: 14px; bottom: 52px; width: min(370px, calc(100% - 28px)); min-height: 0; max-height: none; border: 1px solid #c9d3df; border-radius: 13px; background: #fff; box-shadow: 0 12px 40px #17263724, 0 2px 7px #17263712; overflow: hidden; display: flex; flex-direction: column; }
+.testing-app .t-inspector > header { position: relative; padding: 18px 43px 17px 20px; }
+.testing-app .t-inspector-close { position: absolute; right: 10px; top: 10px; }
+.testing-app .t-inspector-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.testing-app .t-inspector .t-definition-version { flex-shrink: 0; }
+.testing-app .t-show-modified-steps { margin-bottom: 16px; }
+.testing-app .t-workbench.is-fullscreen { position: fixed; z-index: 80; inset: 12px; height: auto; min-height: 0; background: #fff; border: 1px solid #c9d3df; border-radius: 12px; box-shadow: 0 0 0 20px #f0f3f6; overflow: hidden; }
+.testing-app .t-block-insertion { position: static; flex-shrink: 0; margin: 0 auto 0 12px; padding: 0; border: 0; background: none; }
+.testing-app .t-block-insertion > .t-button { box-shadow: 0 3px 12px #17263720; background: #fff; }
+.testing-app .t-block-insertion .t-block-search > span { display: flex; align-items: center; gap: 8px; }
+.testing-app .t-block-picker { max-height: min(44dvh, 440px); overflow-y: auto; display: grid; gap: 6px; margin-top: 12px; }
+.testing-app .t-block-picker-item { text-align: left; display: flex; gap: 12px; border: 1px solid #dce3e9; border-radius: 9px; background: white; padding: 13px 14px; align-items: flex-start; }
+.testing-app .t-block-picker-item > span { flex: 1; min-width: 0; }
+.testing-app .t-block-picker-item[aria-selected=true] { border-color: #5673a9; background: #f0f4fb; box-shadow: inset 0 0 0 1px #5673a9; }
+.testing-app .t-block-picker-item:hover { background: #f4f7fa; }
+.testing-app .t-block-picker-item small { display: block; margin-top: 4px; color: #667382; }
+.testing-app .t-block-picker-item p { margin-top: 5px; color: #596572; line-height: 1.5; }
+.testing-app .t-define-from-search { display: flex; align-items: center; gap: 8px; margin: 12px 0; padding: 9px 0; border: 0; background: none; color: #315785; font-weight: 600; }
+.testing-app .t-placement-actions { display: flex; flex-wrap: wrap; gap: 10px; border-top: 1px solid #e0e5eb; padding-top: 16px; margin-top: 8px; }
+.testing-app .t-placement-actions > div { width: 100%; }
+.testing-app .t-placement-actions p { color: #627080; font-size: 12px; margin-top: 5px; }
+.testing-app .t-placement-actions > label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.testing-app .t-block-dot.action { background: #18794e; }
+.testing-app .t-block-dot.assertion { background: #2468c6; }
+.testing-app .t-block-dot.workflow { background: #7952b8; }
+.testing-app .t-block-dot.context { background: #b45b13; }
+@media (max-width: 700px) {
+  .testing-app .t-workbench { height: 76dvh; min-height: 520px; }
+  .testing-app .t-workbench .t-inspector { top: 54px; right: 8px; bottom: 48px; width: min(350px, calc(100% - 16px)); }
+  .testing-app .t-workbench.is-fullscreen { inset: 0; border-radius: 0; }
+  .testing-app .t-canvas-toolbar { height: auto; min-height: 46px; flex-wrap: wrap; row-gap: 5px; padding: 7px; }
+  .testing-app .t-block-insertion { margin-left: auto; }
+  .testing-app .t-block-insertion > .t-button { min-height: 31px; padding: 6px 8px; font-size: 10px; }
+  .testing-app .t-canvas-tools { margin-left: auto; }
+}
+
+.testing-app .t-kind.action { background: #e1f2e9; color: #146440; }
+.testing-app .t-kind.workflow { background: #eee7fa; color: #65439e; }
+.testing-app .t-kind.assertion { background: #e5eefc; color: #245cb0; }
+.testing-app .t-kind.context { background: #fff0dd; color: #955017; }

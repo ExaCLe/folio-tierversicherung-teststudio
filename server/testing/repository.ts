@@ -53,12 +53,12 @@ export function saveTestingScenario(input:TestingScenario,expectedRevision?:numb
   const previous=listTestingScenarios().find(s=>s.id===input.id);
   if(previous&&expectedRevision!==previous.revision)throw new TestingModelError('Der Testfall wurde zwischenzeitlich geändert. Lade die aktuelle Fassung vor dem Speichern.',409,'REVISION_CONFLICT');
   if(!previous&&expectedRevision!==undefined&&expectedRevision!==0)throw new TestingModelError('Der neue Testfall hat noch keine gespeicherte Revision.',409,'REVISION_CONFLICT');
-  const saved={...clone(input),revision:previous?previous.revision+1:1,createdAt:previous?.createdAt??input.createdAt??now(),updatedAt:now()};
+  const saved:TestingScenario={...clone(input),...(input.naming&&input.naming.title!==input.title?{naming:{...input.naming,title:input.title,titleSource:'human' as const}}:{}),revision:previous?previous.revision+1:1,createdAt:previous?.createdAt??input.createdAt??now(),updatedAt:now()};
   if(previous)db.upsert<ScenarioRevision>('testingScenarioRevisions',{id:`${previous.id}@${previous.revision}`,scenario:previous});
   db.upsert('testingScenarios',saved);db.upsert<ScenarioRevision>('testingScenarioRevisions',{id:`${saved.id}@${saved.revision}`,scenario:saved});return clone(saved);
 }
 export function createTestingRequestDraft(intent:string,model:TestingModel):TestingScenario {
-  return saveTestingScenario({id:`testfall-${randomUUID()}`,title:intent.trim().split('\n')[0].slice(0,100)||'Neuer Testfall',intent,revision:1,blocks:[],expectedOutcome:'',knowledgeRefs:[],source:'agent',model,createdAt:now(),updatedAt:now()},0);
+  return saveTestingScenario({id:`testfall-${randomUUID()}`,title:'Neuer Testfall',intent,revision:1,blocks:[],expectedOutcome:'',knowledgeRefs:[],source:'agent',model,createdAt:now(),updatedAt:now()},0);
 }
 export function getTestingApproval(scenarioId:string):TestingApproval|undefined {
   return db.read<TestingApproval>('testingApprovals').filter(a=>a.scenarioId===scenarioId).sort((a,b)=>b.approvedAt.localeCompare(a.approvedAt))[0];

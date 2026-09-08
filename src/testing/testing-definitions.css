@@ -1,0 +1,21 @@
+.t-definition-simple { display: grid; gap: 24px; }
+.t-definition-simple section { display: grid; gap: 12px; }
+.t-definition-simple .t-schema-row { display: grid; grid-template-columns: minmax(120px,1fr) minmax(120px,.8fr) auto minmax(220px,1.5fr) 32px; align-items: start; gap: 12px; }
+.t-definition-simple .t-schema-field { padding: 14px; border: 1px solid var(--border, #dedfdc); border-radius: 10px; }
+.t-definition-simple .t-schema-row .t-field { margin: 0; min-width: 0; }
+.t-definition-simple .t-schema-row > .t-check-label, .t-definition-simple .t-schema-row > .t-icon { margin-top: 25px; }
+.t-definition-simple .t-schema-default.compact { display: grid; grid-template-columns: minmax(100px,1fr); gap: 7px; margin: 0; padding: 0; border: 0; }
+.t-definition-simple .t-schema-default.compact:has(.t-default-control) { grid-template-columns: minmax(105px,.9fr) minmax(110px,1fr); }
+.t-definition-simple .t-schema-default.compact label { font-size: 12px; }
+.t-definition-simple .t-schema-default.compact p { font-size: 11px; }
+.t-definition-knowledge-search { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border, #dedfdc); border-radius: 10px; }
+.t-definition-simple .t-knowledge-choices { max-height: 220px; overflow: auto; }
+.t-definition-knowledge-selection { display:flex; flex-wrap:wrap; gap:8px; }
+.t-definition-knowledge-selection span { border:1px solid var(--border,#dedfdc); border-radius:8px; padding:5px 9px; font-size:12px; }
+@media(max-width:800px) { .t-definition-simple .t-schema-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto; } .t-definition-simple .t-schema-default { grid-column:1/3; } .t-definition-simple .t-schema-row > .t-icon { grid-column:3; grid-row:2; } }
+.t-definition-knowledge-selection span { display:inline-flex; align-items:center; gap:6px; }
+.t-definition-knowledge-selection button { display:inline-flex; align-items:center; gap:6px; padding:0; background:none; border:0; color:inherit; cursor:pointer; font:inherit; }
+
+.t-default-list { display:grid; gap:6px; }
+.t-default-list > div { display:flex; gap:5px; }
+.t-default-list input { min-width:0; }

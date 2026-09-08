@@ -30,6 +30,8 @@ Fehler des Repositorys besitzen `status`, `code` und einen deutschen `message`-T
 
 Der geführte Erstellungsauftrag legt bereits vor dem ersten Modellaufruf einen leeren Testfall mit der Anforderung an. Die erste Antwort ergänzt diesen Testfall unter derselben ID. Eine erneute Planung eines noch leeren Entwurfs verwendet dessen aktuelle Revision; konkurrierende Aufträge und veraltete Ergebnisse werden abgewiesen. Ein fachlich unvollständiger, strukturell gültiger Erstentwurf bleibt zur menschlichen Korrektur bearbeitbar.
 
+Der optionale Zusatz `TestingScenario.naming` hält Titel, Zusammenfassung, Themenbegriffe, Titelherkunft und die ID des Benennungsauftrags fest. Der Teilauftrag besitzt die Phase `naming` und verweist über `parentJobId` auf die Entwurfserstellung. Die Übernahme prüft Revision und Fachfingerprint, speichert eine neue Revision und aktualisiert die Ausgangsfassung des übergeordneten Auftrags. Ein späteres Planungsergebnis übernimmt den gespeicherten Titel.
+
 Ein Eingabeschema verwendet bekannte Werttypen. Auswahlfelder benötigen Auswahlwerte. Objektfelder können wiederum typisierte `fields` enthalten. `requiredWhen` und `applicableWhen` beschreiben tierartabhängige Pflichtfelder und erlaubte Angaben. Unbekannte Felder werden nicht still verworfen.
 
 ## Kompilierung und Fachfreigabe
@@ -48,7 +50,7 @@ Referenzfehler verwenden deutsche Fachbegriffe und nennen Block und Eingabefeld.
 
 Bei einem ausdrücklich als `*-ref` definierten Eingabefeld bestimmen dessen gepinnte Definition und der tatsächlich aufgelöste Quellausgang die erlaubte Ergebnisart. Eine ältere optionale `TestingReference.type`-Annotation überschreibt diese Fachdefinition nicht. Das gilt auch für verschachtelte Schemafelder und Parameterketten. Das Kompilat enthält den tatsächlichen Quelltyp. Fehlende Quellen, falsche Ablaufbereiche und echte Typkonflikte bleiben Fehler. Bei Referenzen ohne eigenes Referenzfeldschema, etwa in untypisierten Listen, bleibt die Annotation eine geprüfte Typanforderung.
 
-Eine fehlende technische Bindung erzeugt `BINDING_MISSING` als Warnung und `executable: false`. Ein unbekanntes Eingabefeld erzeugt `INPUT_UNKNOWN` als fachlichen Fehler. Ein fachlich definiertes, aber technisch nicht verwendetes Feld erzeugt `BINDING_INPUT_MISSING` und verhindert die Ausführung.
+Eine fehlende technische Bindung erzeugt `BINDING_MISSING` als Information (`severity: info`) und `executable: false`. Das ist im fachlichen Entwurf ein erwarteter Zwischenstand, verhindert aber weiterhin eine Ausführung ohne Technik. Ein unbekanntes Eingabefeld erzeugt `INPUT_UNKNOWN` als fachlichen Fehler. Ein fachlich definiertes, aber technisch noch nicht verwendetes Feld erzeugt ebenfalls eine Information (`BINDING_INPUT_MISSING`) und verhindert die Ausführung, bis seine Zuordnung ergänzt wurde.
 
 ## Technische Zuordnung
 

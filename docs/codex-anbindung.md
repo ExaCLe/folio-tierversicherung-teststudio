@@ -55,6 +55,16 @@ Das Ergebnis bleibt zunächst im Agentenauftrag. Der Testfall und der Katalog ä
 
 Die Annahme prüft Ausgangsrevision und Fachfingerprint erneut und speichert den neuen Ablauf samt neuen Definitionen und Wissensverweisen atomar. Veraltete Vorschläge können den aktuellen Stand nicht überschreiben. Der geänderte Ablauf benötigt eine neue Fachfreigabe, bevor die technische Runde ihn umsetzt. Frühere Laufnachweise behalten ihre ursprüngliche Momentaufnahme.
 
+## Titel und kurze Beschreibung
+
+Ein neuer Auftrag wird sofort als „Neuer Testfall“ gespeichert. Vor der Erkundung startet ein eigener Luna-Teilauftrag zur Benennung. Er erhält die Anforderung und gegebenenfalls den bisherigen Titel, erzeugt einen kurzen deutschen Titel, eine Zusammenfassung des Testziels und Themenbegriffe. Diese Texte beschreiben das Ziel, nicht einen bereits erfolgreichen Test.
+
+Gibt die Anforderung ausdrücklich einen Titel vor, soll Luna ihn wortgetreu übernehmen. Die Antwort muss dafür die entsprechende Textstelle zitieren; die Anwendung prüft, dass sie tatsächlich in der Anforderung steht. Bereits brauchbar benannte Entwürfe werden bei einer unveränderten Wiederholung nicht erneut umbenannt. Eine inzwischen bearbeitete Fassung darf auch durch ein später eintreffendes Benennungsergebnis nicht überschrieben werden.
+
+Die Benennung verwendet ein eingerichtetes Codex-Profil mit dem Slug `gpt-5.6-luna`, unabhängig vom Modell für die anschließende fachliche Arbeit. Fehlt dieses Profil oder schlägt die Benennung fehl, bleibt der Entwurf mit seinem bisherigen Titel bearbeitbar. Die fachliche Arbeit kann fortgesetzt werden; die Anwendung ersetzt Luna nicht still durch ein anderes Modell.
+
+Am 8. September 2026 wurde dieser Helfer mit zwei echten Luna-Aufrufen und ausschließlich neu formulierten synthetischen Anforderungen geprüft. Er erzeugte einen kurzen Titel samt Zusammenfassung und Themenbegriffen und übernahm einen in Anführungszeichen vorgegebenen Titel exakt. Beide Antworten bestanden die strukturierte Validierung im ersten Versuch. Dieser Nachweis betrifft die Benennung; er belegt keinen vollständigen Versicherungsablauf.
+
 ## Die fachliche Runde
 
 Der Agent erhält den deutschen Auftrag, den versionierten Blockkatalog und kuratierte Fachtexte. Dateien mit technischen Portalquellen werden erst in der technischen Runde beigefügt. Das Ausgabeschema lässt neue elementare Definitionen und neue Wissensdokumente ausdrücklich zu. Der Ablauf kann deshalb bei einem leeren Blockkatalog beginnen.
@@ -67,7 +77,7 @@ Der Mensch kann die Blöcke verschieben, verschachteln und ihre typisierten Wert
 
 ## Wissen prüfen und die Anwendung erkunden
 
-Ein neuer fachlicher Auftrag beginnt mit der Prüfung des vorhandenen Wissens und Blockkatalogs. Reicht dieses Wissen aus, kann die KI direkt einen Entwurf erstellen. Bei Lücken steht ihr eine kontrollierte Anwendungserkundung zur Verfügung.
+Nach der Benennung beginnt die fachliche Arbeit mit der Prüfung des vorhandenen Wissens und Blockkatalogs. Reicht dieses Wissen aus, kann die KI direkt einen Entwurf erstellen. Bei Lücken steht ihr eine kontrollierte Anwendungserkundung zur Verfügung.
 
 Die CLI liefert dafür strukturierte Browseraktionen. Die Anwendung führt sie mit Playwright gegen eine separate lokale Portalinstanz aus und gibt die beobachtete Oberfläche an die nächste Modellrunde zurück. Der Browser verwendet eine eigene Datenbank mit synthetischen Ausgangsdaten. Die Erkundung greift nicht auf den laufenden Versicherungsbestand zu. Die CLI erhält dadurch keinen allgemeinen Shell- oder Browserzugriff.
 

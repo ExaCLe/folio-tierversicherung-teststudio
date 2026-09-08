@@ -42,7 +42,7 @@ test('Nur Wissensrückverweise ändern keine Fachfreigabe; der eingefrorene Wiss
 test('Zusätzliche Eingaben brauchen ein Schema und anschließend technische Abdeckung',()=>{
   const s=clone(seeds()[0]),c=ready(catalog());s.blocks[0].inputs.neuesFeld=5;assert.equal(compileTestingScenario(s,c).issues.some(i=>i.code==='INPUT_UNKNOWN'),true);
   const atomic:TestingScenario={...seeds()[0],blocks:[inst('kunde','kunde.anlegen',{zusatz:5})]};const edited=clone(c);def(edited,'kunde.anlegen').inputs.push({key:'zusatz',label:'Zusatzwert',type:'number'});
-  const result=compileTestingScenario(atomic,edited,approval(atomic,edited));assert.equal(result.valid,true);assert.equal(result.executable,false);assert.equal(result.issues.some(i=>i.code==='BINDING_INPUT_MISSING'),true);
+  const result=compileTestingScenario(atomic,edited,approval(atomic,edited));assert.equal(result.valid,true);assert.equal(result.executable,false);assert.equal(result.issues.find(i=>i.code==='BINDING_INPUT_MISSING')?.severity,'info');
 });
 test('Wiederholte verschachtelte Workflows besitzen lokale Ergebnisnamen',()=>{
   const s:TestingScenario={...seeds()[0],blocks:[inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),inst('erster','ablauf.kuh-vorschlag',{}, {proposal:'ersterVorschlag'}),inst('zweiter','ablauf.kuh-vorschlag',{}, {proposal:'zweiterVorschlag'}),inst('vertrag','ablauf.standard-kuhvertrag',{}, {policy:'police'})]};
@@ -224,4 +224,10 @@ test('Das skalare Eingabeschema und die echte Quelle haben Vorrang vor einer alt
   const promoted=repository.promoteTestingBlocks({scenarioId:saved.id,expectedRevision:saved.revision,instanceIds:['angebot','einreichen'],name:'Angebot und Antrag mit alter Markierung',description:'Synthetische Referenztypregression',parameters:[],replaceSelection:true});
   assert.equal(promoted.definition.inputs.find(input=>input.key==='ref_vorschlag')!.type,'proposal-ref');
   assert.equal(compileTestingScenario(promoted.scenario,getTestingCatalog()).valid,true);
+});
+
+test('Fehlende technische Bindung ist eine Information und blockiert nur die Ausführung',()=>{
+  const source=catalog(),scenario=seeds()[0],withoutBindings={...source,bindings:[]};
+  const compiled=compileTestingScenario(scenario,withoutBindings);
+  const missing=compiled.issues.filter(issue=>issue.code==='BINDING_MISSING');assert(missing.length);assert(missing.every(issue=>issue.severity==='info'));assert.equal(compiled.valid,true);assert.equal(compiled.executable,false);
 });

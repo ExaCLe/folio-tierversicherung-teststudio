@@ -51,6 +51,7 @@ export interface TestingScenario {
   id: string; title: string; intent: string; revision: number; blocks: TestingBlockInstance[];
   expectedOutcome: string; knowledgeRefs: string[]; createdAt: string; updatedAt: string;
   source: 'human' | 'agent' | 'seed'; model?: TestingModel; parameters?: Record<string, TestingValue>;
+  naming?: {title:string;summary:string;tags:string[];titleSource:'user-request'|'agent'|'human';jobId:string};
 }
 export interface TestingScenarioLayout {
   id: string; scenarioId: string; collapsed: string[]; selectedId?: string;
@@ -94,7 +95,7 @@ export interface TestingCatalog {
   knowledge: TestingKnowledgeDocument[];
 }
 export interface TestingValidationIssue {
-  code: string; message: string; severity: 'error' | 'warning'; instanceId?: string; path?: string; field?: string; sourcePath?: string; sourceLabel?: string;
+  code: string; message: string; severity: 'error' | 'warning' | 'info'; instanceId?: string; path?: string; field?: string; sourcePath?: string; sourceLabel?: string;
 }
 export interface TestingCompiledStep {
   id: string; instanceId: string; path: string; ancestors: string[]; definition: TestingVersionRef;
@@ -134,8 +135,8 @@ export interface TestingImpact {
   historicalRuns: { runId: string; scenarioId: string; bindingRevision: number; status: string }[];
   suggestedScenarioIds: string[];
 }
-export type TestingAgentPhase = 'business' | 'exploration' | 'technical' | 'duplicates' | 'reuse';
-export type TestingAgentStage = 'knowledge' | 'exploring' | 'planning' | 'validating' | 'duplicates' | 'wiring' | 'running' | 'reuse';
+export type TestingAgentPhase = 'business' | 'naming' | 'exploration' | 'technical' | 'duplicates' | 'reuse';
+export type TestingAgentStage = 'naming' | 'knowledge' | 'exploring' | 'planning' | 'validating' | 'duplicates' | 'wiring' | 'running' | 'reuse';
 export interface TestingAgentTermination {
   cause:'user_cancelled'|'parent_cancelled'|'time_limit'|'action_limit'|'no_progress'|'server_restart'|'output_limit'|'interrupted';
   message:string; at:string; limitMs?:number;
