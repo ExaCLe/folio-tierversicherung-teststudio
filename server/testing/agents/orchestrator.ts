@@ -120,9 +120,7 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
     if(needsName){
       let naming:ReturnType<typeof launch>|undefined;
       try{
-        const namingModel=getTestingAgentSettings().models.find(model=>model.provider==='codex'&&model.slug==='gpt-5.6-luna');
-        if(namingModel)naming=launch('naming',namingModel.id,'Testtitel und Metadaten aus der Anforderung bestimmen.',async(child,childSignal)=>(await nameScenario({id:child.id,request:input.request,existingTitle:existing?.title,model:namingModel.id,signal:childSignal,onEvent:event=>addEvent(child.id,event)})).parsed,baseline,fingerprint,undefined,{parentJobId:job.id,stage:'naming'});
-        else namingError='Die automatische Benennung ist nicht verfügbar: Es ist kein Luna-Modell eingerichtet. Der Testfall bleibt mit seinem bisherigen Titel bearbeitbar.';
+        naming=launch('naming',input.model,'Testtitel und Metadaten aus der Anforderung bestimmen.',async(child,childSignal)=>(await nameScenario({id:child.id,request:input.request,existingTitle:existing?.title,model:input.model,signal:childSignal,onEvent:event=>addEvent(child.id,event)})).parsed,baseline,fingerprint,undefined,{parentJobId:job.id,stage:'naming'});
       }catch(error){namingError=`Die automatische Benennung konnte nicht gestartet werden: ${message(error)} Der bisherige Titel bleibt bearbeitbar.`;}
       if(naming){
         const named=await naming.promise;

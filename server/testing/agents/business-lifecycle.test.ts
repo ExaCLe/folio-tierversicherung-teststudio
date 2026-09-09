@@ -62,13 +62,13 @@ test('Fehlgeschlagene und abgebrochene Planung lassen sich mit derselben gespeic
   assert.equal(repository.getTestingScenario(cancelled.scenarioId!).revision,1);assert.equal(lifecycle(cancelled.scenarioId!).status,'cancelled');
   const retry=await request('POST',`/scenarios/${cancelled.scenarioId}/plan`,{revision:1,model:'luna'});assert.equal(retry.data.scenarioId,cancelled.scenarioId);assert.equal((await orchestrator.waitTestingJob(retry.data.id)).status,'completed');
 });
-test('Luna benennt den neutralen Entwurf und eine ausdrückliche Titelvorgabe bleibt auch nach Planung erhalten',async()=>{
+test('Das ausgewählte Modell benennt den neutralen Entwurf und eine ausdrückliche Titelvorgabe bleibt erhalten',async()=>{
   const job=orchestrator.startBusinessJob({request:'Titel: Gewünschter Fachtest. Prüfe die fachlichen Rollen.',model:'luna'});
   assert.equal(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');
   const done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);
   const saved=repository.getTestingScenario(job.scenarioId!);assert.equal(saved.title,'Gewünschter Fachtest');
   assert.equal(saved.naming?.titleSource,'user-request');assert.equal(saved.naming?.summary,'Synthetische Zusammenfassung der Testabsicht.');
-  const naming=orchestrator.getTestingJob(saved.naming!.jobId);assert.equal(naming.phase,'naming');assert.equal(naming.agentConfig?.modelSlug,'gpt-5.6-luna');assert.equal(naming.parentJobId,done.id);
+  const naming=orchestrator.getTestingJob(saved.naming!.jobId);assert.equal(naming.phase,'naming');assert.deepEqual(naming.agentConfig,done.agentConfig);assert.equal(naming.model,done.model);assert.equal(naming.parentJobId,done.id);
   const renamed=repository.saveTestingScenario({...saved,title:'Vom Menschen nachträglich benannt'},saved.revision);assert.equal(renamed.naming?.title,renamed.title);assert.equal(renamed.naming?.titleSource,'human');assert.equal(renamed.naming?.jobId,naming.id);assert.equal(repository.listTestingScenarioRevisions().find(item=>item.id===saved.id&&item.revision===saved.revision)?.naming?.titleSource,'user-request');
 });
 test('Wiederaufnahme eines benannten oder von Menschen betitelten Entwurfs ruft keinen neuen Benennungsagenten auf',async()=>{
@@ -78,7 +78,7 @@ test('Wiederaufnahme eines benannten oder von Menschen betitelten Entwurfs ruft 
   assert.equal(done.status,'completed',done.error);assert.equal(repository.getTestingScenario(saved.id).title,saved.title);
   assert(!orchestrator.listTestingJobs().some(child=>child.parentJobId===done.id&&child.phase==='naming'));
 });
-test('Ausfall der optionalen Luna-Benennung lässt den vorhandenen Titel und die fachliche Planung benutzbar',async()=>{
+test('Ausfall der optionalen Benennung lässt den vorhandenen Titel und die fachliche Planung benutzbar',async()=>{
   process.env.FOLIO_BUSINESS_MODE='naming-fail';
   try{const job=orchestrator.startBusinessJob({request:'Auch ohne Benennung soll ein fachlicher Entwurf entstehen.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);assert((done.result as any).namingError);const saved=repository.getTestingScenario(job.scenarioId!);assert.equal(saved.title,'Neuer Testfall');assert(saved.blocks.length);assert.equal(saved.naming,undefined);}
   finally{delete process.env.FOLIO_BUSINESS_MODE;}
@@ -90,14 +90,14 @@ test('Eine ergänzte Anforderung aktualisiert Metadaten, ohne einen vorhandenen 
   assert.equal(done.status,'completed',done.error);
   const result=repository.getTestingScenario(saved.id);assert.equal(result.title,saved.title);assert.equal(result.naming?.title,result.title);assert.equal(result.naming?.titleSource,'human');assert(result.naming?.summary);
 });
-test('Ohne eingerichtetes Luna-Profil bleibt die gewählte Planung mit neutralem Titel möglich',async()=>{
+test('Die Benennung verwendet das ausgewählte Modell auch ohne separates Luna-Profil',async()=>{
   const settings=await import('./settings');const original=settings.getTestingAgentSettings();
   const other=original.models.find(model=>model.slug!=='gpt-5.6-luna')!;
   settings.saveTestingAgentSettings({...original,defaultModel:other.id,models:original.models.filter(model=>model.slug!=='gpt-5.6-luna')});
   try{
-    const job=orchestrator.startBusinessJob({request:'Der Benutzer kann einen anderen Planungsagenten ohne Luna verwenden.',model:other.id}),done=await orchestrator.waitTestingJob(job.id);
-    assert.equal(done.status,'completed',done.error);assert.equal(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');assert.match((done.result as any).namingError,/kein Luna-Modell/);
-    assert(!orchestrator.listTestingJobs().some(child=>child.parentJobId===job.id&&child.phase==='naming'));assert.equal(done.workStages?.find(stage=>stage.stage==='naming')?.status,'failed');
+    const job=orchestrator.startBusinessJob({request:'Der Benutzer verwendet einen anderen Planungsagenten ohne Luna.',model:other.id}),done=await orchestrator.waitTestingJob(job.id);
+    assert.equal(done.status,'completed',done.error);assert.notEqual(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');assert.equal((done.result as any).namingError,undefined);
+    const naming=orchestrator.listTestingJobs().find(child=>child.parentJobId===job.id&&child.phase==='naming');assert(naming);assert.deepEqual(naming.agentConfig,done.agentConfig);assert.equal(done.workStages?.find(stage=>stage.stage==='naming')?.status,'completed');
   }finally{settings.saveTestingAgentSettings({...original,revision:settings.getTestingAgentSettings().revision});}
 });
 test('Eine behauptete menschliche Titelvorgabe braucht ein wortgetreues Zitat aus der Anforderung',()=>{
