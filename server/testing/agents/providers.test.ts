@@ -1,8 +1,8 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import type { TestingAgentConfiguration } from '../../../shared/testing';
 
 const directory = mkdtempSync(join(tmpdir(), 'folio-provider-test-'));
@@ -31,6 +31,7 @@ process.env.FOLIO_CODEX_EXECUTABLE = fixture;
 process.env.FOLIO_CLAUDE_EXECUTABLE = fixture;
 const settings = await import('./settings');
 const cli = await import('./cli');
+const processLaunch = await import('./process-launch');
 after(() => { cli.stopCodexProcesses(); rmSync(directory, { recursive: true, force: true }); });
 const input = (id: string, model: string, prompt = 'Isolierter Adaptertest.') => ({ id, model, prompt, schema: { type: 'object' }, files: { 'context.json': '{"fixture":true}' } });
 function useClaude() {
@@ -48,6 +49,49 @@ test('Lokale Defaults und Codex-Aufruf bleiben mit Luna/Sol kompatibel', async (
   assert.equal(manifest.args[manifest.args.indexOf('--sandbox') + 1], 'read-only');
   assert.equal(manifest.args.includes('--ignore-user-config'), true);
   assert.equal(manifest.args.at(-1), '-');
+});
+
+test('Windows startet PATH-, CMD- und PowerShell-Shims ohne Shell', { skip: process.platform !== 'win32' }, async () => {
+  const shimDirectory = join(directory, 'windows-shims');
+  mkdirSync(shimDirectory);
+  const shim = join(shimDirectory, 'folio-agent-fixture.cmd');
+  const powershellShim = join(shimDirectory, 'folio-agent-fixture.ps1');
+  writeFileSync(shim, '@ECHO off\r\n"%dp0%\\..\\fixture-cli.mjs" %*\r\n');
+  writeFileSync(powershellShim, '$basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent\n& "$basedir/../fixture-cli.mjs" $args\n');
+  const previousPath = process.env.PATH, previousPathExt = process.env.PATHEXT;
+  process.env.PATH = `${shimDirectory}${delimiter}${previousPath ?? ''}`;
+  process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD';
+  try {
+    const configuration = settings.resolveAgentConfiguration('luna');
+    for (const [id, executable] of [['windows-path-shim', 'folio-agent-fixture'], ['windows-explicit-shim', shim], ['windows-powershell-shim', powershellShim]]) {
+      const result = await cli.invokeCodex({ ...input(id, 'luna'), agentConfig: { ...configuration, executable } });
+      assert.deepEqual(result.value, { provider: 'codex', model: 'gpt-5.6-luna' });
+      const manifest = JSON.parse(readFileSync(join(result.directory, 'manifest.json'), 'utf8'));
+      assert.equal(manifest.launchExecutable, process.execPath);
+    }
+  } finally {
+    if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    if (previousPathExt === undefined) delete process.env.PATHEXT; else process.env.PATHEXT = previousPathExt;
+  }
+});
+
+test('Claude übernimmt nur Verbindungsvariablen aus den isolierten Benutzereinstellungen', () => {
+  const configDirectory = join(directory, 'claude-config');
+  mkdirSync(configDirectory);
+  writeFileSync(join(configDirectory, 'settings.json'), JSON.stringify({ env: {
+    ANTHROPIC_API_KEY: 'settings-key', ANTHROPIC_AUTH_TOKEN: 'settings-token', ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+    CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: 'true', CLAUDE_CODE_USE_POWERSHELL_TOOL: 'true', BASH_ENV: 'nicht-uebernehmen',
+  } }));
+  const inherited = { PATH: 'parent-path', CLAUDE_CONFIG_DIR: configDirectory, ANTHROPIC_API_KEY: 'parent-key' };
+  const claudeEnvironment = processLaunch.resolveAgentProcessEnvironment('claude', inherited);
+  assert.equal(claudeEnvironment.ANTHROPIC_API_KEY, 'parent-key');
+  assert.equal(claudeEnvironment.ANTHROPIC_AUTH_TOKEN, 'settings-token');
+  assert.equal(claudeEnvironment.ANTHROPIC_BASE_URL, 'https://gateway.example.test');
+  assert.equal(claudeEnvironment.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, 'true');
+  assert.equal(claudeEnvironment.CLAUDE_CODE_USE_POWERSHELL_TOOL, undefined);
+  assert.equal(claudeEnvironment.BASH_ENV, undefined);
+  const codexEnvironment = processLaunch.resolveAgentProcessEnvironment('codex', inherited);
+  assert.equal(codexEnvironment.ANTHROPIC_AUTH_TOKEN, undefined);
 });
 
 test('Settings persistieren Revision/Provider/Slug und deduplizieren Argumente mit Modellvorrang', () => {

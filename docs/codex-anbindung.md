@@ -17,13 +17,13 @@ codex exec --ignore-user-config --ephemeral --json --color never \
   -m gpt-5.6-luna -C /abgegrenzter/auftrag -
 ```
 
-Der Adapter startet das Programm mit einer Argumentliste und ohne Shell. Nutzertext wird deshalb weder als Shellbefehl noch als Dateiname ausgewertet. Die bestehende lokale Anmeldung verwendet die CLI selbst. Die Anwendung liest, kopiert und veröffentlicht keine Anmeldedateien. `--ignore-user-config` verhindert, dass persönliche Modellvorgaben oder zusätzliche Werkzeuge den abgegrenzten Auftrag verändern; die bestehende Authentifizierung bleibt erhalten. Die innere Agentensandbox ist schreibgeschützt.
+Der Adapter startet das Programm mit einer Argumentliste und ohne Shell. Unter Windows löst er `.cmd`- und `.ps1`-Starter aus npm-Installationen auf deren direktes `.exe`- oder JavaScript-Ziel auf; JavaScript startet mit demselben Node-Laufzeitprogramm wie der Server. Nutzertext wird deshalb weder als Shellbefehl noch als Dateiname ausgewertet. Die bestehende lokale Anmeldung verwendet die CLI selbst. Die Anwendung liest, kopiert und veröffentlicht keine Anmeldedateien. `--ignore-user-config` verhindert, dass persönliche Modellvorgaben oder zusätzliche Werkzeuge den abgegrenzten Auftrag verändern; die bestehende Authentifizierung bleibt erhalten. Die innere Agentensandbox ist schreibgeschützt.
 
 ## Claude Code und eigene Modelle
 
 Claude Code wird im nicht interaktiven Modus mit `--print`, `--output-format stream-json`, `--verbose`, `--json-schema` und `--model` gestartet. Die Anwendung liest das Feld `structured_output` aus dem erfolgreichen abschließenden `result`-Ereignis. Ein Fehlerergebnis oder ein fehlendes strukturiertes Ergebnis gilt nicht als Erfolg. Diese Ausgabeformate beschreibt die [offizielle Dokumentation](https://code.claude.com/docs/en/headless).
 
-Die Claude-Anbindung erlaubt ausschließlich die lesenden Werkzeuge `Read`, `Glob` und `Grep`. `--safe-mode`, leere Einstellungssourcen und eine leere strikte MCP-Konfiguration schalten persönliche Anpassungen und zusätzliche Werkzeuge für den Auftrag aus. Die normale CLI-Anmeldung bleibt verwendbar. Es gibt keine automatische Berechtigungsumgehung. Eine aktuelle Claude-Code-Version muss die verwendeten Flags unterstützen; `claude --help` zeigt die Fähigkeiten der Installation.
+Die Claude-Anbindung erlaubt ausschließlich die lesenden Werkzeuge `Read`, `Glob` und `Grep`. `--safe-mode`, leere Einstellungssourcen und eine leere strikte MCP-Konfiguration schalten persönliche Anpassungen und zusätzliche Werkzeuge für den Auftrag aus. Stehen die Verbindungsdaten nur unter `env` in den Claude-Benutzereinstellungen, übernimmt der Adapter daraus ausschließlich `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_BEDROCK_BASE_URL`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_SKIP_BEDROCK_AUTH` und `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` in die Umgebung des Kindprozesses. Bereits gesetzte Prozessvariablen haben Vorrang. Die Werte erscheinen weder im Manifest noch in Ereignissen; Hooks, Werkzeuge, MCP-Server, Plugins und andere Benutzereinstellungen bleiben deaktiviert. Es gibt keine automatische Berechtigungsumgehung. Eine aktuelle Claude-Code-Version muss die verwendeten Flags unterstützen; `claude --help` zeigt die Fähigkeiten der Installation.
 
 Provider- und Modellprofile werden lokal in der Kollektion `testingAgentSettings` derselben JSON-Datendatei gespeichert. Ein Auftrag hält eine Kopie der verwendeten Konfiguration als `agentConfig` fest. Auch seine Korrekturversuche und zugehörigen Agentenschritte verwenden diese Kopie. Ein späterer Wechsel der Einstellungen verändert laufende Aufträge nicht. Alte Aufträge ohne diesen Zusatz bleiben lesbar.
 
@@ -45,7 +45,7 @@ Beispiel für ein Claude-Code-Profil:
 - Modellname / Slug `sonnet`, oder ein auf dem eigenen Konto verfügbarer Modellname
 - Zusätzliche Modellargumente `--effort high`
 
-Ein leeres Feld „CLI-Programm“ verwendet die Umgebungsvariable beziehungsweise den lokalen Standardpfad. Ein eingetragener Pfad enthält nur das Programm. Die Anwendung hängt ihre Argumente selbst an. Die Modell-Slugs werden unverändert an den gewählten Provider übergeben und nicht auf eine andere Modellfamilie umgeschrieben.
+Ein leeres Feld „CLI-Programm“ verwendet die Umgebungsvariable beziehungsweise den lokalen Standardpfad. Ein eingetragener Pfad enthält nur das Programm. Unter Windows darf dies auch ein von npm angelegter `.cmd`- oder `.ps1`-Pfad sein. Die Anwendung löst ihn ohne Shell auf und hängt ihre Argumente selbst an. Die Modell-Slugs werden unverändert an den gewählten Provider übergeben und nicht auf eine andere Modellfamilie umgeschrieben.
 
 ## Einen vorhandenen Ablauf überarbeiten
 
@@ -129,8 +129,8 @@ Wenn ein Portalbutton umbenannt wird, scheitert der kleinste technische Block. D
 
 | Variable | Bedeutung |
 | --- | --- |
-| `FOLIO_CODEX_EXECUTABLE` | Pfad zur Codex CLI; ansonsten `/opt/homebrew/bin/codex`, falls vorhanden, sonst `codex` aus PATH |
-| `FOLIO_CLAUDE_EXECUTABLE` | Pfad zu Claude Code; ansonsten `/opt/homebrew/bin/claude`, falls vorhanden, sonst `claude` aus PATH |
+| `FOLIO_CODEX_EXECUTABLE` | Pfad zur Codex CLI; ansonsten `/opt/homebrew/bin/codex`, falls vorhanden, sonst `codex` aus `PATH`; Windows-`.cmd`- und `.ps1`-Starter werden unterstützt |
+| `FOLIO_CLAUDE_EXECUTABLE` | Pfad zu Claude Code; ansonsten `/opt/homebrew/bin/claude`, falls vorhanden, sonst `claude` aus `PATH`; Windows-`.cmd`- und `.ps1`-Starter werden unterstützt |
 | `FOLIO_CODEX_TIMEOUT_MS` | Gemeinsames Zeitlimit pro CLI-Aufruf beider Provider, standardmäßig 300000 ms, höchstens 1800000 ms |
 | `FOLIO_AGENT_ARTIFACTS_ROOT` | Agentennachweise, standardmäßig `.local/testing/agents` |
 | `FOLIO_TESTING_RUN_ROOT` | Browsernachweise, standardmäßig `.local/testing/runs` |
@@ -149,7 +149,7 @@ Der Adapter begrenzt die CLI-Aufrufe der Anwendung auf zwei gleichzeitige Kindpr
 
 `e2e/testing-runtime.spec.ts` prüft echte Browserläufe mit getrennten Testdaten, eine neu definierte freie Assertion sowie einen absichtlich veralteten Button und die zentrale Reparatur. Echte Luna-/Sol-Aufrufe werden separat im lokalen System durchgeführt; ihre Prompts, Modelle, Schemas und Ergebnisse bleiben als Agentenartefakte erhalten.
 
-`server/testing/agents/providers.test.ts` prüft beide CLI-Adapter mit ausdrücklich künstlichen Prozessantworten, gespeicherte Modellprofile, Argumente, Fehlerergebnisse und unveränderliche Auftragskonfigurationen. `server/testing/agents/flow-edit.test.ts` prüft Vorschau, verschachtelte Änderungen, Verwerfen, Übernahme und veraltete Revisionen. Die Browserprüfungen der KI-Oberfläche verwenden vorbereitete Agentenantworten; sie behaupten keinen echten Modelllauf.
+`server/testing/agents/providers.test.ts` prüft beide CLI-Adapter mit ausdrücklich künstlichen Prozessantworten, gespeicherte Modellprofile, Argumente, Fehlerergebnisse und unveränderliche Auftragskonfigurationen. Unter Windows prüft er zusätzlich einen über `PATH` gefundenen sowie einen ausdrücklich konfigurierten npm-`.cmd`- und `.ps1`-Starter. Ein eigener Test stellt sicher, dass nur die freigegebenen Claude-Verbindungsvariablen aus den Benutzereinstellungen übernommen werden und die vorhandene Prozessumgebung Vorrang behält. `server/testing/agents/flow-edit.test.ts` prüft Vorschau, verschachtelte Änderungen, Verwerfen, Übernahme und veraltete Revisionen. Die Browserprüfungen der KI-Oberfläche verwenden vorbereitete Agentenantworten; sie behaupten keinen echten Modelllauf.
 
 `server/testing/agents/exploration.test.ts` verwendet eine künstliche CLI, die den Kontext ausschließlich aus der Modellanfrage liest, und einen echten isolierten Portalbrowser. Die Tests prüfen Beobachtungen, Kundenanlage, Rollenwechsel, ungültige Belege, Kontextgrenzen und Abbruch. `business-lifecycle.test.ts` prüft die sofortige Speicherung, Wiederaufnahme, Revisionsschutz und die Trennung zwischen Browserergebnis und optionaler Analyse. `e2e/testing-workspace.spec.ts` prüft den geführten Arbeitsbereich mit vorbereiteten Agentenantworten und echten lokalen Speicheraktionen.
 

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import { z } from 'zod';
 import type { TestingAgentEvent, TestingAgentProgress, TestingAgentTermination, TestingCatalog, TestingExplorationQuestion, TestingKnowledgeDocument, TestingModel } from '../../../shared/testing';
@@ -177,7 +177,7 @@ async function observe(page: Page, id: string, directory: string, action: string
   await page.screenshot({ path: resolve(directory, filename), fullPage: true, timeout: 5000 });
   const url = new URL(page.url());
   const evidence: ExplorationEvidence = { id, action, path: `${url.pathname}${url.search}`, snapshot,
-    screenshot: `/api/testing/jobs/${encodeURIComponent(directory.split('/').at(-1)!)}/artifacts/${filename}`, observedAt: new Date().toISOString(), targets, paths: [...paths], ...(error ? { error } : {}) };
+    screenshot: `/api/testing/jobs/${encodeURIComponent(basename(directory))}/artifacts/${filename}`, observedAt: new Date().toISOString(), targets, paths: [...paths], ...(error ? { error } : {}) };
   await writeFile(resolve(directory, `exploration-${number}.json`), JSON.stringify(evidence, null, 2));
   return evidence;
 }
