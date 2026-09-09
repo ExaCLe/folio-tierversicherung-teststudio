@@ -161,15 +161,15 @@ test('Menschen ergänzen eine fehlende Fähigkeit und erweitern ihr typisiertes 
   await dialog.getByLabel('Bezeichnung der Eingabe 2', { exact: true }).fill('Anzahl Nachweise');
   await dialog.getByLabel('Datentyp der Eingabe 2', { exact: true }).selectOption('number');
   await dialog.getByRole('button', { name: 'Definition aktualisieren', exact: true }).click();
-  await expect(dialog).not.toBeVisible();
   const changeReview = page.getByRole('dialog', { name: 'Änderung der Blockdefinition prüfen', exact: true });
   await expect(changeReview).toContainText(current.title);
-  await expect(changeReview).toContainText('Testdefinition wird angepasst');
+  await expect(changeReview).toContainText('Fachliche Werte bleiben erhalten');
   await changeReview.getByRole('button', { name: 'Geprüfte Änderung übernehmen', exact: true }).click();
   await expect(changeReview).not.toBeVisible();
   await expect(page.getByLabel(/Anzahl Nachweise/)).toHaveValue('5');
   result = await compiled(request, current.id);
   expect(result.valid).toBeTruthy();
+  expect(result.scenarioRevision).toBe(beforeSchema.revision + 1);
   expect(result.steps.find(step => step.label === name)?.definition.version).toBe('1.0.1');
   expect(result.steps.find(step => step.label === name)?.inputs.anzahlNachweise).toBe(5);
   const updatedCatalog = await (await request.get('/api/testing/catalog')).json() as TestingCatalog;

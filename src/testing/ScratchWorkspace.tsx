@@ -219,6 +219,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
   const current = useRef(props);
   current.current = props;
   const applying = useRef(false);
+  const canvasDeselectPending = useRef(false);
   const lastBlocks = useRef('');
   const lastParked = useRef('');
   const lastParameters = useRef('');
@@ -293,20 +294,30 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
     workspace.current = ws;
     const resize = new ResizeObserver(() => { Scratch.svgResize(ws); });
     resize.observe(element.current);
-    const clearOnCanvas = (event: MouseEvent) => {
-      if (event.button !== 0 || !(event.target instanceof Element) || !event.target.closest('.blocklyMainBackground')) return;
-      // Scratch handles the same pointer event after this listener and may
-      // restore its internal selection. Clear the React selection once that
-      // native event has finished as well.
-      current.current.onSelect(undefined);
-      requestAnimationFrame(() => current.current.onSelect(undefined));
+    const trackCanvasIntent = (event: PointerEvent) => {
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const canvasBackground = !!event.target.closest('.blocklyMainBackground') && event.target.closest('.t-scratch-workspace') === element.current;
+      canvasDeselectPending.current = canvasBackground;
+      if (canvasBackground) current.current.onSelect(undefined);
     };
-    element.current.addEventListener('pointerdown', clearOnCanvas, true);
-    element.current.addEventListener('click', clearOnCanvas, true);
+    const finishCanvasIntent = () => {
+      if (!canvasDeselectPending.current) return;
+      current.current.onSelect(undefined);
+      canvasDeselectPending.current = false;
+    };
+    // Track the complete pointer interaction at document level. Scratch stops
+    // some canvas clicks before they bubble back to the workspace container.
+    // The next pointerdown also clears an abandoned canvas intent after a drag.
+    document.addEventListener('pointerdown', trackCanvasIntent, true);
+    document.addEventListener('pointerup', finishCanvasIntent, true);
     const onChange = (event: Scratch.Events.Abstract) => {
       if (applying.current) return;
       if (event.type === Scratch.Events.SELECTED) {
         const selected = event as Scratch.Events.Selected;
+        if (canvasDeselectPending.current) {
+          current.current.onSelect(undefined);
+          return;
+        }
         const block = selected.newElementId ? ws.getBlockById(selected.newElementId) : undefined;
         // Scratch clears canvas focus on document clicks, including inspector
         // controls. Keep the inspected block until another real block is chosen
@@ -390,7 +401,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       Scratch.svgResize(ws);
     };
     render();
-    return () => { element.current?.removeEventListener('pointerdown', clearOnCanvas, true); element.current?.removeEventListener('click', clearOnCanvas, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
+    return () => { canvasDeselectPending.current = false; document.removeEventListener('pointerdown', trackCanvasIntent, true); document.removeEventListener('pointerup', finishCanvasIntent, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
   }, [catalogueKey, props.readOnly]);
   useEffect(() => {
     const ws = workspace.current;
