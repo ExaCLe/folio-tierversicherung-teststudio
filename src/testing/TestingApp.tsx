@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronRight, Code2, FileText, GitBranch, History, Layers3, Leaf, List, Maximize2, Menu, Minus, Play, Plus, Redo2, Save, Settings2, Sparkles, Undo2, X } from 'lucide-react';
-import type { TestingAgentJob, TestingScenarioLifecycle, TestingKnowledgeDocument, TestingAgentSettings, TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingModel, TestingRun, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingValidationIssue, TestingValue } from '../../shared/testing';
+import type { TestingAgentJob, TestingScenarioLifecycle, TestingKnowledgeDocument, TestingAgentSettings, TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingDefaultDecision, TestingDefinitionChangeApplyResult, TestingDefinitionChangePreview, TestingDefinitionChangeRequest, TestingModel, TestingRun, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingValidationIssue, TestingValue } from '../../shared/testing';
 import { createTestingInstance, testingVersionKey } from '../../shared/testing';
 import { testingApi, testingPost, messageOf } from './api';
 import { Method } from './Method';
@@ -18,6 +18,7 @@ import './testing-workspace.css';
 import { Library, Knowledge, KnowledgeArticle } from './Library';
 import { Graph } from './Graph';
 import { DefinitionDialog } from './DefinitionDialog';
+import { DefinitionChangeReview } from './DefinitionChangeReview';
 import { Inspector } from './Inspector';
 import type { ScratchWorkspaceHandle } from './ScratchWorkspace';
 const ScratchWorkspace = lazy(() => import('./ScratchWorkspace').then(module => ({ default: module.ScratchWorkspace })));
@@ -41,6 +42,7 @@ interface Bootstrap { lifecycles?: TestingScenarioLifecycle[]; catalog: TestingC
 type View = 'scenarios' | 'start' | 'editor' | 'library' | 'knowledge' | 'graph' | 'runs' | 'method' | 'settings';
 interface OverrideProposal { scope?: 'scenario'; reviewStatus?: 'pending' | 'dismissed' | 'applied'; before?: TestingScenario; scenario: TestingScenario; changes?: unknown; draft?: TestingBusinessDraft; applied: false }
 type OverrideReview = OverrideProposal & { job: TestingAgentJob };
+interface PendingDefinitionChange { definition: TestingBlockDefinition; newKnowledge: TestingKnowledgeDocument[]; preview: TestingDefinitionChangePreview; busy: boolean; error?: string }
 function overrideProposal(job?: TestingAgentJob): OverrideProposal | undefined {
   if (job?.phase !== 'business' || job.status !== 'completed') return;
   const result = job.result as Partial<OverrideProposal> | undefined;
@@ -102,6 +104,7 @@ export function TestingApp() {
   const [knowledgeId, setKnowledgeId] = useState<string>();
   const [knowledgeModal, setKnowledgeModal] = useState<string>();
   const [definitionModal, setDefinitionModal] = useState<{ definition?: TestingBlockDefinition; insertion?: InsertionTarget }>();
+  const [definitionChange, setDefinitionChange] = useState<PendingDefinitionChange>();
   const [bindingId, setBindingId] = useState<string>();
   const [libraryId, setLibraryId] = useState<string>();
   const [outline, setOutline] = useState(false);
@@ -500,6 +503,16 @@ export function TestingApp() {
   function duplicateSelected() { if (!entry || !draft || !data || !entry.definition) return; const copy = createTestingInstance(entry.definition); copy.inputs = structuredClone(entry.block.inputs); copy.overrides = structuredClone(entry.block.overrides); copy.children = structuredClone(entry.block.children); const append = (blocks: TestingBlockInstance[]) => { const next = [...blocks]; next.splice(next.findIndex(block => block.id === entry.block.id) + 1, 0, copy); return next; }; if (entry.parent) editSelectedScope(updateBlockAtPath(selectedBlocks, entry.parent.path, data.catalog, parent => ({ ...parent, children: append(parent.children ?? entry.parent?.definition?.body ?? []) }))); else editSelectedScope(append(selectedBlocks)); setSelected(entry.parent ? `${entry.parent.path}/${copy.id}` : copy.id); }
   async function saveDefinition(definition: TestingBlockDefinition, newKnowledge: TestingKnowledgeDocument[] = []) {
     const insertion = definitionModal?.insertion;
+    if (definitionModal?.definition) {
+      const current = draftRef.current;
+      if (current && JSON.stringify(current) !== savedRef.current) {
+        const saved = await saveDraft();
+        if (!saved || draftRef.current?.id !== current.id || JSON.stringify(draftRef.current) !== savedRef.current) throw new Error('Der offene Testfall konnte vor der Definitionsprüfung nicht eindeutig gespeichert werden. Prüfe seine Änderungen und versuche es erneut.');
+      }
+      const preview = await testingPost<TestingDefinitionChangePreview>('/definitions/change-preview', { definition, newKnowledge });
+      setDefinitionChange({ definition, newKnowledge, preview, busy: false });
+      return;
+    }
     await testingPost('/definitions', { definition, newKnowledge });
     // A successful definition save is sufficient to insert it. A later
     // bootstrap failure must not leave a silently detached library entry.
@@ -510,6 +523,70 @@ export function TestingApp() {
     void refresh().catch(cause => setError(`Der Block wurde gespeichert, aber der Katalog konnte nicht neu geladen werden: ${messageOf(cause)}`));
     if (insertion) { addDefinition(definition, insertion, next.catalog); return; }
     setNotice(`„${definition.name}“ wurde als gemeinsame aktuelle Definition aktualisiert. Die Änderung gilt für alle bearbeitbaren Testfälle.`);
+  }
+  async function chooseDefinitionDefault(key: string, decision: TestingDefaultDecision) {
+    const pending = definitionChange;
+    if (!pending || pending.busy) return;
+    setDefinitionChange({ ...pending, busy: true, error: undefined });
+    try {
+      const defaultDecisions = { ...pending.preview.defaultDecisions, [key]: decision };
+      const preview = await testingPost<TestingDefinitionChangePreview>('/definitions/change-preview', { definition: pending.definition, newKnowledge: pending.newKnowledge, defaultDecisions, valueResolutions: pending.preview.valueResolutions });
+      setDefinitionChange({ ...pending, preview, busy: false });
+    } catch (cause) { setDefinitionChange({ ...pending, busy: false, error: messageOf(cause) }); }
+  }
+  async function chooseDefinitionResolution(key: string, resolution: NonNullable<TestingDefinitionChangeRequest['valueResolutions']>[string]) {
+    const pending = definitionChange;
+    if (!pending || pending.busy) return;
+    setDefinitionChange({ ...pending, busy: true, error: undefined });
+    try {
+      const valueResolutions = { ...pending.preview.valueResolutions, [key]: resolution };
+      const preview = await testingPost<TestingDefinitionChangePreview>('/definitions/change-preview', { definition: pending.definition, newKnowledge: pending.newKnowledge, defaultDecisions: pending.preview.defaultDecisions, valueResolutions });
+      setDefinitionChange({ ...pending, preview, busy: false });
+    } catch (cause) { setDefinitionChange({ ...pending, busy: false, error: messageOf(cause) }); }
+  }
+  async function refreshDefinitionChange() {
+    const pending = definitionChange;
+    if (!pending || pending.busy) return;
+    setDefinitionChange({ ...pending, busy: true, error: undefined });
+    const current = draftRef.current;
+    if (current && JSON.stringify(current) !== savedRef.current) {
+      const saved = await saveDraft();
+      if (!saved || draftRef.current?.id !== current.id || JSON.stringify(draftRef.current) !== savedRef.current) { setDefinitionChange({ ...pending, busy: false, error: 'Der offene Testfall konnte nicht eindeutig gespeichert werden. Prüfe seine Änderungen und aktualisiere die Vorschau erneut.' }); return; }
+    }
+    try {
+      const preview = await testingPost<TestingDefinitionChangePreview>('/definitions/change-preview', { definition: pending.definition, newKnowledge: pending.newKnowledge, defaultDecisions: pending.preview.defaultDecisions, valueResolutions: pending.preview.valueResolutions });
+      setDefinitionChange({ ...pending, preview, busy: false });
+    } catch (cause) { setDefinitionChange({ ...pending, busy: false, error: messageOf(cause) }); }
+  }
+  async function applyDefinitionChange() {
+    const pending = definitionChange;
+    if (!pending || pending.busy || pending.preview.blocked) return;
+    const openDraft = draftRef.current;
+    if (openDraft && JSON.stringify(openDraft) !== savedRef.current) {
+      await refreshDefinitionChange();
+      setDefinitionChange(current => current ? { ...current, error: 'Der offene Testfall wurde zuerst gespeichert und die Vorschau aktualisiert. Prüfe die Auswirkungen noch einmal und übernimm sie anschließend.' } : current);
+      return;
+    }
+    setDefinitionChange({ ...pending, busy: true, error: undefined });
+    let result: TestingDefinitionChangeApplyResult | undefined;
+    try {
+      result = await testingPost<TestingDefinitionChangeApplyResult>('/definitions/change-apply', { definition: pending.definition, newKnowledge: pending.newKnowledge, defaultDecisions: pending.preview.defaultDecisions, valueResolutions: pending.preview.valueResolutions, previewId: pending.preview.id });
+    } catch (cause) { setDefinitionChange({ ...pending, busy: false, error: messageOf(cause) }); }
+    if (!result) return;
+    let next: Bootstrap;
+    try { next = await refresh(); }
+    catch (cause) {
+      const base = dataRef.current!;
+      next = { ...base, catalog: { ...base.catalog, definitions: [...base.catalog.definitions.filter(item => testingVersionKey(item) !== testingVersionKey(result.definition)), result.definition], knowledge: [...base.catalog.knowledge, ...result.preview.newKnowledge], ...(result.binding ? { bindings: [...base.catalog.bindings.filter(item => !(item.id === result.binding!.id && item.revision === result.binding!.revision)), result.binding] } : {}) }, scenarios: [...result.scenarios, ...base.scenarios.filter(item => !result.scenarios.some(saved => saved.id === item.id))] };
+      dataRef.current = next; setData(next);
+      setError(`Die Änderung wurde gespeichert, aber der Arbeitsbereich konnte nicht vollständig neu geladen werden: ${messageOf(cause)}`);
+    }
+    const current = draftRef.current;
+    const updated = result.scenarios.find(item => item.id === current?.id) ?? next.scenarios.find(item => item.id === current?.id);
+    if (current && updated && JSON.stringify(current) === savedRef.current) loadScenario(updated, next);
+    setDefinitionChange(undefined);
+    const affected = result.scenarios.length, changed = result.preview.changedCaseCount;
+    setNotice(`„${result.definition.name}“ wurde aktualisiert. ${affected} ${affected === 1 ? 'betroffener Testfall wurde' : 'betroffene Testfälle wurden'} als neue Revision gespeichert; ${changed} Testausprägung${changed === 1 ? '' : 'en'} ${changed === 1 ? 'ändert' : 'ändern'} ihren fachlichen Wert.`);
   }
   const lastSaved = data?.scenarios.find(scenario => scenario.id === lastId);
   const resumeScenario = draft ?? (lastSaved ? storageDraft(lastSaved) : undefined);
@@ -571,7 +648,7 @@ export function TestingApp() {
     {view === 'runs' && <RunsPage runs={data.runs} jobs={data.jobs} activeRun={activeRun} onScenario={id => void openScenario(id)} onRefresh={async () => { const next = await refresh(); setActiveRun(current => next.runs.find(run => run.id === current?.id)); }} onImpact={id => { setBindingId(id); navigate('graph'); }} />}
     {view === 'settings' && <AgentSettings onSaved={value => { setAgentSettings(value); setModel(value.defaultModel); }} />}
     {view === 'method' && <Method onStart={startWith} />}
-  </>}</main>{validationOpen && <ValidationDialog issues={visibleIssues} entries={entries} onClose={() => setValidationOpen(false)} onShow={issue => { setValidationOpen(false); selectPhase(2); requestAnimationFrame(() => showIssue(issue)); }}/>} {definitionModal && data && <DefinitionDialog saveLabel={definitionModal.insertion ? definitionModal.insertion.placement === 'canvas' ? 'Definieren und auf Arbeitsfläche platzieren' : 'Definieren und zum Ablauf hinzufügen' : undefined} insertionHint={definitionModal.insertion ? definitionModal.insertion.placement === 'canvas' ? 'Der neue Block wird frei auf der Arbeitsfläche platziert. Verbinde ihn anschließend mit deinem Ablauf.' : definitionModal.insertion.parentPath ? 'Der neue Block wird am Ende des ausgewählten zusammengesetzten Blocks eingefügt.' : 'Der neue Block wird am Ende des Ablaufs eingefügt.' : undefined} definition={definitionModal.definition} catalog={data.catalog} onSave={saveDefinition} onClose={() => setDefinitionModal(undefined)} />}{knowledgeModal && data && <Modal title="Verknüpftes Fachwissen" onClose={() => setKnowledgeModal(undefined)} wide>{data.catalog.knowledge.find(doc => doc.id === knowledgeModal) ? <KnowledgeArticle doc={data.catalog.knowledge.find(doc => doc.id === knowledgeModal)!} catalog={data.catalog} onDefinition={id => { setKnowledgeModal(undefined); setLibraryId(id); navigate('library'); }} onKnowledge={setKnowledgeModal} /> : <Empty title="Wissensdokument nicht gefunden" />}</Modal>}</div></AgentSettingsContext.Provider>;
+  </>}</main>{validationOpen && <ValidationDialog issues={visibleIssues} entries={entries} onClose={() => setValidationOpen(false)} onShow={issue => { setValidationOpen(false); selectPhase(2); requestAnimationFrame(() => showIssue(issue)); }}/>} {definitionModal && data && <DefinitionDialog saveLabel={definitionModal.insertion ? definitionModal.insertion.placement === 'canvas' ? 'Definieren und auf Arbeitsfläche platzieren' : 'Definieren und zum Ablauf hinzufügen' : undefined} insertionHint={definitionModal.insertion ? definitionModal.insertion.placement === 'canvas' ? 'Der neue Block wird frei auf der Arbeitsfläche platziert. Verbinde ihn anschließend mit deinem Ablauf.' : definitionModal.insertion.parentPath ? 'Der neue Block wird am Ende des ausgewählten zusammengesetzten Blocks eingefügt.' : 'Der neue Block wird am Ende des Ablaufs eingefügt.' : undefined} definition={definitionModal.definition} catalog={data.catalog} onSave={saveDefinition} onClose={() => setDefinitionModal(undefined)} />}{definitionChange && data && <DefinitionChangeReview preview={definitionChange.preview} catalog={data.catalog} scenarios={data.scenarios} busy={definitionChange.busy} error={definitionChange.error} onDecision={chooseDefinitionDefault} onResolution={chooseDefinitionResolution} onRefresh={refreshDefinitionChange} onApply={applyDefinitionChange} onClose={() => { if (!definitionChange.busy) setDefinitionChange(undefined); }}/>} {knowledgeModal && data && <Modal title="Verknüpftes Fachwissen" onClose={() => setKnowledgeModal(undefined)} wide>{data.catalog.knowledge.find(doc => doc.id === knowledgeModal) ? <KnowledgeArticle doc={data.catalog.knowledge.find(doc => doc.id === knowledgeModal)!} catalog={data.catalog} onDefinition={id => { setKnowledgeModal(undefined); setLibraryId(id); navigate('library'); }} onKnowledge={setKnowledgeModal} /> : <Empty title="Wissensdokument nicht gefunden" />}</Modal>}</div></AgentSettingsContext.Provider>;
 }
 
 

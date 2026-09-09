@@ -236,6 +236,33 @@ export interface TestingPromotionRequest {
 }
 export interface TestingPromotionResult { definition: TestingBlockDefinition; scenario: TestingScenario; duplicateReport: TestingDuplicateReport }
 
+export type TestingDefaultDecision = 'neuen-standard-uebernehmen' | 'bisherigen-wert-beibehalten';
+export interface TestingDefinitionChangeRequest {
+  definition: TestingBlockDefinition; newKnowledge?: TestingKnowledgeDocument[];
+  defaultDecisions?: Record<string, TestingDefaultDecision>;
+  valueResolutions?: Record<string, { action: 'wert-setzen'; value: TestingValue } | { action: 'feld-verwerfen' } | { action: 'feld-zuordnen'; targetField: string }>;
+}
+export interface TestingDefinitionScenarioChange {
+  scenarioId: string; title: string; revision: number; direct: boolean;
+  instancePaths: string[]; directPaths: string[]; transitivePaths: string[];
+  behavior: 'fachlich-unveraendert' | 'testdefinition-aendern' | 'nicht-anwendbar';
+  changes: { path: string; field: string; label: string; before?: TestingValue; after?: TestingValue; reason: string; decisionKey?: string; decisionRequired?: boolean; source?: 'standard' | 'ausdruecklich' | 'override' | 'parameter' | 'matrix' }[];
+  matrixRows: { rowId: string; rowLabel: string; behavior: 'fachlich-unveraendert' | 'testdefinition-aendern' | 'nicht-anwendbar'; changes?: TestingDefinitionScenarioChange['changes']; diagnostics?: TestingValidationIssue[] }[];
+  diagnostics: TestingValidationIssue[];
+  affectedCaseCount: number; changedCaseCount: number; blockedCaseCount: number;
+}
+export interface TestingDefinitionChangePreview {
+  id: string; catalogFingerprint: string; source: TestingVersionRef; target: TestingVersionRef;
+  definition: TestingBlockDefinition; newKnowledge: TestingKnowledgeDocument[];
+  defaultDecisions: Record<string, TestingDefaultDecision>;
+  valueResolutions: NonNullable<TestingDefinitionChangeRequest['valueResolutions']>;
+  scenarios: TestingDefinitionScenarioChange[]; affectedScenarioCount: number;
+  changedScenarioCount: number; unchangedScenarioCount: number; blocked: boolean;
+  affectedCaseCount: number; changedCaseCount: number; unchangedCaseCount: number; blockedCaseCount: number;
+  technicalPreparation?: { status: 'wiederverwendbar' | 'neu-zu-pruefen'; bindingId?: string; reason: string };
+}
+export interface TestingDefinitionChangeApplyResult { definition: TestingBlockDefinition; scenarios: TestingScenario[]; preview: TestingDefinitionChangePreview; binding?: TestingTechnicalBinding }
+
 export function testingVersionKey(ref: TestingVersionRef): string { return `${ref.id}@${ref.version}`; }
 export function compareTestingVersions(left: string, right: string): number {
   const split = (value: string) => { const [core, ...pre] = value.split('-'); return { core: core.split('.').map(Number), pre: pre.join('-') }; };

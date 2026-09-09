@@ -132,6 +132,8 @@ Im Block stehen Werte als benannte, typisierte Eingaben. Die Versicherungssumme 
 
 Eine Änderung von 3.500 auf 15.000 EUR ist eine lokale Wertänderung. Sie ändert nur diese Verwendung und wird vor einer weiteren Ausführung erneut fachlich geprüft. Eine Ergänzung wie „C = 5“ benötigt außerdem eine fachliche Definition von C. Welchen Werttyp hat es? Was bedeutet es? Ist es erforderlich? Wo wirkt es in der Anwendung?
 
+Eine Änderung am Eingabeschema einer gemeinsamen Definition wird vor der Übernahme gegen alle bearbeitbaren Verwendungen geprüft. Die Prüfung zeigt jeden betroffenen Testfall, direkte und verschachtelte Blockstellen und die Testmatrixzeilen. Beim Entfernen eines Standardwerts wird dessen bisherige Wirkung durch einen ausdrücklich gespeicherten Wert erhalten. Beim Ändern des Standards wird pro betroffener Stelle gewählt, ob sie dem neuen Standard folgt oder ihren bisherigen Wert festhält. Ein anderer bereits ausdrücklich gesetzter Wert bleibt bestehen. Unklare Typwechsel, entfernte belegte Felder und neue Pflichtwerte müssen vor der Übernahme einzeln aufgelöst werden.
+
 Der Prototyp weist unbekannte Eingabefelder als fachliche Lücke aus. Nach einer Schemaerweiterung prüft die technische Phase, ob jedes Feld tatsächlich gesetzt oder gegen die Anwendung geprüft wird. Ein zusätzliches Feld darf nicht im Block stehen bleiben, während der Browserlauf es still übergeht.
 
 Tierarten zeigen diesen Unterschied gut. Ein Rind braucht eine Ohrmarke, ein Pferd eine Chipnummer und einen Gesundheitszustand. Der allgemeine Tierblock übernimmt beim Wechsel zu Pferd keine versteckten Kuhwerte. Fehlende Pflichtfelder oder unpassende Angaben sind sichtbare Fehler.

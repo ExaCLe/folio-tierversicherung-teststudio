@@ -193,3 +193,39 @@ test('Bearbeitete Wiederverwendung behält Name und Parameterauswahl beim Neulad
   assert.equal(JSON.stringify(reloadedRun.data.compiled), originalCompiled);
   assert.equal(testingFingerprint(repository.getTestingScenario(scenario.id), getTestingCatalog()), run.compiled.fingerprint);
 });
+
+test('Geprüfte globale Standardwertentfernung schreibt Testfälle atomar um und erhält historische Revisionen', async () => {
+  const catalog=getTestingCatalog(),source=catalog.definitions.find(item=>item.id==='pruefung.vorschlagsstatus'&&item.version==='1.0.0')!;
+  const target:TestingBlockDefinition={...clone(source),version:'1.0.1',supersedes:{id:source.id,version:source.version},inputs:source.inputs.map(input=>input.key==='expectedStatus'?(({default:_default,...rest})=>rest)(input):input),createdAt:'2026-09-09T12:00:00Z',origin:'human'};
+  const affected=loadTestingSeedScenarios().filter(scenario=>JSON.stringify(scenario).includes(source.id));
+  const originals=new Map(affected.map(scenario=>[scenario.id,clone(repository.getTestingScenario(scenario.id))]));
+  const preview=await request('POST','/definitions/change-preview',{definition:target});
+  assert.equal(preview.status,200,JSON.stringify(preview.data));assert.equal(preview.data.blocked,false);assert(preview.data.affectedScenarioCount>0);
+  const applied=await request('POST','/definitions/change-apply',{definition:target,previewId:preview.data.id});
+  assert.equal(applied.status,200,JSON.stringify(applied.data));
+  for(const saved of applied.data.scenarios as TestingScenario[]){const original=originals.get(saved.id)!;assert.equal(saved.revision,original.revision+1);const history=repository.listTestingScenarioRevisions().find(item=>item.id===original.id&&item.revision===original.revision);assert.deepEqual(history,original);}
+  const stored=JSON.parse(readFileSync(process.env.FOLIO_DATA_FILE!,'utf8'));
+  assert(stored.testingDefinitionChanges.some((item:{id:string})=>item.id===preview.data.id));
+  for(const saved of applied.data.scenarios as TestingScenario[]){const prepared=stored.testingDefinitionPreparations.find((item:{scenarioId:string})=>item.scenarioId===saved.id);assert.equal(prepared.scenarioRevision,saved.revision);assert.equal(prepared.compiled.fingerprint,testingFingerprint(saved,getTestingCatalog()));}
+  const direct=await request('POST','/definitions',{definition:{...target,version:'1.0.2',supersedes:{id:target.id,version:target.version}}});assert.equal(direct.status,409);assert.equal(direct.data.code,'DEFINITION_CHANGE_REVIEW_REQUIRED');
+});
+
+test('Eine veraltete globale Vorschau schreibt nach einer Testfalländerung nichts', async () => {
+  const source=getTestingCatalog().definitions.find(item=>item.id==='police.neu-ausgeben'&&item.version==='1.0.0')!;
+  const target:TestingBlockDefinition={...clone(source),version:'1.0.1',supersedes:{id:source.id,version:source.version},inputs:source.inputs.map(input=>input.key==='reason'?{...input,default:'Neue Begründung'}:input),createdAt:'2026-09-09T12:01:00Z',origin:'human'};
+  const first=await request('POST','/definitions/change-preview',{definition:target});assert.equal(first.status,200);
+  const affected=first.data.scenarios[0];const current=repository.getTestingScenario(affected.scenarioId);repository.saveTestingScenario({...current,title:`${current.title} – geändert`},current.revision);
+  const before=readFileSync(process.env.FOLIO_DATA_FILE!,'utf8');const stale=await request('POST','/definitions/change-apply',{definition:target,previewId:first.data.id});
+  assert.equal(stale.status,409);assert.equal(stale.data.code,'DEFINITION_CHANGE_STALE');assert.equal(readFileSync(process.env.FOLIO_DATA_FILE!,'utf8'),before);
+});
+
+test('Globale Übernahme validiert Nutzereingaben erneut und Agenten umgehen die Prüfung nicht', () => {
+  const source=getTestingCatalog().definitions.find(item=>item.id==='direktion.entscheiden')!;
+  const target:TestingBlockDefinition={...clone(source),version:'1.0.1',supersedes:{id:source.id,version:source.version},createdAt:'2026-09-09T12:02:00Z',origin:'human'};
+  const before=readFileSync(process.env.FOLIO_DATA_FILE!,'utf8');
+  assert.throws(()=>repository.applyTestingDefinitionChange({definition:{...target,inputs:[{key:'__proto__',label:'Ungültig',type:'text'}]},previewId:'erfunden'}),/Feldnamen/);
+  assert.throws(()=>repository.applyTestingDefinitionChange({definition:target,defaultDecisions:{decision:'unbekannt' as never},previewId:'erfunden'}),/Standardwertentscheidung/);
+  const draft={title:'Agenten-Bypass',expectedOutcome:'Unverändert',blocks:[],knowledgeRefs:[],newDefinitions:[target],newKnowledge:[],explanation:'',assumptions:[],openQuestions:[]};
+  assert.throws(()=>repository.createTestingScenarioFromDraft('Bypass',draft,'sol'),(error:any)=>error.code==='DEFINITION_CHANGE_REVIEW_REQUIRED');
+  assert.equal(readFileSync(process.env.FOLIO_DATA_FILE!,'utf8'),before);
+});

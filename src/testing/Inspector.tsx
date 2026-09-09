@@ -9,7 +9,7 @@ import { ReferenceValue } from './ReferenceValue';
 import { referenceChoices, type ReferenceIndex } from './references';
 
 interface ValueEditorProps { input: TestingInput; value: TestingValue | undefined; onChange: (value: TestingValue) => void; references: ReferenceIndex; entryPath: string; onSource?: (path: string) => void; path?: string }
-function ValueEditor({ input, value, onChange, references, entryPath, onSource, path = input.key }: ValueEditorProps) {
+export function ValueEditor({ input, value, onChange, references, entryPath, onSource, path = input.key }: ValueEditorProps) {
   const [newKey, setNewKey] = useState('');
   const [newType, setNewType] = useState<TestingValueType>('text');
   const [numberText, setNumberText] = useState(typeof value === 'number' ? formatGermanNumber(value) : String(value ?? ''));

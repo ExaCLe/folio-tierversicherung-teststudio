@@ -213,7 +213,7 @@ test('Promotion erreicht einen neu ergänzten Schritt in einer alten materialisi
   const c=getTestingCatalog(),source=clone(def(c,'ablauf.kuh-vorschlag')),id=`ablauf.promotion-aktuell-${Date.now()}`;
   const old={...source,id,semanticKey:`workflow.${id}`,version:'1.0.0',origin:'human' as const};repository.saveTestingDefinition(old);
   const added=clone(source.body![0]);added.id='gemeinsam-neu';added.outputs={customer:'zusatzkunde'};
-  const current={...clone(old),version:'1.0.1',supersedes:{id,version:'1.0.0'},body:[...clone(old.body!),added]};repository.saveTestingDefinition(current);
+  const current={...clone(old),version:'1.0.1',supersedes:{id,version:'1.0.0'},body:[...clone(old.body!),added]};const preview=repository.previewTestingDefinitionChange({definition:current});repository.applyTestingDefinitionChange({definition:current,previewId:preview.id});
   const scenario=repository.saveTestingScenario({...clone(seeds()[0]),id:`promotion-aktuell-${Date.now()}`,blocks:[{id:'workflow',definition:{id,version:'1.0.0'},inputs:{},children:clone(old.body!)}]},0);
   const promoted=repository.promoteTestingBlocks({scenarioId:scenario.id,expectedRevision:scenario.revision,parentPath:'workflow',instanceIds:['gemeinsam-neu'],name:'Neuen gemeinsamen Schritt bündeln',description:'Bündelt den aktuellen gemeinsamen Schritt.',parameters:[],replaceSelection:false});
   assert.equal(promoted.definition.body?.[0].id,'gemeinsam-neu');

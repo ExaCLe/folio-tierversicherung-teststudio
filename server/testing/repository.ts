@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingInput, TestingKnowledgeDocument, TestingModel, TestingPromotionRequest, TestingPromotionResult, TestingRun, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingValue, TestingVersionRef } from '../../shared/testing';
+import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingDefinitionChangeApplyResult, TestingDefinitionChangePreview, TestingDefinitionChangeRequest, TestingInput, TestingKnowledgeDocument, TestingModel, TestingPromotionRequest, TestingPromotionResult, TestingRun, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingValue, TestingVersionRef } from '../../shared/testing';
 import { currentTestingChildren, currentTestingDefinition, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
 import { dataFile, db } from '../store';
 import { getTestingCatalog, loadTestingSeedScenarios } from './catalog';
 import { compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from './compiler';
 import { validateTestingMatrix } from './matrix';
+import { compatibleDefinitionChangeBinding, migrateDefinitionScenarios, previewDefinitionChange } from './definition-change';
+import { validateTestingBinding } from './bindings/validation';
 
 export class TestingModelError extends Error {
   constructor(message:string,public status=400,public code='TESTING_INVALID') {super(message);this.name='TestingModelError';}
@@ -74,6 +76,7 @@ export function saveTestingDefinition(definition:TestingBlockDefinition,newKnowl
   assertTestingDefinition(definition);if(!Array.isArray(newKnowledge))throw new TestingModelError('Neue Wissensbelege müssen als Liste übergeben werden.');
   const catalog=getTestingCatalog(),existing=catalog.definitions.find(d=>testingVersionKey(d)===testingVersionKey(definition));
   if(existing&&stableTestingStringify(existing)!==stableTestingStringify(definition))throw new TestingModelError('Diese Definitionsversion ist unveränderlich. Veröffentliche eine neue semantische Version.',409,'DEFINITION_IMMUTABLE');
+  if(!existing&&catalog.definitions.some(item=>item.id===definition.id))throw new TestingModelError('Eine neue Version einer gemeinsamen Blockdefinition muss zuerst mit allen betroffenen Testfällen geprüft werden.',409,'DEFINITION_CHANGE_REVIEW_REQUIRED');
   const knowledge=new Map(catalog.knowledge.map(document=>[`${document.id}@${document.revision}`,document]));
   for(const document of newKnowledge){assertKnowledge(document);const key=`${document.id}@${document.revision}`,previous=knowledge.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(document))throw new TestingModelError('Diese Wissensrevision ist unveränderlich.',409,'KNOWLEDGE_IMMUTABLE');knowledge.set(key,document);}
   for(const document of newKnowledge){if(document.definitionRefs.some(ref=>testingVersionKey(ref)!==testingVersionKey(definition)&&!catalog.definitions.some(item=>testingVersionKey(item)===testingVersionKey(ref))))throw new TestingModelError('Ein neuer Wissensbeleg verweist auf eine fehlende Blockversion.');if(document.relatedKnowledge.some(id=>![...knowledge.values()].some(item=>item.id===id)))throw new TestingModelError('Ein neuer Wissensbeleg verweist auf fehlendes weiteres Wissen.');}
@@ -84,6 +87,66 @@ export function saveTestingDefinition(definition:TestingBlockDefinition,newKnowl
   merge('testingDefinitions',[definition],testingVersionKey);merge('testingKnowledge',additions,document=>`${document.id}@${document.revision}`);
   writeTestingCollections(collections);return clone(definition);
 }
+
+export function previewTestingDefinitionChange(input:TestingDefinitionChangeRequest):TestingDefinitionChangePreview {
+  assertTestingDefinition(input.definition);validateDefinitionChangeRequest(input);
+  validateDefinitionChangeKnowledge(input.definition,input.newKnowledge??[],getTestingCatalog());
+  const preview=previewDefinitionChange(input,getTestingCatalog(),listTestingScenarios());validateDefinitionChangeDecisionKeys(input,preview);return preview;
+}
+export function applyTestingDefinitionChange(input:TestingDefinitionChangeRequest&{previewId:string}):TestingDefinitionChangeApplyResult {
+  assertTestingDefinition(input.definition);validateDefinitionChangeRequest(input);
+  const catalog=getTestingCatalog(),scenarios=listTestingScenarios();validateDefinitionChangeKnowledge(input.definition,input.newKnowledge??[],catalog);
+  const preview=previewDefinitionChange(input,catalog,scenarios);validateDefinitionChangeDecisionKeys(input,preview);
+  if(preview.id!==input.previewId)throw new TestingModelError('Die Blockdefinition oder ein betroffener Testfall wurde seit der Vorschau geändert. Prüfe die aktuelle Änderung erneut.',409,'DEFINITION_CHANGE_STALE');
+  if(preview.blocked)throw new TestingModelError('Die Änderung enthält noch ungeklärte Testfälle. Löse alle angezeigten Entscheidungen und Fehler vor der Übernahme.',409,'DEFINITION_CHANGE_BLOCKED');
+  const knowledgeAdditions=validateDefinitionChangeKnowledge(preview.definition,preview.newKnowledge,catalog,true);
+  const migrated=migrateDefinitionScenarios(preview,catalog,scenarios),collections:Record<string,unknown[]>=existsSync(dataFile)?JSON.parse(readFileSync(dataFile,'utf8')):{};
+  const merge=<T>(collection:string,added:T[],key:(value:T)=>string)=>{collections[collection]=[...new Map([...(collections[collection]??[]) as T[],...added].map(value=>[key(value),clone(value)])).values()];};
+  const nowValue=now(),saved=migrated.map(scenario=>({...scenario,revision:scenario.revision+1,updatedAt:nowValue}));
+  const binding=preview.technicalPreparation?.status==='wiederverwendbar'?renewCompatibleBinding(catalog,preview.definition,preview.source):undefined;
+  if(preview.technicalPreparation?.status==='wiederverwendbar'&&!binding)throw new TestingModelError('Die als wiederverwendbar geprüfte technische Bindung ist nicht mehr eindeutig verfügbar. Prüfe die globale Änderung erneut.',409,'DEFINITION_BINDING_STALE');
+  merge('testingDefinitions',[preview.definition],testingVersionKey);
+  if(binding)merge('testingBindings',[binding],item=>`${item.id}@${item.revision}`);
+  merge('testingKnowledge',knowledgeAdditions,document=>`${document.id}@${document.revision}`);
+  const priorRevisions=migrated.map(scenario=>{const original=scenarios.find(item=>item.id===scenario.id)!;return {id:`${original.id}@${original.revision}`,scenario:original};});
+  for(const revision of priorRevisions){const existing=((collections.testingScenarioRevisions??[]) as {id:string;scenario:TestingScenario}[]).find(item=>item.id===revision.id);if(existing&&!sameStored(existing.scenario,revision.scenario))throw new TestingModelError(`Die historische Testfallrevision ${revision.id} stimmt nicht mit dem gespeicherten Ausgangsstand überein. Die globale Änderung wurde nicht übernommen.`,409,'SCENARIO_HISTORY_IMMUTABLE');}
+  merge('testingScenarioRevisions',priorRevisions,row=>row.id);
+  merge('testingScenarios',saved,scenario=>scenario.id);
+  merge('testingScenarioRevisions',saved.map(scenario=>({id:`${scenario.id}@${scenario.revision}`,scenario})),row=>row.id);
+  const preparedCatalog:TestingCatalog={...catalog,definitions:[...catalog.definitions,preview.definition],knowledge:[...catalog.knowledge,...knowledgeAdditions],bindings:[...catalog.bindings,...(binding?[binding]:[])]};
+  const currentAffected=preview.scenarios.map(item=>saved.find(scenario=>scenario.id===item.scenarioId)??scenarios.find(scenario=>scenario.id===item.scenarioId)!);
+  merge('testingDefinitionPreparations',currentAffected.map(scenario=>({id:`${preview.id}:${scenario.id}`,previewId:preview.id,scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint:testingFingerprint(scenario,preparedCatalog),compiled:compileTestingScenario(scenario,preparedCatalog),status:preview.scenarios.find(item=>item.scenarioId===scenario.id)?.behavior,createdAt:nowValue})),row=>row.id);
+  merge('testingDefinitionChanges',[{id:preview.id,source:preview.source,target:preview.target,catalogFingerprint:preview.catalogFingerprint,defaultDecisions:preview.defaultDecisions,valueResolutions:preview.valueResolutions,scenarioRevisions:currentAffected.map(scenario=>({scenarioId:scenario.id,revision:scenario.revision})),summary:{affectedCases:preview.affectedCaseCount,changedCases:preview.changedCaseCount,unchangedCases:preview.unchangedCaseCount},appliedAt:nowValue}],row=>row.id);
+  writeTestingCollections(collections);
+  return {definition:clone(preview.definition),scenarios:clone(saved),preview,...(binding?{binding:clone(binding)}:{})};
+}
+function validateDefinitionChangeRequest(input:TestingDefinitionChangeRequest) {
+  if(input.defaultDecisions&&Object.values(input.defaultDecisions).some(value=>!['neuen-standard-uebernehmen','bisherigen-wert-beibehalten'].includes(value)))throw new TestingModelError('Eine Standardwertentscheidung ist unbekannt.',400,'DEFINITION_DECISION_INVALID');
+  if(input.valueResolutions)for(const resolution of Object.values(input.valueResolutions))if(!resolution||!['wert-setzen','feld-verwerfen','feld-zuordnen'].includes(resolution.action)||(resolution.action==='wert-setzen'&&!Object.hasOwn(resolution,'value'))||(resolution.action==='feld-zuordnen'&&(!resolution.targetField||typeof resolution.targetField!=='string')))throw new TestingModelError('Eine Feldauflösung ist unvollständig oder unbekannt.',400,'DEFINITION_RESOLUTION_INVALID');
+}
+function validateDefinitionChangeDecisionKeys(input:TestingDefinitionChangeRequest,preview:TestingDefinitionChangePreview) {
+  const inputKeys=new Set(input.definition.inputs.map(item=>item.key));for(const scenario of preview.scenarios){for(const change of scenario.changes)inputKeys.add(change.field);for(const issue of scenario.diagnostics)if(issue.field)inputKeys.add(issue.field);for(const row of scenario.matrixRows)for(const issue of row.diagnostics??[])if(issue.field)inputKeys.add(issue.field);}
+  const allowed=new Set(inputKeys);
+  for(const scenario of preview.scenarios)for(const path of scenario.instancePaths)for(const key of inputKeys)allowed.add(`${scenario.scenarioId}:${path}:${key}`);
+  for(const key of [...Object.keys(input.defaultDecisions??{}),...Object.keys(input.valueResolutions??{})])if(!allowed.has(key)&&![...allowed].some(prefix=>key.startsWith(`${prefix}:zeile:`)))throw new TestingModelError(`Die Entscheidung „${key}“ gehört zu keinem betroffenen Feld dieser Vorschau.`,400,'DEFINITION_DECISION_TARGET_UNKNOWN');
+}
+function renewCompatibleBinding(catalog:TestingCatalog,target:TestingBlockDefinition,sourceRef:TestingVersionRef):TestingTechnicalBinding|undefined {
+  const source=currentTestingDefinition({...catalog,definitions:catalog.definitions.filter(item=>!(item.id===target.id&&item.version===target.version))},sourceRef.id);if(!source)return;
+  const binding=compatibleDefinitionChangeBinding(source,target,catalog);if(!binding)return;
+  const revision=Math.max(...catalog.bindings.filter(item=>item.id===binding.id).map(item=>item.revision))+1;
+  const renewed={...clone(binding),revision,definitionRefs:[...binding.definitionRefs,{id:target.id,version:target.version}],changeReason:`Geprüfte Übernahme der fachlich kompatiblen Definition ${target.id}@${target.version}.`,createdAt:now()};
+  return validateTestingBinding(renewed,{...catalog,definitions:[...catalog.definitions,target]});
+}
+function validateDefinitionChangeKnowledge(definition:TestingBlockDefinition,newKnowledge:TestingKnowledgeDocument[],catalog:TestingCatalog,withBacklinks=false):TestingKnowledgeDocument[] {
+  const knowledge=new Map(catalog.knowledge.map(document=>[`${document.id}@${document.revision}`,clone(document)]));
+  for(const document of newKnowledge){assertKnowledge(document);const key=`${document.id}@${document.revision}`,previous=knowledge.get(key);if(previous&&!sameStored(previous,document))throw new TestingModelError('Diese Wissensrevision ist unveränderlich.',409,'KNOWLEDGE_IMMUTABLE');knowledge.set(key,clone(document));}
+  const knownDefinition=(ref:TestingVersionRef)=>ref.id===definition.id&&ref.version===definition.version||catalog.definitions.some(item=>testingVersionKey(item)===testingVersionKey(ref));
+  for(const document of newKnowledge){if(document.definitionRefs.some(ref=>!knownDefinition(ref)))throw new TestingModelError(`„${document.title}“ verweist auf eine fehlende Definitionsversion.`);if(document.relatedKnowledge.some(id=>![...knowledge.values()].some(item=>item.id===id)))throw new TestingModelError(`„${document.title}“ verweist auf fehlendes weiteres Wissen.`);}
+  const additions=[...newKnowledge.map(clone)];
+  for(const id of definition.knowledgeRefs){const document=[...knowledge.values()].filter(item=>item.id===id).sort((a,b)=>b.revision-a.revision)[0];if(!document)throw new TestingModelError(`Der Wissensbeleg „${id}“ für „${definition.name}“ fehlt.`);if(withBacklinks&&!document.definitionRefs.some(ref=>testingVersionKey(ref)===testingVersionKey(definition))){const linked={...clone(document),revision:document.revision+1,definitionRefs:[...document.definitionRefs,{id:definition.id,version:definition.version}]};knowledge.set(`${linked.id}@${linked.revision}`,linked);additions.push(linked);}}
+  return additions;
+}
+const sameStored=(left:unknown,right:unknown)=>stableTestingStringify(left)===stableTestingStringify(right);
 function writeTestingCollections(collections:Record<string,unknown[]>) {mkdirSync(dirname(dataFile),{recursive:true});const temporary=`${dataFile}.${process.pid}.${randomUUID()}.tmp`;writeFileSync(temporary,`${JSON.stringify(collections,null,2)}\n`,{encoding:'utf8',mode:0o600});renameSync(temporary,dataFile);}
 export function saveTestingKnowledge(document:TestingKnowledgeDocument):TestingKnowledgeDocument {
   assertKnowledge(document);
@@ -141,7 +204,7 @@ export function createTestingScenarioFromDraft(intent:string,draft:TestingBusine
 function persistTestingBusinessDraft(intent:string,draft:TestingBusinessDraft,model:TestingModel,existing?:TestingScenario):TestingScenario {
   const preview=existing?previewTestingScenarioEdit(existing,draft,model):previewTestingBusinessDraft(intent,draft,model);
   const current=getTestingCatalog();const definitions=new Map(current.definitions.map(d=>[testingVersionKey(d),d]));const knowledge=new Map(current.knowledge.map(d=>[`${d.id}@${d.revision}`,d]));
-  for(const definition of draft.newDefinitions){assertTestingDefinition(definition);const key=testingVersionKey(definition),previous=definitions.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(definition))throw new TestingModelError('Der Agentenentwurf überschreibt eine bestehende Definitionsversion.',409,'DEFINITION_IMMUTABLE');definitions.set(key,clone(definition));}
+  for(const definition of draft.newDefinitions){assertTestingDefinition(definition);const key=testingVersionKey(definition),previous=definitions.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(definition))throw new TestingModelError('Der Agentenentwurf überschreibt eine bestehende Definitionsversion.',409,'DEFINITION_IMMUTABLE');if(!previous&&[...definitions.values()].some(item=>item.id===definition.id))throw new TestingModelError('Der Agentenentwurf enthält eine neue Version einer gemeinsamen Blockdefinition. Diese Änderung braucht zuerst die globale Testfallprüfung.',409,'DEFINITION_CHANGE_REVIEW_REQUIRED');definitions.set(key,clone(definition));}
   for(const doc of draft.newKnowledge){assertKnowledge(doc);const key=`${doc.id}@${doc.revision}`,previous=knowledge.get(key);if(previous&&stableTestingStringify(previous)!==stableTestingStringify(doc))throw new TestingModelError('Der Agentenentwurf überschreibt eine bestehende Wissensrevision.',409,'KNOWLEDGE_IMMUTABLE');knowledge.set(key,clone(doc));}
   for(const doc of draft.newKnowledge){if(doc.definitionRefs.some(ref=>!definitions.has(testingVersionKey(ref))))throw new TestingModelError(`„${doc.title}“ verweist auf eine fehlende Definitionsversion.`);if(doc.relatedKnowledge.some(id=>![...knowledge.values()].some(d=>d.id===id)))throw new TestingModelError(`„${doc.title}“ verweist auf fehlendes weiteres Wissen.`);}
   const addedKnowledge=[...draft.newKnowledge];

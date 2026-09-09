@@ -2,13 +2,13 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { basename, resolve, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
-import type { TestingAgentJob, TestingApproval, TestingBlockInstance, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingTechnicalIssue } from '../../shared/testing';
+import type { TestingAgentJob, TestingApproval, TestingBlockInstance, TestingDefinitionChangeRequest, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingTechnicalIssue } from '../../shared/testing';
 import { currentTestingChildren, currentTestingDefinition, testingVersionKey } from '../../shared/testing';
 import { db } from '../store';
 import { getTestingCatalog } from './catalog';
 import { compileTestingScenario, testingFingerprint } from './compiler';
 import { buildTestingGraph, getTestingImpact } from './graph';
-import { approveTestingScenario, getTestingApproval, getTestingLayout, getTestingRun, getTestingScenario, listTestingRuns, listTestingScenarios, promoteTestingBlocks, saveTestingBinding, saveTestingDefinition, saveTestingKnowledge, saveTestingLayout, saveTestingRun, saveTestingScenario, TestingModelError } from './repository';
+import { applyTestingDefinitionChange, approveTestingScenario, getTestingApproval, getTestingLayout, getTestingRun, getTestingScenario, listTestingRuns, listTestingScenarios, previewTestingDefinitionChange, promoteTestingBlocks, saveTestingBinding, saveTestingDefinition, saveTestingKnowledge, saveTestingLayout, saveTestingRun, saveTestingScenario, TestingModelError } from './repository';
 import { createStarterBindings } from './bindings/seed';
 import { validateTestingBinding } from './bindings/validation';
 import { AGENT_ARTIFACTS_ROOT, codexConfiguration } from './agents/cli';
@@ -87,6 +87,8 @@ export function createTestingRouter(): Router {
   }));
   router.post('/scenarios/:id/run', guard((req, res) => { const input = body(req); res.status(202).json(startDirectRun({ scenarioId: req.params.id, revision: revision(input.revision), ...(input.model ? { model: model(input.model) } : {}) })); }));
   router.post('/definitions', guard((req, res) => res.status(201).json(saveTestingDefinition(body(req).definition,body(req).newKnowledge??[]))));
+  router.post('/definitions/change-preview', guard((req, res) => res.json(previewTestingDefinitionChange(body(req) as unknown as TestingDefinitionChangeRequest))));
+  router.post('/definitions/change-apply', guard((req, res) => res.json(applyTestingDefinitionChange(body(req) as unknown as TestingDefinitionChangeRequest & {previewId:string}))));
   router.post('/knowledge', guard((req, res) => res.status(201).json(saveTestingKnowledge(body(req).document))));
   router.post('/bindings', guard((req, res) => res.status(201).json(saveTestingBinding(validateTestingBinding(body(req).binding, getTestingCatalog())))));
   router.get('/bindings/:id/impact', guard((req, res) => res.json(getTestingImpact(req.params.id))));

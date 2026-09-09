@@ -120,7 +120,9 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 | `POST /jobs/business` | `{request,model}` → Agentenauftrag mit sofort gespeichertem Testfall, HTTP 202 |
 | `POST /scenarios/:id/plan` | `{revision,model}` → Wissen prüfen und noch leeren Entwurf unter derselben ID erneut planen |
 | `GET /scenarios/:id/lifecycle` | Aus gespeicherten Fakten abgeleiteter Arbeitsstand mit aktueller Phase, nächster Aktion, Auftragsbeziehungen und passendem Lauf |
-| `POST /definitions` | `{definition,newKnowledge?}` → Definition samt neuen Wissensbelegen und Rückverweisen atomar speichern |
+| `POST /definitions` | `{definition,newKnowledge?}` → eine neue Definition samt neuen Wissensbelegen und Rückverweisen atomar speichern |
+| `POST /definitions/change-preview` | `{definition,newKnowledge?,defaultDecisions?,valueResolutions?}` → noch nicht gespeicherte Auswirkungsprüfung für eine neue Version einer vorhandenen gemeinsamen Definition |
+| `POST /definitions/change-apply` | Wie die Vorschau, zusätzlich `{previewId}` → exakt die geprüfte Definition und alle betroffenen bearbeitbaren Testfälle atomar als neue Revisionen speichern |
 | `PUT /scenarios/:id` | `{scenario,expectedRevision}` → gespeicherte neue Szenariorevision |
 | `POST /scenarios/:id/approve` | `{revision,comment?}` → Freigabe genau dieser fachlichen Fassung |
 | `POST /scenarios/:id/interpret-override` | `{revision,instanceId,text,model}` → Agentenauftrag mit lokalem Diff; noch nicht gespeichert |
@@ -136,6 +138,8 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 | `POST /reuse/:id/dismiss` | `{proposalIds:[id]}` → Vorschlag verwerfen |
 
 `model` ist die gespeicherte Profil-ID aus `GET /settings`. `luna` und `sol` sind vorkonfigurierte Profile. Eigene Profile enthalten `id`, `label`, `provider` mit `codex` oder `claude`, `slug` und `extraArgs`. Die Einstellungen enthalten außerdem `defaultModel` und für beide Provider `executable` und `extraArgs`. Beim Speichern dürfen Argumente als Text oder Argumentliste angegeben werden; die Antwort enthält normalisierte Listen. Jeder neue Agentenauftrag hält seine aufgelöste Konfiguration in `agentConfig` fest. Der technische Probelauf verwendet genau die vom Agenten ausgewählten Bindungsrevisionen. Ein zwischenzeitlich veränderter fachlicher Stand kann nicht mit einem alten Agentenergebnis überschrieben werden. Eine Annahme nach erfolgreichem Lauf prüft dessen Revision und Fingerprint erneut.
+
+Die Definitionsvorschau nennt betroffene Testfälle und Testmatrixzeilen, direkte und verschachtelte Blockstellen, fachlich geänderte und unveränderte Werte sowie blockierende Hinweise. `defaultDecisions` verwendet den Schlüssel `testfallId:blockpfad:eingabeschlüssel`. Beim geänderten Standardwert wird damit pro betroffener Stelle zwischen `neuen-standard-uebernehmen` und `bisherigen-wert-beibehalten` entschieden. `valueResolutions` löst entfernte oder inkompatibel geänderte Felder ausdrücklich durch einen neuen Wert, das geprüfte Verwerfen des Feldes oder die Zuordnung zu einem anderen Feld. Jede Entscheidung erzeugt eine neue Vorschau-ID. Die Übernahme akzeptiert nur diese aktuelle Vorschau; ein inzwischen veränderter Katalog oder Testfall macht sie ungültig.
 
 Aufträge können `parentJobId`, `childJobIds`, `stage` und `runId` tragen. `completed` bedeutet, dass der Auftrag beendet ist, nicht dass ein Test bestanden wurde. Der Lifecycle berücksichtigt fachliche Blocker, laufende Teilaufträge sowie die passende Revision und den Fingerprint eines Browserlaufs. Ein späterer direkter Lauf kann einen älteren abgeschlossenen Auftrag ablösen. Eine gescheiterte optionale Wiederverwendungsanalyse verändert einen bereits belegten Browsererfolg nicht. Ältere gespeicherte Aufträge ohne zusätzliche Beziehungsfelder bleiben lesbar.
 
