@@ -1009,7 +1009,6 @@
         "label": "Benutzerrolle",
         "type": "choice",
         "required": true,
-        "default": "Vermittler",
         "options": [
           {
             "value": "Vermittler",

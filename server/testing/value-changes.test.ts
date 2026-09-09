@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { TestingCatalog, TestingScenario } from '../../shared/testing';
+import { createTestingInstance } from '../../shared/testing';
 import { flattenBlocks } from '../../src/testing/model';
 import { buildValueChanges, changesWithin } from '../../src/testing/valueChanges';
 
@@ -49,4 +50,18 @@ test('Materialisierte Kinder werden gegen den unveränderten Definitionskörper 
   assert.equal(result[0].field, 'state');
   assert.equal(result[0].before, 'Niedersachsen');
   assert.equal(result[0].after, 'Bayern');
+});
+
+test('Eine ausdrückliche Benutzerrolle ist sichtbar, ein passender Standardwert bleibt ausgeblendet', () => {
+  const roleDefinition = catalog.definitions.find(item => item.id === 'rolle.als')!;
+  const customerDefinition = catalog.definitions.find(item => item.id === 'kunde.anlegen')!;
+  const role = createTestingInstance(roleDefinition, 'rolle');
+  const customer = createTestingInstance(customerDefinition, 'kunde');
+  role.inputs.role = 'Sachbearbeiter';
+  role.children = [customer];
+  const changes = buildValueChanges(flattenBlocks([role], catalog), catalog).changes;
+  assert.equal(roleDefinition.inputs[0].default, undefined);
+  assert.deepEqual(createTestingInstance(roleDefinition, 'neue-rolle').inputs, {});
+  assert.equal(changes.find(change => change.path === 'rolle' && change.field === 'role')?.after, 'Sachbearbeiter');
+  assert.equal(changes.some(change => change.path === 'rolle/kunde' && change.field === 'name'), false);
 });

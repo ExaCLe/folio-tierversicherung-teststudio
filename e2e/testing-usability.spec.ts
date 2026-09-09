@@ -362,6 +362,19 @@ test('Abweichungen zeigen wirksame Workflowwerte und klappen geänderte Schritte
   expect(await readScenario(request, current.id)).toEqual(saved);
 });
 
+test('Eine neue Benutzerrolle bleibt leer und eine gewählte Rolle steht sichtbar im Scratch-Block', async ({ page, request }) => {
+  const current = await fixture(request, value => { value.blocks = []; });
+  await openOutline(page, current);
+  await chooseBlock(page, 'Als Benutzerrolle');
+  const role = page.locator('#testing-value-role');
+  await expect(role).toHaveValue('');
+  await expect(role.locator('option:checked')).toHaveText('Bitte wählen');
+  await role.selectOption('Vermittler');
+  const roleBlock = page.locator('.t-scratch-workspace g.blocklyDraggable').filter({ hasText: 'Als Benutzerrolle' }).first();
+  await expect(roleBlock).toContainText('Benutzerrolle');
+  await expect(roleBlock).toContainText('Vermittler');
+});
+
 test('Ein abgekoppelter Scratch-Block behält eigene Werte bei fremder Feldänderung und erneutem Andocken', async ({ page, request }, testInfo) => {
   const parkedValues = { name: 'Geparkte Kundin', email: 'geparkt@example.test', phone: '030 1234567' };
   const current = await fixture(request, value => {

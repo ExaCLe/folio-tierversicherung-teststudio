@@ -187,7 +187,8 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
     const resolved=resolveOuter(value,outerValues);let hasReference=false;values(resolved,v=>{if(isTestingReference(v))hasReference=true;});
     // The library default belongs to the new definition. Only its replacement instance may still refer to the old parent context.
     const {default:_previousDefault,...inputSchema}=clone(schema);
-    inputs.push({...inputSchema,key:parameter.key,label:parameter.label,...(!hasReference?{default:resolved}:{}),...(hasReference?{required:true}:{})});replacementInputs[parameter.key]=clone(value);block.inputs[parameter.input]={param:parameter.key};
+    const needsExplicitValue=hasReference||schema.default===undefined;
+    inputs.push({...inputSchema,key:parameter.key,label:parameter.label,...(!needsExplicitValue?{default:resolved}:{}),...(needsExplicitValue?{required:true}:{})});replacementInputs[parameter.key]=clone(value);block.inputs[parameter.input]={param:parameter.key};
   }
   const localAliases=new Map<string,{key:string;type:TestingBlockDefinition['outputs'][number]['type']}>();
   const knownAliases=new Map<string,TestingBlockDefinition['outputs'][number]['type']>();
@@ -202,7 +203,8 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
     const schema=outerSchemas.get(v.param);if(!schema||!Object.hasOwn(outerValues,v.param))throw new TestingModelError(`Der äußere Parameter „${v.param}“ muss vor der Wiederverwendung ausdrücklich belegt werden.`);
     const resolved=resolveOuter(outerValues[v.param],outerValues);let hasReference=false;values(resolved,item=>{if(isTestingReference(item))hasReference=true;});
     const {default:_previousDefault,...inputSchema}=clone(schema);
-    inputs.push({...inputSchema,key:v.param,...(!hasReference?{default:resolved}:{}),...(hasReference?{required:true}:{})});replacementInputs[v.param]={param:v.param};
+    const needsExplicitValue=hasReference||schema.default===undefined;
+    inputs.push({...inputSchema,key:v.param,...(!needsExplicitValue?{default:resolved}:{}),...(needsExplicitValue?{required:true}:{})});replacementInputs[v.param]={param:v.param};
   });
   // References supplied by the surrounding flow become required workflow parameters.
   for(const block of flatten(body)) for(const value of Object.values(block.inputs)) values(value,v=>{

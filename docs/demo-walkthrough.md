@@ -94,7 +94,7 @@ Der erste Beispieltest soll bei einer offenen Direktionsanfrage enden. Ein autom
 4. Ergänze fehlende Blöcke oder lasse die KI den gesamten Ablauf anhand einer neuen Anweisung überarbeiten.
 5. Speichere deine Änderungen und gib den fachlichen Stand ausdrücklich frei. Danach startet die technische Vorbereitung automatisch.
 
-Der Scratch-Block zeigt seine wirksamen Abweichungen direkt als benannte Werte. Unveränderte Standardwerte bleiben dort ausgeblendet; in den Eigenschaften lassen sie sich weiterhin ansehen und ändern. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
+Der Scratch-Block zeigt seine wirksamen Abweichungen direkt als benannte Werte. Unveränderte Standardwerte bleiben dort ausgeblendet; in den Eigenschaften lassen sie sich weiterhin ansehen und ändern. Werte ohne fachlich sinnvollen Standard, etwa die Benutzerrolle, stehen ausdrücklich im Block. Die Auswahl einer Ergebnisquelle nennt den früheren Schritt, der beispielsweise einen Vorschlag erzeugt hat. Du musst dafür keine interne Kennung kennen.
 
 Lose Scratch-Stapel gehören nicht zum ausführbaren Ablauf. Verbinde benötigte Schritte mit der Startkette. Das Layout selbst legt keine fachliche Reihenfolge fest.
 

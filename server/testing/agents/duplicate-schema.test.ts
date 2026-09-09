@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TestingBlockDefinition, TestingCatalog, TestingCompiledScenario } from '../../../shared/testing';
-import { decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA } from './schemas';
+import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA } from './schemas';
 import { validateDuplicateReview } from './reviews';
 import { duplicateReviewContext } from './duplicate-context';
 import { duplicatePrompt } from './prompts';
@@ -96,4 +96,16 @@ test('Technische Lücken liefern genaue Revisionsdaten statt einer bloßen Meldu
   assert.deepEqual(decoded.unsupported,[issue]);
   assert.equal(TECHNICAL_SCHEMA.properties.unsupported.items.properties.blockPaths.minItems,1);
   assert.throws(()=>decodeTechnicalPlan({explanation:'Zu ungenau.',reuseBindings:[],newBindings:[],unsupported:['HTTP fehlt']}));
+});
+
+test('Das Agentenschema erlaubt ausdrücklich Definitionseingaben ohne Standardwert', () => {
+  const defaultSchema = BUSINESS_SCHEMA.properties.newDefinitions.items.properties.inputs.items.properties.defaultJson;
+  assert(defaultSchema.anyOf.some((branch: any) => branch.type === 'null'));
+  const draft = decodeBusinessDraft({
+    title: 'Rollenwahl', expectedOutcome: 'Die gewählte Rolle ist sichtbar.', blocks: [], knowledgeRefs: [], explanation: '', assumptions: [], openQuestions: [], matrix: null,
+    newDefinitions: [{ id: 'fixture.rolle', version: '1.0.0', name: 'Als Rolle', description: '', kind: 'context', category: 'Ablauf', semanticKey: 'execution.actor',
+      inputs: [{ key: 'role', label: 'Rolle', type: 'choice', required: true, defaultJson: null, description: '', options: [{ value: 'Sachbearbeiter', label: 'Sachbearbeiter' }], fieldsJson: '[]', minimum: null, maximum: null, extensible: false }],
+      outputs: [], knowledgeRefs: [], preconditions: [], postconditions: [], operation: null, bindingId: null, body: [], exports: [] }], newKnowledge: [],
+  });
+  assert.equal(draft.newDefinitions[0].inputs[0].default, undefined);
 });

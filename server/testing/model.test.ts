@@ -170,6 +170,20 @@ test('Explizit umbenannte Parameter eines inneren Workflows erhalten eigenständ
   assert.deepEqual(repository.getTestingScenario(s.id),s);
 });
 
+test('Promotion macht einen ursprünglich defaultlosen Rollenwert nicht zum versteckten Standard',()=>{
+  const original=clone(seeds()[0]);
+  original.blocks=[{...inst('rolle','rolle.als',{role:'Vermittler'}),children:[inst('kunde','kunde.anlegen')]}];
+  const saved=repository.saveTestingScenario({...original,id:'defaultlose-rolle-promotion'},0);
+  const promoted=repository.promoteTestingBlocks({scenarioId:saved.id,expectedRevision:saved.revision,instanceIds:['rolle'],name:'Kunde in gewählter Rolle',description:'Legt einen Kunden in der ausdrücklich gewählten Rolle an.',parameters:[
+    {key:'rolle',label:'Benutzerrolle',instanceId:'rolle',input:'role'},
+  ],replaceSelection:true});
+  const input=promoted.definition.inputs.find(item=>item.key==='rolle')!;
+  assert.equal(input.required,true);assert.equal(input.default,undefined);
+  assert.equal(promoted.scenario.blocks[0].inputs.rolle,'Vermittler');
+  const standalone:TestingScenario={...saved,id:'defaultlose-rolle-standalone',blocks:[inst('neu',promoted.definition.id)]};
+  assert(compileTestingScenario(standalone,getTestingCatalog()).issues.some(issue=>issue.code==='INPUT_REQUIRED'&&issue.field==='rolle'));
+});
+
 test('Referenztypfehler nennen Zielblock, Feld, deutsche Ergebnisart und tatsächliche verschachtelte Quelle',()=>{
   const c=catalog(),s=clone(seeds()[0]);
   const customer={...inst('kunde','kunde.anlegen',{}, {customer:'kunde'}),label:'Mein Prüfkunde'};

@@ -126,7 +126,8 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
         for(const [overridePath,values] of Object.entries(overrides)) if(overridePath.startsWith(`${block.id}/`)) childOverrides[overridePath.slice(block.id.length+1)]={...childOverrides[overridePath.slice(block.id.length+1)],...values};
         const body=block.children??definition.body??[];
         if(!body.length) issue('COMPOSITION_EMPTY',`„${definition.name}“ enthält noch keine Schritte.`,block,path);
-        walk(body,path,definition.kind==='workflow'?inputs:params,childScope,definition.kind==='context'?String(inputs.role??actor):actor,[...ancestors,path],[...active,key],childOverrides);
+        const childActor=definition.kind==='context'?(typeof inputs.role==='string'?inputs.role:''):actor;
+        walk(body,path,definition.kind==='workflow'?inputs:params,childScope,childActor,[...ancestors,path],[...active,key],childOverrides);
         for(const overridePath of Object.keys(childOverrides)) if(!body.some(child=>child.id===overridePath.split('/')[0])) issue('OVERRIDE_TARGET',`Die lokale Änderung verweist auf den fehlenden Block „${overridePath}“.`,block,path);
         if(definition.kind==='context') { for(const [name,ref] of childScope) if(!scope.has(name)) scope.set(name,ref); }
         else for(const output of definition.outputs) {

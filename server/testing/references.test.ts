@@ -59,6 +59,15 @@ test('Rollenbereiche übernehmen nur neue Aliasse, Workflow-Ausgänge erst nach 
   assert.equal(referenceChoices(workflowIndex, 'workflow/kunde').some(source => source.value === 'workflow.customer'), false);
 });
 
+test('Ein Rollenbereich ohne ausdrückliche Rolle ist ungültig und erbt keinen Vermittler', () => {
+  const role = block('rolle', 'rolle.als');
+  role.children = [block('kunde', 'kunde.anlegen')];
+  const compiled = compileTestingScenario({ ...structuredClone(seeds[0]), blocks: [role] }, catalog);
+  assert(compiled.issues.some(issue => issue.code === 'INPUT_REQUIRED' && issue.path === 'rolle' && issue.field === 'role'));
+  assert.equal(compiled.valid, false);
+  assert.equal(compiled.steps[0].actor, '');
+});
+
 test('Globale Parameter, lokale Änderungen und Listen liefern verständliche Namen ohne Mutationen', () => {
   const blocks = [block('kunde', 'kunde.anlegen', { name: { param: 'name' } }, { customer: 'kunde' }), block('betrieb', 'betrieb.anlegen', { customerId: { param: 'kundeParam' } }), block('workflow', 'ablauf.kuh-vorschlag')];
   blocks[2].overrides = { kunde: { name: 'Geänderter Name' } };
