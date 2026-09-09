@@ -111,6 +111,12 @@ export function activityModel(job: TrackedJob, related: TrackedJob[]) {
     const history = records(job);
     stages = history.length ? historyStages(job, history) : [activityStage(job.stage ?? job.phase, job, currentState(job))];
   }
+  // Keep the initial checklist in place and append subsequent attempts.
+  // Saved attempt records and their event intervals remain untouched.
+  const reruns = stages.filter(stage => stage.attempt > 1)
+    .sort((a, b) => (a.workStage?.startedAt ?? a.workStage?.finishedAt ?? '')
+      .localeCompare(b.workStage?.startedAt ?? b.workStage?.finishedAt ?? ''));
+  stages = [...stages.filter(stage => stage.attempt === 1), ...reruns];
   const active = stages.filter(item => item.state === 'running' && item.job?.status === 'running' && !['validating', 'running'].includes(item.id));
   const activeJobs = [...new Map(active.map(item => [item.job!.id, item.job!])).values()];
   const current = stages.filter(item => item.state === 'running');

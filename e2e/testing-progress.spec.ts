@@ -201,3 +201,55 @@ test('Zeitlimit und historischer falscher Abbruch bleiben verständlich und beha
   expect(recovery.y - notice.y - notice.height).toBeGreaterThanOrEqual(10);
   await page.screenshot({ path: shot('zeitlimit-fortsetzen.png') });
 });
+
+for (const phase of ['business', 'technical'] as const) {
+  test(`${phase}: Wiederholungen werden unten als eigene Zeilen angehängt`, async ({ page, request }) => {
+    const current = await scenario(request, phase === 'business');
+    const first = phase === 'business' ? 'knowledge' : 'wiring';
+    const next = phase === 'business' ? 'exploring' : 'running';
+    const at = (second: number) => `2026-09-09T10:00:${String(second).padStart(2, '0')}.000Z`;
+    const parent = job(current, { phase, stage: next, workStages: [
+      { stage: first, status: 'completed', startedAt: at(0), finishedAt: at(1), summary: 'Ergebnis des ersten Versuchs.' },
+      { stage: next, status: 'running', startedAt: at(2) },
+    ] });
+    const state = { jobs: [parent] };
+    await transport(page, state);
+    await page.goto(`/testing/editor/${current.id}`);
+    const rows = activity(page).locator('.t-agent-stages > li');
+    await expect(rows).toHaveCount(phase === 'business' ? 4 : 3);
+    const initialCount = await rows.count();
+    const initialOrder = await rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-stage')));
+    state.jobs = [{ ...parent, stage: first, workStages: [
+      parent.workStages![0], { ...parent.workStages![1], status: 'completed', finishedAt: at(3) },
+      { stage: first, status: 'running', startedAt: at(4), summary: 'Ergebnis des zweiten Versuchs.' },
+    ] }];
+    await expect(rows).toHaveCount(initialCount + 1, { timeout: 15_000 });
+    expect(await rows.evaluateAll(elements => elements.map(element => element.getAttribute('data-stage')))).toEqual([...initialOrder, first]);
+    await expect(rows.last()).toContainText('Überarbeitung');
+    await expect(rows.last()).toHaveAttribute('data-state', 'running');
+    await expect(rows.first()).toHaveAttribute('data-state', 'completed');
+    await rows.first().getByRole('button').click();
+    await expect(page.getByRole('dialog')).toContainText('Ergebnis des ersten Versuchs.');
+    await expect(page.getByRole('dialog')).not.toContainText('Ergebnis des zweiten Versuchs.');
+    await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+    await rows.last().getByRole('button').click();
+    await expect(page.getByRole('dialog')).toContainText('Ergebnis des zweiten Versuchs.');
+    await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+    await page.reload();
+    await expect(rows).toHaveCount(initialCount + 1);
+    await expect(rows.last()).toContainText('Überarbeitung');
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const boxes = await rows.evaluateAll(elements => elements.map(element => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      }));
+      for (let index = 1; index < boxes.length; index++) {
+        expect(boxes[index].x).toBeCloseTo(boxes[0].x, 0);
+        expect(boxes[index].width).toBeCloseTo(boxes[0].width, 0);
+        expect(boxes[index].y).toBeGreaterThanOrEqual(boxes[index - 1].y + boxes[index - 1].height);
+      }
+      await page.screenshot({ path: shot(`${phase}-rows-${width}.png`), fullPage: true });
+    }
+  });
+}
