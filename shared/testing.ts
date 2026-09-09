@@ -148,7 +148,7 @@ export interface TestingImpact {
   suggestedScenarioIds: string[];
 }
 export type TestingAgentPhase = 'business' | 'naming' | 'exploration' | 'technical' | 'duplicates' | 'reuse';
-export type TestingAgentStage = 'naming' | 'knowledge' | 'exploring' | 'planning' | 'validating' | 'duplicates' | 'wiring' | 'running' | 'reuse';
+export type TestingAgentStage = 'naming' | 'knowledge' | 'exploring' | 'planning' | 'validating' | 'revising' | 'duplicates' | 'wiring' | 'running' | 'reuse';
 export interface TestingAgentTermination {
   cause:'user_cancelled'|'parent_cancelled'|'time_limit'|'action_limit'|'no_progress'|'server_restart'|'output_limit'|'interrupted';
   message:string; at:string; limitMs?:number;
@@ -163,6 +163,8 @@ export interface TestingExplorationQuestion {
 }
 export interface TestingAgentWorkStage {
   stage:TestingAgentStage; status:'running'|'completed'|'skipped'|'failed'; startedAt?:string; finishedAt?:string; summary?:string;
+  /** Re-entering a stage appends another attempt instead of replacing its history. */
+  attempt?:number;
 }
 export interface TestingScenarioLifecycle {
   scenarioId:string; scenarioRevision:number; fingerprint:string;
