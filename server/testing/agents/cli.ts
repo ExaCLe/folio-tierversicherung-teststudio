@@ -6,6 +6,7 @@ import { basename, resolve } from 'node:path';
 import type { TestingAgentConfiguration, TestingAgentEvent, TestingModel } from '../../../shared/testing';
 
 import { DEFAULT_CODEX_MODELS, providerExecutable, resolveAgentConfiguration, validateExtraArgs } from './settings';
+import { resolveAgentProcessEnvironment, resolveAgentProcessLaunch } from './process-launch';
 import { AgentTerminationError, agentAbortError } from './termination';
 
 export const CODEX_MODELS = DEFAULT_CODEX_MODELS;
@@ -141,8 +142,11 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   await writeFile(resolve(directory, 'schema.json'), JSON.stringify(input.schema, null, 2), { mode: 0o600 });
   const sessionId = randomUUID();
   const args = buildAgentArguments(configuration, directory, input.schema, sessionId);
+  let launch;
+  try { launch = resolveAgentProcessLaunch(configuration.executable, args); }
+  catch (cause) { throw new Error(`${providerName} konnte nicht gestartet werden: ${cause instanceof Error ? cause.message : String(cause)}`); }
   await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ id: input.id, model: configuration.modelSlug, provider: configuration.provider, modelId: configuration.modelId,
-    modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, args,
+    modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, launchExecutable: launch.executable, args,
     contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs: codexTimeout() }, null, 2), { mode: 0o600 });
   let queuedWrites = Promise.resolve();
   function publish(value: Pick<TestingAgentEvent, 'kind' | 'message'>) {
@@ -166,9 +170,9 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   };
   if (input.signal?.aborted) throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');
   await new Promise<void>((done, reject) => {
-    const child = spawn(configuration.executable, args, { cwd: directory, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: { ...process.env } });
+    const child = spawn(launch.executable, launch.args, { cwd: directory, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: resolveAgentProcessEnvironment(configuration.provider) });
     processes.set(input.id, child);
-    if (child.pid) writeFileSync(resolve(directory, 'process.json'), JSON.stringify({ pid: child.pid, ownerPid: process.pid, startedAt: new Date().toISOString(), provider: configuration.provider, executable: configuration.executable, ...(configuration.provider === 'claude' ? { sessionId } : {}) }), { mode: 0o600 });
+    if (child.pid) writeFileSync(resolve(directory, 'process.json'), JSON.stringify({ pid: child.pid, ownerPid: process.pid, startedAt: new Date().toISOString(), provider: configuration.provider, executable: launch.executable, ...(configuration.provider === 'claude' ? { sessionId } : {}) }), { mode: 0o600 });
     let buffer = '', stderr = '', size = 0, overflow = false;
     let stopped:AgentTerminationError|undefined;
     const cancel = () => { stopped ??= agentAbortError(input.signal); killTree(child); };

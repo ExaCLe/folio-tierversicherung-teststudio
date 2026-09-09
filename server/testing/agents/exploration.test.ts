@@ -86,6 +86,7 @@ test('Künstliche CLI-Aktionen erkunden die echte isolierte Portaloberfläche mi
   assert.match(result.evidence.at(-1)!.snapshot,/disabled/);
   assert.equal(result.newKnowledge.length,1);assert.match(result.newKnowledge[0].content,/beleg-011/);
   assert(existsSync(join(directory,'agents/browser-fixture/exploration-011.png')));
+  assert.equal(result.evidence[0].screenshot,'/api/testing/jobs/browser-fixture/artifacts/exploration-001.png');
   assert.match(result.evidence[9].snapshot,/Kunde wurde gespeichert|Kunde gespeichert|KU-/);
   assert.equal(readFileSync(database,'utf8'),before,'Parent-Datenbank bleibt unverändert.');
   assert.equal(catalog.knowledge.length,1,'Gemeinsamer Katalog wird nicht verändert.');
