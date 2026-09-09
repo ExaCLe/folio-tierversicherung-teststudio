@@ -21,6 +21,7 @@ export interface CodexInvocation {
   files: Record<string, string>; signal?: AbortSignal;
   onEvent?: (event: TestingAgentEvent) => void;
   agentConfig?: TestingAgentConfiguration;
+  disableTimeout?: boolean;
 }
 export interface CodexResult { value: unknown; directory: string; model: string; contextHash: string; provider?: 'codex' | 'claude'; }
 
@@ -125,6 +126,7 @@ export async function invokeCodex(input: CodexInvocation): Promise<CodexResult> 
 }
 async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult> {
   const configuration = input.agentConfig ?? resolveAgentConfiguration(input.model);
+  const timeoutMs = input.disableTimeout ? 0 : codexTimeout();
   const providerName = configuration.provider === 'claude' ? 'Claude Code' : 'Codex';
   if (!/^[a-zA-Z0-9_-]+$/.test(input.id)) throw new Error('Ungültige Agentenlauf-ID.');
   if (input.signal?.aborted) throw agentAbortError(input.signal);
@@ -147,7 +149,7 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   catch (cause) { throw new Error(`${providerName} konnte nicht gestartet werden: ${cause instanceof Error ? cause.message : String(cause)}`); }
   await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ id: input.id, model: configuration.modelSlug, provider: configuration.provider, modelId: configuration.modelId,
     modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, launchExecutable: launch.executable, args,
-    contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs: codexTimeout() }, null, 2), { mode: 0o600 });
+    contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs }, null, 2), { mode: 0o600 });
   let queuedWrites = Promise.resolve();
   function publish(value: Pick<TestingAgentEvent, 'kind' | 'message'>) {
     const event = { id: randomUUID(), at: new Date().toISOString(), ...value };
@@ -177,7 +179,7 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
     let stopped:AgentTerminationError|undefined;
     const cancel = () => { stopped ??= agentAbortError(input.signal); killTree(child); };
     input.signal?.addEventListener('abort', cancel, { once: true });
-    const timer = setTimeout(() => { stopped ??= new AgentTerminationError('time_limit',`${providerName} hat das Zeitlimit von ${Math.round(codexTimeout() / 1000)} Sekunden überschritten.`,codexTimeout()); killTree(child); }, codexTimeout());
+    const timer = timeoutMs > 0 ? setTimeout(() => { stopped ??= new AgentTerminationError('time_limit',`${providerName} hat das Zeitlimit von ${Math.round(timeoutMs / 1000)} Sekunden überschritten.`,timeoutMs); killTree(child); }, timeoutMs) : undefined;
     child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       size += chunk.length;

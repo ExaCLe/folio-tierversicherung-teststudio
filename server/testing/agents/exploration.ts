@@ -9,7 +9,7 @@ import { reviewWithCodex } from './reviews';
 import { AgentTerminationError, agentAbortError } from './termination';
 import { startPortalSandbox, type PortalSandbox } from './portal-sandbox';
 
-const LIMIT_ACTIONS = 32, LIMIT_MS = 360_000;
+const LIMIT_ACTIONS = 32;
 const HISTORY_BUDGET = 60_000;
 const roles = ['button', 'link', 'textbox', 'combobox', 'checkbox', 'radio', 'spinbutton', 'tab'] as const;
 type TargetRole = typeof roles[number];
@@ -87,10 +87,10 @@ function evidenceExcerpt(snapshot: string, budget: number, terms: string[]) {
   return { snapshot: [...selected].sort((a, b) => a - b).map(index => lines[index]).join('\n'), snapshotTruncated: true };
 }
 
-export function explorationCompletion(evidence: ExplorationEvidence[], gaps: string[], round: number, remainingMs = LIMIT_MS) {
+export function explorationCompletion(evidence: ExplorationEvidence[], gaps: string[], round: number) {
   const current = evidence.at(-1);
   const repeatedStateIds = current ? evidence.filter(item => item.path === current.path && item.snapshot === current.snapshot).map(item => item.id) : [];
-  const reason = !current ? undefined : round >= LIMIT_ACTIONS ? 'action_limit' : remainingMs <= 45_000 ? 'time_limit'
+  const reason = !current ? undefined : round >= LIMIT_ACTIONS ? 'action_limit'
     : repeatedStateIds.length >= 3 ? 'no_progress' : !gaps.length ? 'no_open_gaps' : undefined;
   return { finishRequired: !!reason, reason: reason ?? null, repeatedStateIds,
     instruction: reason ? 'Jetzt vorhandene Beobachtungen auswerten und decision:finish liefern. Nur belegte findings mit Beleg-IDs übernehmen. Noch nicht beantwortete Teile der Anforderung ausdrücklich in gaps benennen; keine weitere Browseraktion.'
@@ -99,7 +99,7 @@ export function explorationCompletion(evidence: ExplorationEvidence[], gaps: str
 
 /** The essential context travels over stdin, independent of provider read tools.
  * Full audit files remain available, but no tool call is required to act. */
-export function explorationPromptContext(request: string, catalog: TestingCatalog, round: number, gaps: string[], evidence: ExplorationEvidence[], remainingMs = LIMIT_MS, questions: TestingExplorationQuestion[] = []) {
+export function explorationPromptContext(request: string, catalog: TestingCatalog, round: number, gaps: string[], evidence: ExplorationEvidence[], questions: TestingExplorationQuestion[] = []) {
   const terms = [...new Set(`${request} ${gaps.join(' ')}`.toLocaleLowerCase('de').match(/[\p{L}\p{N}]{4,}/gu) ?? [])];
   const score = (value: unknown) => { const content = JSON.stringify(value).toLocaleLowerCase('de'); return terms.reduce((sum, term) => sum + Number(content.includes(term)), 0); };
   function select<T>(items: T[], budget: number) {
@@ -119,8 +119,8 @@ export function explorationPromptContext(request: string, catalog: TestingCatalo
     preconditions: definition.preconditions, postconditions: definition.postconditions,
   })), 25_000);
   const previous = evidence.slice(0, -1), historyPerObservation = Math.min(6000, Math.floor(HISTORY_BUDGET / Math.max(1, previous.length)));
-  return { request, round, browserOpen: evidence.length > 0, remainingActions: Math.max(0, LIMIT_ACTIONS - round), remainingMs, gaps, questions,
-    completion: explorationCompletion(evidence, gaps, round, remainingMs),
+  return { request, round, browserOpen: evidence.length > 0, remainingActions: Math.max(0, LIMIT_ACTIONS - round), gaps, questions,
+    completion: explorationCompletion(evidence, gaps, round),
     knowledgeIndex: [...latest.values()].map(doc => ({ id: doc.id, revision: doc.revision, title: doc.title, summary: doc.summary.slice(0, 300), summaryTruncated: doc.summary.length > 300 })),
     knowledge: knowledge.rows, definitions: definitions.rows,
     coverage: { omittedKnowledgeDocuments: knowledge.omitted, omittedDefinitions: definitions.omitted,
@@ -165,7 +165,7 @@ export async function explorationTargets(page: Page, snapshot: string, id: strin
 
 async function observe(page: Page, id: string, directory: string, action: string, origin: string, error?: string): Promise<ExplorationEvidence> {
   const number = id.split('-').at(-1)!;
-  const snapshot = (await page.locator('body').ariaSnapshot({ timeout: 5000 })).slice(0, 20_000);
+  const snapshot = (await page.locator('body').ariaSnapshot({ timeout: 0 })).slice(0, 20_000);
   const targets = await explorationTargets(page, snapshot, id);
   const paths = new Set<string>(['/portal']);
   for (const link of await page.getByRole('link').all()) {
@@ -174,7 +174,7 @@ async function observe(page: Page, id: string, directory: string, action: string
     if (url.origin === origin && /^\/portal(?:\/|$)/.test(url.pathname)) paths.add(`${url.pathname}${url.search}`);
   }
   const filename = `exploration-${number}.png`;
-  await page.screenshot({ path: resolve(directory, filename), fullPage: true, timeout: 5000 });
+  await page.screenshot({ path: resolve(directory, filename), fullPage: true, timeout: 0 });
   const url = new URL(page.url());
   const evidence: ExplorationEvidence = { id, action, path: `${url.pathname}${url.search}`, snapshot,
     screenshot: `/api/testing/jobs/${encodeURIComponent(basename(directory))}/artifacts/${filename}`, observedAt: new Date().toISOString(), targets, paths: [...paths], ...(error ? { error } : {}) };
@@ -189,7 +189,7 @@ export async function performExplorationAction(page: Page, raw: unknown, observa
     if (!action.path || !observation.paths.includes(action.path)) throw new Error('Diese Portalseite wurde nicht in der aktuellen Beobachtung angeboten.');
     const url = new URL(action.path, origin);
     if (!explorationRequestAllowed(url.href, origin) || !/^\/portal(?:\/|$)/.test(url.pathname)) throw new Error('Die Zielseite liegt außerhalb der isolierten Anwendung.');
-    await page.goto(url.href, { waitUntil: 'networkidle', timeout: 10_000 }); return;
+    await page.goto(url.href, { waitUntil: 'networkidle', timeout: 0 }); return;
   }
   const target = observation.targets.find(item => item.id === action.targetId);
   if (!target) throw new Error('Das Ziel stammt nicht aus der aktuellen Browserbeobachtung.');
@@ -200,20 +200,19 @@ export async function performExplorationAction(page: Page, raw: unknown, observa
   const ended = (request: import('@playwright/test').Request) => { pending.delete(request); };
   page.on('request', started); page.on('requestfinished', ended); page.on('requestfailed', ended);
   try {
-    if (action.op === 'click') await found.click({ timeout: 5000 });
-    else if (action.op === 'fill') { if (!['textbox', 'spinbutton'].includes(target.role) || action.value === null) throw new Error('Nur beobachtete Eingabefelder können ausgefüllt werden.'); await found.fill(action.value, { timeout: 5000 }); }
-    else if (action.op === 'select') { if (target.role !== 'combobox' || action.value === null) throw new Error('Nur beobachtete Auswahllisten können ausgewählt werden.'); await found.selectOption({ label: action.value }, { timeout: 5000 }); }
-    else if (action.op === 'check') { if (!['checkbox', 'radio'].includes(target.role) || action.checked === null) throw new Error('Nur beobachtete Kontrollfelder können gesetzt werden.'); await found.setChecked(action.checked, { timeout: 5000 }); }
+    if (action.op === 'click') await found.click({ timeout: 0 });
+    else if (action.op === 'fill') { if (!['textbox', 'spinbutton'].includes(target.role) || action.value === null) throw new Error('Nur beobachtete Eingabefelder können ausgefüllt werden.'); await found.fill(action.value, { timeout: 0 }); }
+    else if (action.op === 'select') { if (target.role !== 'combobox' || action.value === null) throw new Error('Nur beobachtete Auswahllisten können ausgewählt werden.'); await found.selectOption({ label: action.value }, { timeout: 0 }); }
+    else if (action.op === 'check') { if (!['checkbox', 'radio'].includes(target.role) || action.checked === null) throw new Error('Nur beobachtete Kontrollfelder können gesetzt werden.'); await found.setChecked(action.checked, { timeout: 0 }); }
     // SPA mutations do not start a navigation. An already reached loadstate
     // would return immediately while the request and React render still run.
-    let previous = ''; const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
+    let previous = '';
+    while (true) {
       await page.waitForTimeout(100);
-      const snapshot = await page.locator('body').ariaSnapshot({ timeout: 1000 });
+      const snapshot = await page.locator('body').ariaSnapshot({ timeout: 0 });
       if (!pending.size && snapshot === previous) return;
       previous = pending.size ? '' : snapshot;
     }
-    throw new Error('Die Anwendung hat nach der Aktion noch keinen stabilen sichtbaren Zustand erreicht.');
   } finally { page.off('request', started); page.off('requestfinished', ended); page.off('requestfailed', ended); }
 }
 
@@ -226,8 +225,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
   const controller = new AbortController();
   const abort = () => controller.abort(agentAbortError(input.signal)); input.signal?.addEventListener('abort', abort, { once: true });
   if (input.signal?.aborted) abort();
-  const startedAt = new Date().toISOString(), deadlineAt = new Date(Date.now() + LIMIT_MS).toISOString();
-  const timeout = setTimeout(() => controller.abort(new AgentTerminationError('time_limit', 'Die Anwendungserkundung hat ihr Zeitlimit von sechs Minuten erreicht.', LIMIT_MS)), LIMIT_MS);
+  const startedAt = new Date().toISOString();
   const directory = resolve(AGENT_ARTIFACTS_ROOT, input.id);
   const evidence: ExplorationEvidence[] = [];
   let sandbox: PortalSandbox | undefined, browser: Browser | undefined, page: Page | undefined;
@@ -236,7 +234,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
   const knowledge = input.catalog.knowledge.filter(item => item.kind !== 'technical');
   let gaps: string[] = [], explanation = '', knowledgeIds: string[] = [], round = 0, questions: TestingExplorationQuestion[] = [];
   const progress = (status: TestingAgentProgress['status'], summary: string) => input.onProgress?.({ stage: page ? 'exploring' : 'knowledge',
-    status, round, observationCount: evidence.length, actionLimit: LIMIT_ACTIONS, startedAt, deadlineAt, summary, questions: structuredClone(questions) });
+    status, round, observationCount: evidence.length, actionLimit: LIMIT_ACTIONS, startedAt, summary, questions: structuredClone(questions) });
   const finish = async (newKnowledge: TestingKnowledgeDocument[], openQuestions: string[], termination?: TestingAgentTermination): Promise<ExplorationResult> => {
     const result = { catalog: { ...input.catalog, knowledge: [...input.catalog.knowledge, ...newKnowledge] }, newKnowledge, evidence, openQuestions: [...new Set([...openQuestions, ...questions.filter(question => question.status === 'open').map(question => question.text)])], explored: evidence.length > 0, explanation, knowledgeIds, questions, ...(termination ? { termination } : {}) };
     await writeFile(resolve(directory, 'exploration-result.json'), JSON.stringify({ ...result, catalog: undefined }, null, 2));
@@ -248,7 +246,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
     input.onStage?.('knowledge'); event('Vorhandenes Fachwissen wird auf die Anforderung geprüft.');
     for (round = 0; round <= LIMIT_ACTIONS; round++) {
       if (controller.signal.aborted) throw agentAbortError(controller.signal);
-      const inlineContext = explorationPromptContext(input.request, input.catalog, round, gaps, evidence, Date.parse(deadlineAt) - Date.now(), questions);
+      const inlineContext = explorationPromptContext(input.request, input.catalog, round, gaps, evidence, questions);
       if (JSON.stringify(inlineContext).length > 200_000) {
         explanation = 'Der Wissensstand ist für eine vollständige begrenzte Kontextprüfung zu umfangreich.';
         return await finish([], [...gaps, 'Bitte die Anforderung enger eingrenzen oder die benötigten Wissensbelege ausdrücklich benennen. Es wurde kein vollständiger Wissensvergleich behauptet.']);
@@ -257,7 +255,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
       let reply: z.infer<typeof replyParser>;
       try {
       ({ parsed: reply } = await reviewWithCodex({ id: `${input.id}-observation-${round}`, model: input.model, signal: controller.signal, onEvent: input.onEvent,
-        label: 'Wissenserkundung',
+        label: 'Wissenserkundung', disableTimeout: true,
         validate: raw => {
           const parsed = replyParser.safeParse(raw);
           if (!parsed.success) throw new Error(`Die Erkundungsantwort passt nicht zum Vertrag:\n${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('\n')}`);
@@ -285,7 +283,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
       } catch (cause) {
         if (inlineContext.completion.finishRequired && cause instanceof Error && cause.message.startsWith('Wissenserkundung: Auch die KI-Korrektur')) {
           explanation = 'Das Modell hat die angeforderte abschließende Auswertung auch nach einer Korrektur nicht gültig geliefert.';
-          const reason = inlineContext.completion.reason === 'time_limit' ? 'time_limit' : inlineContext.completion.reason === 'action_limit' ? 'action_limit' : 'no_progress';
+          const reason = inlineContext.completion.reason === 'action_limit' ? 'action_limit' : 'no_progress';
           return await finish([], [...gaps, 'Die vorhandenen Beobachtungen müssen noch zu einer belegten Antwort auf die Anforderung ausgewertet werden.'], new AgentTerminationError(reason, explanation).termination);
         }
         throw cause;
@@ -312,14 +310,15 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
         if (reply.decision !== 'explore' || !gaps.length || reply.action || reply.findings.length) throw new Error('Vor der Browseröffnung muss eine konkrete Wissenslücke benannt werden.');
         input.onStage?.('exploring'); event('Eine Wissenslücke wird in der isolierten Anwendung mit synthetischen Daten untersucht.');
         sandbox = await startPortalSandbox(controller.signal);
-        browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
+        browser = await chromium.launch({ headless: true, timeout: 0, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}) });
         if (controller.signal.aborted) throw agentAbortError(controller.signal);
         const context = await browser.newContext({ viewport: { width: 1360, height: 900 }, serviceWorkers: 'block', acceptDownloads: false });
         await context.route('**/*', route => explorationRequestAllowed(route.request().url(), sandbox!.origin) ? route.continue() : route.abort('blockedbyclient'));
         await context.routeWebSocket('**/*', socket => socket.close());
+        context.setDefaultTimeout(0); context.setDefaultNavigationTimeout(0);
         page = await context.newPage(); context.on('page', popup => { if (popup !== page) void popup.close(); });
-        await page.goto(`${sandbox.origin}/portal`, { waitUntil: 'networkidle', timeout: 20_000 });
-        await page.getByRole('combobox', { name: 'Benutzerrolle', exact: true }).waitFor({ timeout: 15_000 });
+        await page.goto(`${sandbox.origin}/portal`, { waitUntil: 'networkidle', timeout: 0 });
+        await page.getByRole('combobox', { name: 'Benutzerrolle', exact: true }).waitFor({ timeout: 0 });
         evidence.push(await observe(page, 'beleg-001', directory, 'Anwendung geöffnet', sandbox.origin));
       } else {
         if (reply.decision !== 'act' || !reply.action || reply.findings.length) throw new Error('Während der Erkundung wird genau eine Browseraktion oder ein Abschluss erwartet.');
@@ -347,7 +346,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
     }
     throw cause;
   } finally {
-    clearTimeout(timeout); input.signal?.removeEventListener('abort', abort); controller.signal.removeEventListener('abort', closeBrowser);
+    input.signal?.removeEventListener('abort', abort); controller.signal.removeEventListener('abort', closeBrowser);
     await browser?.close().catch(() => {}); await sandbox?.close();
   }
 }

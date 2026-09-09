@@ -6,12 +6,12 @@ import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplic
 
 /** A rejected answer is returned to the same real model; no local answer is substituted. */
 export async function reviewWithCodex<T>(input: { id: string; model: TestingModel; prompt: string; schema: Record<string, unknown>;
-  files: Record<string, string>; label: string; validate: (value: unknown) => T; signal?: AbortSignal; onEvent?: (event: TestingAgentEvent) => void }) {
+  files: Record<string, string>; label: string; validate: (value: unknown) => T; disableTimeout?: boolean; signal?: AbortSignal; onEvent?: (event: TestingAgentEvent) => void }) {
   let previous: unknown, diagnostic = '';
   for (let attempt = 0; attempt < 2; attempt++) {
     const result = await invokeCodex({ id: attempt ? `${input.id}-korrektur` : input.id, model: input.model, schema: input.schema,
       prompt: `${input.prompt}${attempt ? `\n\nDeine vorherige Antwort wurde nicht übernommen. Lies vorherige-antwort.json und validierungsfehler.txt. Korrigiere ausschließlich die dort belegten Vertrags- oder Referenzfehler und liefere eine vollständige Antwort. Fehlerbericht: ${JSON.stringify(diagnostic)}` : ''}`,
-      files: { ...input.files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
+      files: { ...input.files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, disableTimeout: input.disableTimeout, onEvent: input.onEvent });
     previous = result.value;
     try { return { result, parsed: input.validate(result.value), attempts: attempt + 1 }; }
     catch (error) {

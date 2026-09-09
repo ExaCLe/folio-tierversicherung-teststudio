@@ -155,7 +155,7 @@ export interface TestingAgentTermination {
 }
 export interface TestingAgentProgress {
   stage:'knowledge'|'exploring'; status:'waiting-model'|'acting'|'observed'|'finished';
-  round:number; observationCount:number; actionLimit:number; startedAt:string; deadlineAt:string; summary:string;
+  round:number; observationCount:number; actionLimit:number; startedAt:string; deadlineAt?:string; summary:string;
   questions?:TestingExplorationQuestion[];
 }
 export interface TestingExplorationQuestion {
