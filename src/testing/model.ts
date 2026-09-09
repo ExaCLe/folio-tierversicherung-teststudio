@@ -1,5 +1,5 @@
 import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingInput, TestingScenario, TestingValue, TestingValueType } from '../../shared/testing';
-import { createTestingInstance, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
+import { createTestingInstance, currentTestingChildren, currentTestingDefinition, isTestingParameter, isTestingReference } from '../../shared/testing';
 
 export const kindLabels = { action: 'Aktion', assertion: 'Prüfung', workflow: 'Baustein', context: 'Rolle & Gruppe' };
 export const phaseLabels = { naming: 'Testfall benennen', business: 'Fachlicher Entwurf', exploration: 'Erkundung', technical: 'Technische Umsetzung', duplicates: 'Dublettenprüfung', reuse: 'Wiederverwendung' };
@@ -7,7 +7,7 @@ export const statusLabels: Record<string, string> = { queued: 'Eingereiht', runn
 export const typeLabels: Record<TestingValueType, string> = { text: 'Text', number: 'Zahl', money: 'Geldbetrag', boolean: 'Ja / Nein', date: 'Datum', choice: 'Auswahl', object: 'Wertepaare', list: 'Liste', 'customer-ref': 'Kunde', 'farm-ref': 'Betrieb', 'animal-ref': 'Tier', 'proposal-ref': 'Vorschlag', 'referral-ref': 'Direktionsanfrage', 'policy-ref': 'Police', 'contract-ref': 'Vertrag', 'document-ref': 'Dokument' };
 
 export function findDefinition(catalog: TestingCatalog, block: TestingBlockInstance) {
-  return catalog.definitions.find(definition => testingVersionKey(definition) === testingVersionKey(block.definition));
+  return currentTestingDefinition(catalog, block.definition);
 }
 
 export interface BlockEntry { block: TestingBlockInstance; definition?: TestingBlockDefinition; path: string; depth: number; inherited: boolean; parent?: BlockEntry }
@@ -16,9 +16,9 @@ export function flattenBlocks(blocks: TestingBlockInstance[], catalog: TestingCa
     const definition = findDefinition(catalog, block);
     const path = parent ? `${parent.path}/${block.id}` : block.id;
     const entry: BlockEntry = { block, definition, path, depth: parent ? parent.depth + 1 : 0, inherited: !!parent && !parent.block.children, parent };
-    const key = testingVersionKey(block.definition);
-    const children = block.children ?? definition?.body;
-    return [entry, ...(children && !seen.has(key) ? flattenBlocks(children, catalog, entry, new Set([...seen, key])) : [])];
+    const key = definition ? `${definition.id}@${definition.version}` : block.definition.id;
+    const children = currentTestingChildren(block, catalog);
+    return [entry, ...(children.length && !seen.has(key) ? flattenBlocks(children, catalog, entry, new Set([...seen, key])) : [])];
   });
 }
 
@@ -27,7 +27,7 @@ export function updateBlockAtPath(blocks: TestingBlockInstance[], path: string, 
   return blocks.flatMap(block => {
     if (block.id !== head) return [block];
     if (!tail.length) { const next = update(structuredClone(block)); return next ? [next] : []; }
-    const children = block.children ?? findDefinition(catalog, block)?.body ?? [];
+    const children = currentTestingChildren(block, catalog);
     return [{ ...block, children: updateBlockAtPath(children, tail.join('/'), catalog, update) }];
   });
 }

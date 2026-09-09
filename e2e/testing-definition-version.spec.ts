@@ -13,22 +13,19 @@ async function fixture(request: APIRequestContext) {
   expect(response.ok()).toBeTruthy(); return { scenario: await response.json(), definition };
 }
 async function open(page: Page, id: string) { await page.goto(`/testing/editor/${id}`); await expect(page.getByLabel('Name des Testfalls', { exact: true })).toBeVisible(); await openDetails(page, '.t-editor-step'); await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click(); await page.locator('.t-outline [data-block-path="pruefung"]').click(); }
-async function correctDialog(page: Page) { const dialog = page.getByRole('dialog', { name: 'Eine neue Blockversion definieren', exact: true }); await dialog.getByLabel('Datentyp der Eingabe 1', { exact: true }).selectOption('proposal-ref'); await dialog.getByRole('button', { name: 'Definition speichern', exact: true }).click(); await expect(dialog).not.toBeVisible(); }
+async function correctDialog(page: Page) { const dialog = page.getByRole('dialog', { name: 'Gemeinsame Blockdefinition aktualisieren', exact: true }); await dialog.getByLabel('Datentyp der Eingabe 1', { exact: true }).selectOption('proposal-ref'); await dialog.getByRole('button', { name: 'Definition aktualisieren', exact: true }).click(); await expect(dialog).not.toBeVisible(); }
 
-test('Eine Bibliothekskorrektur wird sichtbar angeboten und gezielt in die Verwendung übernommen', async ({ page, request }, testInfo) => {
+test('Eine Bibliothekskorrektur gilt ohne Versionswahl im vorhandenen Testfall', async ({ page, request }, testInfo) => {
   const { scenario, definition } = await fixture(request);
   await open(page, scenario.id);
   await page.locator('#testing-value-target').selectOption('vertrag');
   await workspaceNavigation(page, 'Blockbibliothek');
   await page.getByLabel('Blockbibliothek durchsuchen').fill(definition.name);
   await page.locator('.t-definition-card').click();
-  await page.getByRole('button', { name: 'Neue Version bearbeiten', exact: true }).click();
+  await page.getByRole('button', { name: 'Definition aktualisieren', exact: true }).click();
   await correctDialog(page);
   await page.getByRole('link', { name: 'Testfall erstellen', exact: true }).click();
-  await expect(page.locator('.t-inspector')).toContainText('Version 1.0.0');
-  await openDetails(page, '.t-definition-version');
-  await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.0');
-  await page.getByLabel('Verwendete Blockversion', { exact: true }).selectOption('1.0.1');
+  await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveCount(0);
   const picker = page.locator('#testing-value-target');
   await expect(picker.locator('option[value="vorschlag"]')).toHaveCount(1);
   await expect(picker.locator('option[value="vertrag"]')).toHaveCount(0);
@@ -39,8 +36,6 @@ test('Eine Bibliothekskorrektur wird sichtbar angeboten und gezielt in die Verwe
   await openDetails(page, '.t-editor-step');
   await page.getByRole('button', { name: 'Ablaufliste', exact: true }).click();
   await page.locator('.t-outline [data-block-path="pruefung"]').click();
-  await openDetails(page, '.t-definition-version');
-  await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.1');
   await expect(picker).toHaveValue('vorschlag');
   const compiled = await (await request.get(`/api/testing/scenarios/${scenario.id}/compile`)).json();
   expect(compiled.issues.filter((issue: any) => issue.field === 'target')).toEqual([]);
@@ -50,21 +45,25 @@ test('Eine Bibliothekskorrektur wird sichtbar angeboten und gezielt in die Verwe
   await page.screenshot({ path: testInfo.outputPath('korrigierte-blockversion-picker.png') });
 });
 
-test('Eine Korrektur im Inspector aktualisiert nur die ausdrücklich bearbeitete Verwendung', async ({ page, request }) => {
+test('Eine Korrektur im Inspector aktualisiert alle Verwendungen desselben Blocks', async ({ page, request }) => {
   const { scenario, definition } = await fixture(request);
+  const other={...scenario,id:`weiterer-testfall-${randomUUID()}`,title:`Weiterer ${definition.name}`};
+  expect((await request.put(`/api/testing/scenarios/${other.id}`,{data:{...other,expectedRevision:0}})).ok()).toBeTruthy();
   const second = { ...scenario.blocks[1], id: 'historische-pruefung' };
   expect((await request.put(`/api/testing/scenarios/${scenario.id}`, { data: { ...scenario, blocks: [...scenario.blocks, second], expectedRevision: scenario.revision } })).ok()).toBeTruthy();
   await open(page, scenario.id);
   await page.getByRole('button', { name: 'Blockdefinition bearbeiten', exact: true }).click();
   await correctDialog(page);
-  await openDetails(page, '.t-definition-version');
-  await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveValue('1.0.1');
+  await expect(page.getByLabel('Verwendete Blockversion', { exact: true })).toHaveCount(0);
   await page.locator('#testing-value-target').selectOption('vorschlag');
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toBeDisabled();
-  const saved = await (await request.get(`/api/testing/scenarios/${scenario.id}`)).json();
-  expect(saved.blocks[1]).toMatchObject({ definition: { id: definition.id, version: '1.0.1' }, inputs: { target: { ref: 'vorschlag', type: 'proposal-ref' } } });
-  expect(saved.blocks[2]).toMatchObject({ definition: { id: definition.id, version: '1.0.0' }, inputs: { target: { ref: 'vertrag', type: 'contract-ref' } } });
+  const compiled = await (await request.get(`/api/testing/scenarios/${scenario.id}/compile`)).json();
+  expect(compiled.steps.filter((step:any)=>step.definition.id===definition.id).map((step:any)=>step.definition.version)).toEqual(['1.0.1','1.0.1']);
+  expect(compiled.issues.some((issue:any)=>issue.field==='target')).toBeTruthy();
+  const otherCompiled=await (await request.get(`/api/testing/scenarios/${other.id}/compile`)).json();
+  expect(otherCompiled.steps.find((step:any)=>step.definition.id===definition.id)?.definition.version).toBe('1.0.1');
+  expect(otherCompiled.scenario.blocks.find((block:any)=>block.definition.id===definition.id)?.definition.version).toBe('1.0.1');
 });
 
 test('Eine bereits korrigierte Definition akzeptiert ihre echte Vorschlagsquelle trotz alter Referenzmarkierung', async ({ page, request }) => {

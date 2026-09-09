@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingCompiledStep, TestingDuplicateReport, TestingInput, TestingScenario, TestingTechnicalBinding, TestingValidationIssue, TestingValue, TestingValueType, TestingVersionRef } from '../../shared/testing';
-import { isTestingParameter, isTestingReference, testingVersionKey, testingValueTypeLabels } from '../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition, currentTestingDefinitions, isTestingParameter, isTestingReference, testingVersionKey, testingValueTypeLabels } from '../../shared/testing';
 import { scenarioForTestingMatrixRow, validateTestingMatrix } from './matrix';
 
 export function stableTestingStringify(value: unknown): string {
@@ -10,24 +10,36 @@ export function stableTestingStringify(value: unknown): string {
 }
 const hash = (value: unknown) => createHash('sha256').update(stableTestingStringify(value)).digest('hex');
 export const effectiveTestingOperation = (definition: TestingBlockDefinition): string => definition.operation ?? definition.semanticKey;
-const definitionMap = (catalog: TestingCatalog) => new Map(catalog.definitions.map(d => [testingVersionKey(d), d]));
+const definitionMap = (catalog: TestingCatalog) => new Map(catalog.definitions.map(d => [d.id, currentTestingDefinition(catalog, d.id)!]));
 function latestKnowledge(catalog: TestingCatalog) {
   const docs = new Map<string, TestingCatalog['knowledge'][number]>();
   for (const doc of catalog.knowledge) if ((docs.get(doc.id)?.revision ?? -1) < doc.revision) docs.set(doc.id, doc);
   return docs;
+}
+function effectiveTestingScenario(scenario:TestingScenario,catalog:TestingCatalog):TestingScenario {
+  const normalize=(blocks:TestingBlockInstance[],active:string[]=[]):TestingBlockInstance[]=>blocks.map(block=>{
+    const definition=currentTestingDefinition(catalog,block.definition);
+    if(!definition)return structuredClone(block);
+    const key=testingVersionKey(definition), children=currentTestingChildren(block,catalog);
+    const normalized={...structuredClone(block),definition:{id:definition.id,version:definition.version}};
+    if(definition.kind==='workflow'||definition.kind==='context')normalized.children=active.includes(key)?[]:normalize(children,[...active,key]);
+    return normalized;
+  });
+  return {...structuredClone(scenario),blocks:normalize(scenario.blocks)};
 }
 export function testingBusinessDependencies(scenario: TestingScenario, catalog: TestingCatalog) {
   const map = definitionMap(catalog); const definitions = new Map<string, TestingBlockDefinition>();
   const knowledgeIds = new Set(scenario.knowledgeRefs); const seenPaths = new Set<string>();
   function walk(blocks: TestingBlockInstance[], active: string[]) {
     for (const block of blocks) {
-      const key = testingVersionKey(block.definition); const definition = map.get(key);
+      const definition = map.get(block.definition.id); const key = definition ? testingVersionKey(definition) : block.definition.id;
       if (!definition) continue;
       definitions.set(key, definition); definition.knowledgeRefs.forEach(id => knowledgeIds.add(id));
       if (active.includes(key)) continue;
       // A definition's full body remains review-relevant even when an instance overrides it.
       if (definition.body && !seenPaths.has(key)) { seenPaths.add(key); walk(definition.body, [...active,key]); }
-      if (block.children) walk(block.children, [...active,key]);
+      const children = currentTestingChildren(block, catalog);
+      if (children.length && children !== definition.body) walk(children, [...active,key]);
     }
   }
   walk(scenario.blocks, []);
@@ -44,7 +56,8 @@ export function testingFingerprint(scenario: TestingScenario, catalog: TestingCa
   const deps = testingBusinessDependencies(scenario,catalog);
   const { createdAt: _created, updatedAt: _updated, ...business } = scenario;
   const knowledge=deps.knowledge.map(({revision:_revision,definitionRefs:_links,path:_path,origin:_origin,...meaning})=>meaning);
-  return hash({ scenario:business, definitions:deps.definitions.map(({createdAt:_at, bindingId:_binding, ...d}) => d), knowledge });
+  const effective=effectiveTestingScenario({...scenario,...business},catalog);delete (effective as Partial<TestingScenario>).createdAt;delete (effective as Partial<TestingScenario>).updatedAt;
+  return hash({ scenario:effective, definitions:deps.definitions.map(({createdAt:_at, bindingId:_binding, ...d}) => d), knowledge });
 }
 export function latestTestingBinding(catalog: TestingCatalog, id: string): TestingTechnicalBinding | undefined {
   const versions=catalog.bindings.filter(b => b.id === id).sort((a,b) => b.revision-a.revision);
@@ -59,9 +72,9 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   const sources = new Map<string, { sourcePath: string; sourceLabel: string }>();
   const issue = (code:string,message:string,block?:TestingBlockInstance,path?:string,field?:string,severity:TestingValidationIssue['severity']='error',source?:{sourcePath:string;sourceLabel:string}) => issues.push({code,message,severity,instanceId:block?.id,path,field,...source});
   issues.push(...validateTestingMatrix(scenario, catalog));
-  const blockLabel = (block:TestingBlockInstance) => block.label ?? defs.get(testingVersionKey(block.definition))?.name ?? block.definition.id;
+  const blockLabel = (block:TestingBlockInstance) => block.label ?? defs.get(block.definition.id)?.name ?? block.definition.id;
   const fieldLabel = (block:TestingBlockInstance,field:string) => {
-    let inputs = defs.get(testingVersionKey(block.definition))?.inputs ?? []; const labels:string[]=[];
+    let inputs = defs.get(block.definition.id)?.inputs ?? []; const labels:string[]=[];
     for(const key of field.split('.')) { const input = inputs.find(item=>item.key===key); labels.push(input?.label??key); inputs=input?.fields??[]; }
     return labels.join(' / ');
   };
@@ -109,7 +122,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
       const path=parentPath?`${parentPath}/${block.id}`:block.id;
       if(localIds.has(block.id)) { issue('INSTANCE_DUPLICATE',`Die Block-ID „${block.id}“ kommt in derselben Komposition mehrfach vor.`,block,path); continue; } localIds.add(block.id);
       if(!block.id || block.id.includes('/')) {issue('INSTANCE_ID',`Eine Block-ID muss vorhanden sein und darf keinen Schrägstrich enthalten.`,block,path);continue;}
-      const key=testingVersionKey(block.definition); const definition=defs.get(key);
+      const definition=defs.get(block.definition.id); const key=definition ? testingVersionKey(definition) : block.definition.id;
       if(!definition) {issue('DEFINITION_MISSING',`Die Definition „${key}“ fehlt. Die KI kann sie fachlich ergänzen.`,block,path);continue;}
       if(active.includes(key)) {issue('COMPOSITION_CYCLE',`„${definition.name}“ enthält sich selbst.`,block,path);continue;}
       for(const outputKey of Object.keys(block.outputs??{})) if(!definition.outputs.some(o=>o.key===outputKey)) issue('OUTPUT_UNKNOWN',`„${outputKey}“ ist kein Ergebnis von „${definition.name}“.`,block,path,outputKey);
@@ -124,7 +137,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
       if(definition.kind==='context' || definition.kind==='workflow') {
         const childScope=new Map(scope); const childOverrides:Record<string,Record<string,TestingValue>>={...block.overrides};
         for(const [overridePath,values] of Object.entries(overrides)) if(overridePath.startsWith(`${block.id}/`)) childOverrides[overridePath.slice(block.id.length+1)]={...childOverrides[overridePath.slice(block.id.length+1)],...values};
-        const body=block.children??definition.body??[];
+        const body=currentTestingChildren(block,catalog);
         if(!body.length) issue('COMPOSITION_EMPTY',`„${definition.name}“ enthält noch keine Schritte.`,block,path);
         const childActor=definition.kind==='context'?(typeof inputs.role==='string'?inputs.role:''):actor;
         walk(body,path,definition.kind==='workflow'?inputs:params,childScope,childActor,[...ancestors,path],[...active,key],childOverrides);
@@ -153,7 +166,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
       }
       const outputs:Record<string,string>={};
       for(const output of definition.outputs) {const qualified=`${path}::${output.key}`;sources.set(qualified,{sourcePath:path,sourceLabel:blockLabel(block)});outputs[output.key]=qualified;bindOutput(block,output.key,{key:qualified,type:output.type},scope,path);}
-      steps.push({id:path,instanceId:block.id,path,ancestors,definition:block.definition,label:block.label??definition.name,kind:definition.kind,operation:effectiveTestingOperation(definition),actor,inputs,outputs,...(binding?{binding:{id:binding.id,revision:binding.revision}}:{}),knowledgeRefs:definition.knowledgeRefs});
+      steps.push({id:path,instanceId:block.id,path,ancestors,definition:{id:definition.id,version:definition.version},label:block.label??definition.name,kind:definition.kind,operation:effectiveTestingOperation(definition),actor,inputs,outputs,...(binding?{binding:{id:binding.id,revision:binding.revision}}:{}),knowledgeRefs:definition.knowledgeRefs});
     }
   }
   function bindOutput(block:TestingBlockInstance,outputKey:string,resolved:{key:string;type:TestingValueType},scope:Map<string,{key:string;type:TestingValueType}>,path:string) {
@@ -181,7 +194,7 @@ export function compileTestingScenario(scenario: TestingScenario, catalog: Testi
   const approved=!!approval && approval.scenarioId===scenario.id && approval.scenarioRevision===scenario.revision && approval.fingerprint===fingerprint;
   if(!approved) issue(approval?'APPROVAL_STALE':'APPROVAL_REQUIRED',approval?'Die fachliche Freigabe ist durch eine Änderung veraltet. Bitte den aktuellen Entwurf erneut prüfen.':'Bitte den fachlichen Entwurf vor der technischen Ausführung freigeben.',undefined,undefined,undefined,'warning');
   const valid=!issues.some(i=>i.severity==='error');
-  return {scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,compiledAt:new Date().toISOString(),scenario:structuredClone(scenario),definitions:structuredClone(deps.definitions),bindings:structuredClone([...usedBindings.values()]),knowledge:structuredClone(deps.knowledge),steps,issues,valid,executable:valid&&wired&&approved,...(approval?{approval}: {})};
+  return {scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,compiledAt:new Date().toISOString(),scenario:effectiveTestingScenario(scenario,catalog),definitions:structuredClone(deps.definitions),bindings:structuredClone([...usedBindings.values()]),knowledge:structuredClone(deps.knowledge),steps,issues,valid,executable:valid&&wired&&approved,...(approval?{approval}: {})};
 }
 
 /** Authorizes a deterministic row from the exact frozen, human-approved parent snapshot without fabricating a row approval. */
@@ -205,7 +218,7 @@ function compositionSignature(definition:TestingBlockDefinition,catalog:TestingC
     if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,normalizeValue(v,scope)]));return value;
   };
   const walk=(blocks:TestingBlockInstance[],scope:Map<string,string>,prefix:string):unknown[]=>blocks.map((block,index)=>{
-    const position=`${prefix}${index}`;const referenced=definitions.get(testingVersionKey(block.definition));
+    const position=`${prefix}${index}`;const referenced=definitions.get(block.definition.id);
     const inputs=Object.fromEntries(Object.entries(block.inputs).map(([key,value])=>[key,normalizeValue(value,scope)]));
     const children=block.children?walk(block.children,referenced?.kind==='context'?scope:new Map(scope),`${position}/`):undefined;
     for(const output of referenced?.outputs??[])scope.set(block.outputs?.[output.key]??`${block.id}.${output.key}`,`${position}::${output.key}`);
@@ -218,7 +231,7 @@ export function findTestingDuplicates(proposed:TestingBlockDefinition,catalog:Te
   const normalize=(value:string)=>value.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
   const words=(value:string)=>new Set(normalize(value).split(' ').filter(w=>w.length>3));
   const proposedMeaning=words(`${proposed.semanticKey} ${proposed.description} ${proposed.preconditions.join(' ')} ${proposed.postconditions.join(' ')}`);
-  const candidates=catalog.definitions.filter(d=>d.id!==proposed.id).map(existing=>{
+  const candidates=currentTestingDefinitions(catalog).filter(d=>d.id!==proposed.id).map(existing=>{
     const matching:string[]=[];const differences:string[]=[];let score=0;
     const sameSemantic=existing.semanticKey===proposed.semanticKey; const sameSchema=stableTestingStringify(schemaSignature(existing))===stableTestingStringify(schemaSignature(proposed));
     const sameBody=stableTestingStringify(compositionSignature(existing,catalog))===stableTestingStringify(compositionSignature(proposed,catalog));

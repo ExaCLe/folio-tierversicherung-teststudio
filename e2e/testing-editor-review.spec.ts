@@ -160,10 +160,9 @@ test('Menschen ergänzen eine fehlende Fähigkeit und erweitern ihr typisiertes 
   await dialog.getByRole('button', { name: 'Eingabe ergänzen', exact: true }).click();
   await dialog.getByLabel('Bezeichnung der Eingabe 2', { exact: true }).fill('Anzahl Nachweise');
   await dialog.getByLabel('Datentyp der Eingabe 2', { exact: true }).selectOption('number');
-  await dialog.getByRole('button', { name: 'Definition speichern', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Definition aktualisieren', exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await page.getByLabel(/Anzahl Nachweise/).fill('5');
-  await save(page, request, current.id);
+  await expect(page.getByLabel(/Anzahl Nachweise/)).toHaveValue('5');
   result = await compiled(request, current.id);
   expect(result.valid).toBeTruthy();
   expect(result.steps.find(step => step.label === name)?.definition.version).toBe('1.0.1');

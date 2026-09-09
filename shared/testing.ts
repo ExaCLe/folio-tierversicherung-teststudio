@@ -235,6 +235,97 @@ export interface TestingPromotionRequest {
 export interface TestingPromotionResult { definition: TestingBlockDefinition; scenario: TestingScenario; duplicateReport: TestingDuplicateReport }
 
 export function testingVersionKey(ref: TestingVersionRef): string { return `${ref.id}@${ref.version}`; }
+export function compareTestingVersions(left: string, right: string): number {
+  const split = (value: string) => { const [core, ...pre] = value.split('-'); return { core: core.split('.').map(Number), pre: pre.join('-') }; };
+  const a = split(left), b = split(right);
+  for (let index = 0; index < Math.max(3, a.core.length, b.core.length); index++) {
+    const difference = (a.core[index] ?? 0) - (b.core[index] ?? 0); if (difference) return difference;
+  }
+  if (!a.pre || !b.pre) return a.pre === b.pre ? 0 : a.pre ? -1 : 1;
+  const aa = a.pre.split('.'), bb = b.pre.split('.');
+  for (let index = 0; index < Math.max(aa.length, bb.length); index++) {
+    if (aa[index] === bb[index]) continue;
+    if (aa[index] === undefined || bb[index] === undefined) return aa[index] === undefined ? -1 : 1;
+    const an = /^\d+$/.test(aa[index]), bn = /^\d+$/.test(bb[index]);
+    return an && bn ? Number(aa[index]) - Number(bb[index]) : an !== bn ? an ? -1 : 1 : aa[index].localeCompare(bb[index]);
+  }
+  return 0;
+}
+/** Editable flows always use the newest immutable revision of a stable block ID. */
+export function currentTestingDefinition(catalog: TestingCatalog, ref: Pick<TestingVersionRef, 'id'> | string): TestingBlockDefinition | undefined {
+  const id = typeof ref === 'string' ? ref : ref.id;
+  return catalog.definitions.filter(definition => definition.id === id).sort((a, b) => compareTestingVersions(b.version, a.version))[0];
+}
+export function currentTestingDefinitions(catalog: TestingCatalog): TestingBlockDefinition[] {
+  return [...new Set(catalog.definitions.map(definition => definition.id))].map(id => currentTestingDefinition(catalog, id)!).filter(Boolean);
+}
+const sameTestingValue = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every((value, index) => sameTestingValue(value, right[index]));
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  const a = Object.keys(left as object).filter(key => (left as Record<string, unknown>)[key] !== undefined).sort();
+  const b = Object.keys(right as object).filter(key => (right as Record<string, unknown>)[key] !== undefined).sort();
+  return a.length === b.length && a.every((key, index) => key === b[index] && sameTestingValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
+};
+/** Reconciles previously materialized inherited bodies with the current shared body.
+ * Added/removed shared steps follow the current definition; locally added steps and
+ * changed values remain local. */
+export function currentTestingChildren(block: TestingBlockInstance, catalog: TestingCatalog): TestingBlockInstance[] {
+  const current = currentTestingDefinition(catalog, block.definition);
+  const body = current?.body ?? [];
+  if (!block.children) return body;
+  const referenced = catalog.definitions.find(definition => testingVersionKey(definition) === testingVersionKey(block.definition));
+  if (!referenced?.body || referenced.version === current?.version || sameTestingValue(referenced.body, body)) return block.children;
+  if (sameTestingValue(block.children,referenced.body)) return body;
+  const oldById = new Map(referenced.body.map(child => [child.id, child]));
+  const localById = new Map(block.children.map(child => [child.id, child]));
+  const remoteById = new Map(body.map(child => [child.id, child]));
+  const mergeMap = <T>(oldValue: Record<string,T>|undefined, localValue: Record<string,T>|undefined, remoteValue: Record<string,T>|undefined) => {
+    const merged = structuredClone(remoteValue ?? {}); let changed = false;
+    for (const key of new Set([...Object.keys(oldValue ?? {}), ...Object.keys(localValue ?? {})])) {
+      if (sameTestingValue(oldValue?.[key], localValue?.[key])) continue;
+      changed = true;
+      if (localValue && Object.hasOwn(localValue,key)) merged[key]=structuredClone(localValue[key]); else delete merged[key];
+    }
+    return changed || Object.keys(merged).length ? merged : undefined;
+  };
+  const mergeChild = (old: TestingBlockInstance, local: TestingBlockInstance, remote: TestingBlockInstance): TestingBlockInstance => {
+    const merged = structuredClone(remote);
+    if (!sameTestingValue(old.definition,local.definition)) merged.definition=structuredClone(local.definition);
+    merged.inputs=mergeMap(old.inputs,local.inputs,remote.inputs) ?? {};
+    for (const field of ['outputs','overrides'] as const) {
+      const value=mergeMap(old[field] as Record<string,unknown>|undefined,local[field] as Record<string,unknown>|undefined,remote[field] as Record<string,unknown>|undefined) as never;
+      if(value)(merged as any)[field]=value;else delete (merged as any)[field];
+    }
+    for (const field of ['label','note','children'] as const) if(!sameTestingValue(old[field],local[field])) {
+      if(local[field]!==undefined)(merged as any)[field]=structuredClone(local[field]);else delete (merged as any)[field];
+    }
+    return merged;
+  };
+  const baseOrder=referenced.body.map(child=>child.id),localOrder=block.children.map(child=>child.id);
+  const structureChanged=!sameTestingValue(baseOrder,localOrder);
+  if(!structureChanged)return body.flatMap(remote=>{
+    const local=localById.get(remote.id),old=oldById.get(remote.id);
+    return [local&&old?mergeChild(old,local,remote):structuredClone(remote)];
+  });
+  // Begin with the user's relative order. Deleted base children remain deleted;
+  // locally changed children removed upstream survive as intentional local steps.
+  const reconciled = block.children.flatMap(local => {
+    const old=oldById.get(local.id),remote=remoteById.get(local.id);
+    if(remote)return [old?mergeChild(old,local,remote):structuredClone(local)];
+    return !old||!sameTestingValue(old,local)?[structuredClone(local)]:[];
+  });
+  // Insert new shared children next to their nearest shared neighbour without
+  // undoing an intentional local reorder.
+  for(const remote of body)if(!localById.has(remote.id)&&!oldById.has(remote.id)) {
+    const remoteIndex=body.findIndex(child=>child.id===remote.id);
+    const next=body.slice(remoteIndex+1).find(child=>reconciled.some(item=>item.id===child.id));
+    const previous=[...body.slice(0,remoteIndex)].reverse().find(child=>reconciled.some(item=>item.id===child.id));
+    const index=next?reconciled.findIndex(item=>item.id===next.id):previous?reconciled.findIndex(item=>item.id===previous.id)+1:reconciled.length;
+    reconciled.splice(index,0,structuredClone(remote));
+  }
+  return reconciled;
+}
 export function isTestingReference(value: unknown): value is TestingReference {
   return !!value && typeof value === 'object' && !Array.isArray(value) && typeof (value as TestingReference).ref === 'string';
 }
@@ -243,7 +334,7 @@ export function isTestingParameter(value: unknown): value is TestingParameter {
 }
 export function createTestingInstance(definition: TestingBlockDefinition, id = `block-${globalThis.crypto.randomUUID()}`): TestingBlockInstance {
   return { id, definition: { id: definition.id, version: definition.version },
-    inputs: Object.fromEntries(definition.inputs.filter(input => input.default !== undefined).map(input => [input.key, structuredClone(input.default!)])),
+    inputs: {},
     outputs: Object.fromEntries(definition.outputs.map(output => [output.key, `${id}.${output.key}`])),
     ...(definition.kind === 'context' ? { children: [] } : {}) };
 }

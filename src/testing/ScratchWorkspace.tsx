@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import * as Scratch from 'scratch-blocks';
 import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingScenarioLayout, TestingValue, TestingInput } from '../../shared/testing';
-import { createTestingInstance, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
+import { createTestingInstance, currentTestingChildren, currentTestingDefinitions, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
 import { buildValueChanges, type ValueChange } from './valueChanges';
 import { buildReferenceIndex, describeReference, type ReferenceIndex } from './references';
 import { findDefinition, flattenBlocks, formatGermanNumber, kindLabels, parseGermanNumber } from './model';
@@ -59,7 +59,7 @@ function registerDefinitions(catalog: TestingCatalog) {
   Scratch.ScratchMsgs.setLocale('de');
   Object.assign(Scratch.Msg, { WORKSPACE_ARIA_LABEL: 'Fachlicher Testablauf', UNDO: 'Rückgängig', REDO: 'Wiederholen', DELETE_BLOCK: 'Block löschen', DELETE_X_BLOCKS: '%1 Blöcke löschen', CLEAN_UP: 'Blöcke aufräumen', COLLAPSE_BLOCK: 'Block einklappen', EXPAND_BLOCK: 'Block aufklappen', COLLAPSE_ALL: 'Alle einklappen', EXPAND_ALL: 'Alle aufklappen', DUPLICATE_BLOCK: 'Duplizieren', ADD_COMMENT: 'Kommentar hinzufügen', REMOVE_COMMENT: 'Kommentar entfernen' });
   Scratch.Blocks.folio_start = { init(this: Scratch.Block) { this.jsonInit({ message0: 'Wenn dieser Test startet', extensions: ['shape_hat'] }); this.setStyle('context'); this.setDeletable(false); this.setMovable(false); } };
-  for (const definition of catalog.definitions) {
+  for (const definition of currentTestingDefinitions(catalog)) {
     const type = typeFor(definition);
     definitionForType.set(type, definition);
     Scratch.Blocks[type] = {
@@ -70,7 +70,7 @@ function registerDefinitions(catalog: TestingCatalog) {
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setStyle(definition.kind);
-        this.setTooltip(`${definition.description}\n${kindLabels[definition.kind]} · Version ${definition.version}`);
+        this.setTooltip(`${definition.description}\n${kindLabels[definition.kind]}`);
         this.data = JSON.stringify({ instance: createTestingInstance(definition), path: '' } satisfies BlockMetadata);
       },
       saveExtraState(this: CanvasBlock) { return { rows: this.folioRows ?? [] }; },
@@ -83,7 +83,7 @@ function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent
   const definition = findDefinition(catalog, block);
   const path = parent ? `${parent}/${block.id}` : block.id;
   if (!definition) throw new Error(`Der Block ${block.definition.id} in Version ${block.definition.version} fehlt im Katalog.`);
-  const childBlocks = block.children ?? definition.body;
+  const childBlocks = currentTestingChildren(block,catalog);
   const hasCycle = seen.has(testingVersionKey(definition));
   const rows = canvasRows(definition, path, changes);
   const displayValues = Object.fromEntries(rows.map(row => {
@@ -98,8 +98,8 @@ function blockState(block: TestingBlockInstance, catalog: TestingCatalog, parent
     return [input.key, changedValueLabel(resolved, definition.inputs.find(field => field.key === row.key), changes.find(change => change.path === path && change.field === row.key)?.before)];
   }));
   const state: ScratchState = {
-    type: typeFor(block.definition), id: path,
-    data: JSON.stringify({ instance: block, body: !block.children ? definition.body : undefined, path, displayValues } satisfies BlockMetadata),
+    type: typeFor(definition), id: path,
+    data: JSON.stringify({ instance: {...block,definition:{id:definition.id,version:definition.version}}, body: !block.children ? definition.body : undefined, path, displayValues } satisfies BlockMetadata),
     extraState: { rows },
     fields: Object.fromEntries(rows.map(row => [`VALUE_${row.key}`, displayValues[row.key]])),
   };
@@ -293,8 +293,16 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
     workspace.current = ws;
     const resize = new ResizeObserver(() => { Scratch.svgResize(ws); });
     resize.observe(element.current);
-    const clearOnCanvas = (event: PointerEvent) => { if (event.button === 0 && event.target instanceof Element && event.target.closest('.blocklyMainBackground')) current.current.onSelect(undefined); };
+    const clearOnCanvas = (event: MouseEvent) => {
+      if (event.button !== 0 || !(event.target instanceof Element) || !event.target.closest('.blocklyMainBackground')) return;
+      // Scratch handles the same pointer event after this listener and may
+      // restore its internal selection. Clear the React selection once that
+      // native event has finished as well.
+      current.current.onSelect(undefined);
+      requestAnimationFrame(() => current.current.onSelect(undefined));
+    };
     element.current.addEventListener('pointerdown', clearOnCanvas, true);
+    element.current.addEventListener('click', clearOnCanvas, true);
     const onChange = (event: Scratch.Events.Abstract) => {
       if (applying.current) return;
       if (event.type === Scratch.Events.SELECTED) {
@@ -382,7 +390,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       Scratch.svgResize(ws);
     };
     render();
-    return () => { element.current?.removeEventListener('pointerdown', clearOnCanvas, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
+    return () => { element.current?.removeEventListener('pointerdown', clearOnCanvas, true); element.current?.removeEventListener('click', clearOnCanvas, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
   }, [catalogueKey, props.readOnly]);
   useEffect(() => {
     const ws = workspace.current;

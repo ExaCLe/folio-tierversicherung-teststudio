@@ -1,4 +1,5 @@
 import type { TestingAgentEvent, TestingCatalog, TestingCompiledScenario, TestingModel, TestingScenario } from '../../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition } from '../../../shared/testing';
 import { invokeCodex } from './cli';
 import { decodeDuplicates, decodeReuse } from './schemas';
 import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplicate-context';
@@ -52,16 +53,16 @@ export function validateReuseReview(raw: unknown, scenario: TestingScenario, cat
     let siblings = scenario.blocks;
     for (const part of (item.parentPath ?? '').split('/').filter(Boolean)) {
       const parent = siblings.find(block => block.id === part);
-      const definition = catalog.definitions.find(value => value.id === parent?.definition.id && value.version === parent.definition.version);
+      const definition = parent && currentTestingDefinition(catalog,parent.definition);
       if (!parent || !definition || !['context', 'workflow'].includes(definition.kind)) throw new Error(`Der vorgeschlagene übergeordnete Blockpfad ${item.parentPath} fehlt oder ist keine Komposition.`);
-      siblings = parent.children ?? definition.body ?? [];
+      siblings = currentTestingChildren(parent,catalog);
     }
     const positions = item.instanceIds.map(id => siblings.findIndex(block => block.id === id)).sort((a, b) => a - b);
     if (positions.some(index => index < 0) || new Set(positions).size !== positions.length || positions.at(-1)! - positions[0] + 1 !== positions.length) throw new Error(`„${item.name}“ muss vorhandene zusammenhängende Kind-IDs auf der Ebene ${item.parentPath ?? 'oberste Ebene'} verwenden. Dort verfügbar: ${siblings.map(block => block.id).join(', ')}.`);
     if (new Set(item.parameters.map(parameter => parameter.key)).size !== item.parameters.length) throw new Error(`„${item.name}“ enthält mehrfach vergebene Parameternamen.`);
     for (const parameter of item.parameters) {
       const block = siblings.find(value => value.id === parameter.instanceId);
-      const definition = catalog.definitions.find(value => value.id === block?.definition.id && value.version === block.definition.version);
+      const definition = block && currentTestingDefinition(catalog,block.definition);
       if (!item.instanceIds.includes(parameter.instanceId) || !definition?.inputs.some(value => value.key === parameter.input)) throw new Error(`Der Wiederverwendungsparameter ${parameter.key} verweist mit input=${JSON.stringify(parameter.input)} nicht auf einen Schemafeldnamen des ausgewählten Blocks ${parameter.instanceId}. input ist ein Schlüssel, niemals der eingetragene Wert. Erlaubte Felder: ${definition?.inputs.map(value => value.key).join(', ') ?? 'Zielblock fehlt'}.`);
     }
   }

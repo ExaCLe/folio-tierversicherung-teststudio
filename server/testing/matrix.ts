@@ -1,5 +1,5 @@
 import type { TestingBlockInstance, TestingCatalog, TestingInput, TestingMatrix, TestingMatrixColumn, TestingScenario, TestingValidationIssue, TestingValue } from '../../shared/testing';
-import { isTestingParameter, isTestingReference, testingValueTypeLabels, testingVersionKey } from '../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition, isTestingParameter, isTestingReference, testingValueTypeLabels } from '../../shared/testing';
 class MatrixModelError extends Error { constructor(message: string, public status = 400, public code = 'MATRIX_INVALID') { super(message); } }
 
 const MAX_MATRIX_ROWS = 100;
@@ -8,15 +8,14 @@ const safeId = (value: string) => /^[a-zA-Z0-9_.-]+$/.test(value) && !['__proto_
 
 type Target = { block: TestingBlockInstance; definitionInputs: TestingInput[]; overrideOwner?: TestingBlockInstance; overridePath?: string };
 function findTarget(scenario: TestingScenario, catalog: TestingCatalog, wanted: string): Target | undefined {
-  const definitions = new Map(catalog.definitions.map(item => [testingVersionKey(item), item]));
   function walk(blocks: TestingBlockInstance[], parent: string, owner?: TestingBlockInstance, relativeParent = ''): Target | undefined {
     for (const block of blocks) {
       const path = parent ? `${parent}/${block.id}` : block.id;
       const relative = relativeParent ? `${relativeParent}/${block.id}` : block.id;
-      const definition = definitions.get(testingVersionKey(block.definition));
+      const definition = currentTestingDefinition(catalog, block.definition);
       if (path === wanted && definition) return { block, definitionInputs: definition.inputs, ...(owner ? { overrideOwner: owner, overridePath: relative } : {}) };
       if (!definition) continue;
-      const body = block.children ?? definition.body ?? [];
+      const body = currentTestingChildren(block, catalog);
       const nested = block.children
         ? walk(body, path)
         : walk(body, path, owner ?? block, owner ? relative : '');
@@ -88,6 +87,13 @@ export function scenarioForTestingMatrixRow(scenario: TestingScenario, catalog: 
   const copy = structuredClone(scenario), matrix = copy.matrix, row = matrix?.rows.find(item => item.id === rowId);
   if (!matrix || !row || !row.enabled) throw new MatrixModelError('Diese Matrixzeile ist nicht vorhanden oder deaktiviert.', 400, 'MATRIX_ROW_INVALID');
   const errors = validateTestingMatrix(copy, catalog); if (errors.length) throw new MatrixModelError(errors.map(item => item.message).join(' '));
+  const materialize=(blocks:TestingBlockInstance[],active:string[]=[]):TestingBlockInstance[]=>blocks.map(block=>{
+    const definition=currentTestingDefinition(catalog,block.definition);if(!definition)return block;
+    const key=`${definition.id}@${definition.version}`,next={...structuredClone(block),definition:{id:definition.id,version:definition.version}};
+    if(['workflow','context'].includes(definition.kind))next.children=active.includes(key)?[]:materialize(currentTestingChildren(block,catalog),[...active,key]);
+    return next;
+  });
+  copy.blocks=materialize(copy.blocks);
   for (const column of matrix.columns) {
     const target = findTarget(copy, catalog, column.target.blockPath)!;
     if (target.overrideOwner && target.overridePath) {

@@ -1,5 +1,5 @@
 import type { TestingBlockDefinition, TestingBlockInstance, TestingCatalog, TestingGraph, TestingGraphEdge, TestingGraphNode, TestingImpact, TestingRun, TestingScenario } from '../../shared/testing';
-import { testingVersionKey } from '../../shared/testing';
+import { currentTestingChildren, currentTestingDefinitions, testingVersionKey } from '../../shared/testing';
 import { getTestingCatalog } from './catalog';
 import { compileTestingScenario, latestTestingBinding } from './compiler';
 import { getTestingApproval, listTestingRuns, listTestingScenarioRevisions, listTestingScenarios } from './repository';
@@ -43,17 +43,17 @@ export function buildTestingGraph(catalog:TestingCatalog=getTestingCatalog(),sce
 export function getTestingImpact(bindingId:string,catalog:TestingCatalog=getTestingCatalog(),scenarios:TestingScenario[]=listTestingScenarios(),runs:TestingRun[]=listTestingRuns()):TestingImpact {
   const binding=latestTestingBinding(catalog,bindingId);
   const relevantBindings=catalog.bindings.filter(b=>b.id===bindingId);
-  const direct=new Set(relevantBindings.flatMap(b=>b.definitionRefs.map(testingVersionKey)));
-  for(const definition of catalog.definitions)if(definition.bindingId===bindingId)direct.add(testingVersionKey(definition));
+  const direct=new Set(relevantBindings.flatMap(b=>b.definitionRefs.map(ref=>ref.id)));
+  for(const definition of currentTestingDefinitions(catalog))if(definition.bindingId===bindingId)direct.add(definition.id);
   const affected=new Map<string,{definition:TestingBlockDefinition;direct:boolean;via:string[]}>();
-  for(const definition of catalog.definitions)if(direct.has(testingVersionKey(definition)))affected.set(testingVersionKey(definition),{definition,direct:true,via:[bindingId]});
-  const references=(blocks:TestingBlockInstance[]):string[]=>blocks.flatMap(block=>[testingVersionKey(block.definition),...references(block.children??[])]);
-  let changed=true;while(changed){changed=false;for(const definition of catalog.definitions){const key=testingVersionKey(definition);if(affected.has(key))continue;const via=references(definition.body??[]).filter(ref=>affected.has(ref));if(via.length){affected.set(key,{definition,direct:false,via});changed=true;}}}
+  for(const definition of currentTestingDefinitions(catalog))if(direct.has(definition.id))affected.set(definition.id,{definition,direct:true,via:[bindingId]});
+  const references=(blocks:TestingBlockInstance[],active:string[]=[]):string[]=>blocks.flatMap(block=>[block.definition.id,...(active.includes(block.definition.id)?[]:references(currentTestingChildren(block,catalog),[...active,block.definition.id]))]);
+  let changed=true;while(changed){changed=false;for(const definition of currentTestingDefinitions(catalog)){if(affected.has(definition.id))continue;const via=references(definition.body??[]).filter(ref=>affected.has(ref));if(via.length){affected.set(definition.id,{definition,direct:false,via});changed=true;}}}
   const impactedScenarios:TestingImpact['scenarios']=[];
   for(const scenario of scenarios) {
-    const compiled=compileTestingScenario(scenario,catalog);const steps=compiled.steps.filter(step=>step.binding?.id===bindingId || direct.has(testingVersionKey(step.definition)));
+    const compiled=compileTestingScenario(scenario,catalog);const steps=compiled.steps.filter(step=>step.binding?.id===bindingId || direct.has(step.definition.id));
     if(!steps.length)continue;
-    impactedScenarios.push({scenarioId:scenario.id,title:scenario.title,revision:scenario.revision,direct:scenario.blocks.some(block=>direct.has(testingVersionKey(block.definition))),instancePaths:steps.map(step=>step.path)});
+    impactedScenarios.push({scenarioId:scenario.id,title:scenario.title,revision:scenario.revision,direct:scenario.blocks.some(block=>direct.has(block.definition.id)),instancePaths:steps.map(step=>step.path)});
   }
   return {bindingId,bindingRevision:binding?.revision??0,definitions:[...affected.values()].map(item=>({definition:{id:item.definition.id,version:item.definition.version},name:item.definition.name,direct:item.direct,via:item.via})),scenarios:impactedScenarios,historicalRuns:runs.flatMap(run=>run.compiled.bindings.filter(b=>b.id===bindingId).map(b=>({runId:run.id,scenarioId:run.scenarioId,bindingRevision:b.revision,status:run.status}))),suggestedScenarioIds:impactedScenarios.map(s=>s.scenarioId)};
 }

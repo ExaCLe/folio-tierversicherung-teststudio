@@ -92,22 +92,19 @@ function migrationFixture(nested = false) {
   return { c, before, after, target, blocks, path: nested ? 'rolle/pruefung' : 'pruefung', scenario: { ...structuredClone(seeds[0]), blocks } };
 }
 
-test('Expliziter Versionswechsel verwendet neuen Feldtyp und behält Referenz sowie alte Version', () => {
+test('Eine gespeicherte ältere Referenz verwendet automatisch das aktuelle Schema', () => {
   const { c, after, blocks, path, scenario } = migrationFixture();
   const beforeJSON = JSON.stringify({ c, blocks }), fingerprint = testingFingerprint(scenario, c);
-  const compiledBefore = compileTestingScenario(scenario, c);
-  assert(compiledBefore.issues.some(issue => issue.code === 'INPUT_REFERENCE_TYPE'));
-  const migrated = migrateDefinition(blocks, path, c, after);
-  assert.deepEqual(migrated[1].inputs.proposalId, blocks[1].inputs.proposalId);
-  assert.equal(migrated[1].definition.version, '1.0.1');
-  const compiledAfter = compileTestingScenario({ ...scenario, blocks: migrated }, c);
-  assert.equal(compiledAfter.valid, true, JSON.stringify(compiledAfter.issues));
-  const index = indexFor(migrated, {}, c);
+  assert.equal(blocks[1].definition.version,'1.0.0');
+  const compiled = compileTestingScenario(scenario, c);
+  assert.equal(compiled.valid, true, JSON.stringify(compiled.issues));
+  assert.equal(compiled.steps.find(step=>step.path===path)?.definition.version,after.version);
+  const index = indexFor(blocks, {}, c);
   assert.equal(describeReference(index, path, index.inputs.get(path)!.proposalId, 'proposal-ref').status, 'available');
   assert.deepEqual(referenceChoices(index, path, 'proposal-ref').map(source => source.value), ['vorschlag']);
   assert.equal(JSON.stringify({ c, blocks }), beforeJSON);
   assert.equal(testingFingerprint(scenario, c), fingerprint);
-  assert.equal(flattenBlocks(blocks, c).find(entry => entry.path === path)!.definition!.inputs[0].type, 'contract-ref');
+  assert.equal(flattenBlocks(blocks, c).find(entry => entry.path === path)!.definition!.inputs[0].type, 'proposal-ref');
 });
 
 test('Tatsächlich falsche Quelle wird bei Versionswechsel weder umgebunden noch passend markiert', () => {

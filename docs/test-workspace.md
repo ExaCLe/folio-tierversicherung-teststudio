@@ -73,8 +73,8 @@ Beim Definieren eines Blocks gibt der Mensch einen Namen, die Blockart und Einga
 
 Über „Wissen hinzufügen“ lassen sich bestehende Quellen auswählen oder neue Wissensbeschreibungen ergänzen. Die neue Wissensbeschreibung und ihre Verbindung zum Block werden gemeinsam gespeichert. Es ist nicht nötig, einen beliebigen vorhandenen Wissenseintrag auszuwählen, nur um den Dialog abschließen zu können.
 
-## Dubletten und Versionen
+## Dubletten und gemeinsame Blockdefinitionen
 
-Eine andere Version desselben Blocks ist keine eigenständige Dublette. Versionspflege gehört zur verwendeten Blockdefinition. Ein Dublettenvergleich untersucht dagegen andere Bausteine und erklärt, was fachlich übereinstimmt, welche Eingaben abweichen und welche Entscheidung erforderlich ist.
+Eine interne Revision desselben Blocks ist keine eigenständige Dublette. Im Editor gibt es je stabiler Block-ID genau eine aktuelle gemeinsame Definition; ein Testfall wählt keine ältere Fassung aus. Ein Dublettenvergleich untersucht dagegen andere Bausteine und erklärt, was fachlich übereinstimmt, welche Eingaben abweichen und welche Entscheidung erforderlich ist.
 
-Weder ein Versionswechsel noch ein Vorschlag zur Wiederverwendung verändert still den freigegebenen Test. Eine fachliche Änderung braucht eine neue Prüfung. Wiederverwendungsvorschläge nach einem bestandenen Lauf sind optional; ihr Fehlschlagen macht den bestandenen Browserlauf nicht rückwirkend ungültig.
+Eine Änderung der gemeinsamen Definition verändert den wirksamen fachlichen Stand aller aktuellen Verwendungen und braucht eine neue Prüfung. Historische Läufe bleiben eingefroren. Wiederverwendungsvorschläge nach einem bestandenen Lauf sind optional; ihr Fehlschlagen macht den bestandenen Browserlauf nicht rückwirkend ungültig.

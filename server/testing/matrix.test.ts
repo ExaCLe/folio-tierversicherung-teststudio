@@ -67,7 +67,7 @@ test('Zweifach verschachtelte Definitionskörper erhalten Objekt-Defaults und Ge
   scenario.matrix = matrix([column('land', 'aussen/mitte/pruefen', 'profil.adresse.land', 'text')], { land: 'AT' });
   const beforeScenario = clone(scenario), beforeCatalog = clone(baseCatalog);
   const row = scenarioForTestingMatrixRow(scenario, baseCatalog, 'fall-1');
-  assert.deepEqual(row.blocks[0].overrides?.['mitte/pruefen']?.profil, { adresse: { land: 'AT', plz: '87437' }, alter: 4 });
+  assert.deepEqual(row.blocks[0].children?.[0].children?.[0].inputs.profil, { adresse: { land: 'AT', plz: '87437' }, alter: 4 });
   assert.deepEqual(scenario, beforeScenario, 'Materialisierung darf die gespeicherte Matrix nicht verändern');
   assert.deepEqual(baseCatalog, beforeCatalog, 'Materialisierung darf den Katalog nicht verändern');
 });
@@ -84,7 +84,7 @@ test('Eine Matrix darf ein Pflichtfeld vollständig liefern, braucht aber einen 
   scenario.matrix = matrix([column('erwartet', 'aussen/mitte/pruefen', 'expected', 'text')], { erwartet: 'angenommen' });
   const compiled = compileTestingScenario(scenario, baseCatalog);
   assert.equal(compiled.valid, true, JSON.stringify(compiled.issues));
-  assert.equal(scenarioForTestingMatrixRow(scenario, baseCatalog, 'fall-1').blocks[0].overrides?.['mitte/pruefen']?.expected, 'angenommen');
+  assert.equal(scenarioForTestingMatrixRow(scenario, baseCatalog, 'fall-1').blocks[0].children?.[0].children?.[0].inputs.expected, 'angenommen');
 
   const action = definition({ ...leaf, id: 'matrix.aktion', kind: 'action' });
   const noAssertionCatalog = { ...baseCatalog, definitions: [action], bindings: [binding(action.id)] };
@@ -132,4 +132,32 @@ test('Matrixzeilen verwenden ausschließlich die eingefrorene Bindungsrevision d
   assert.equal(row.approval?.fingerprint, parent.fingerprint);
   assert.deepEqual(row.matrixOrigin, { parentFingerprint: parent.fingerprint, rowId: 'fall-1', approval: parent.approval });
   assert.equal(row.executable, true);
+});
+
+test('Matrixzeilen wiederholen den eingefrorenen aktuellen Definitionskörper',()=>{
+  const catalog=clone(baseCatalog),scenario=baseScenario();
+  scenario.blocks[0].children=clone(outer.body!);
+  scenario.blocks[0].children![0].children=clone(middle.body!);
+  scenario.matrix=matrix([column('erwartet','aussen/mitte/pruefen','expected','text')],{erwartet:'angenommen'});
+  const extra=instance('zusatz',leaf.id,{expected:'zusätzliche Prüfung'});
+  catalog.definitions.push({...clone(middle),version:'1.0.1',supersedes:{id:middle.id,version:middle.version},body:[...clone(middle.body!),extra]});
+  const parent=compileTestingScenario(scenario,catalog,approval(scenario,catalog));
+  assert.equal(parent.executable,true,JSON.stringify(parent.issues));
+  assert.deepEqual(parent.steps.map(step=>step.path),['aussen/mitte/pruefen','aussen/mitte/zusatz']);
+  assert.equal(parent.scenario.blocks[0].children?.[0].definition.version,'1.0.1');
+  const frozen={revision:`run-${parent.fingerprint}`,definitions:parent.definitions,bindings:parent.bindings,knowledge:parent.knowledge};
+  catalog.definitions.push({...clone(middle),version:'1.0.2',body:[]});
+  const row=compileTestingMatrixRow(parent,'fall-1',frozen);
+  assert.deepEqual(row.steps.map(step=>step.path),parent.steps.map(step=>step.path));
+  assert.equal(row.steps[0].inputs.expected,'angenommen');
+  assert.equal(row.steps[1].inputs.expected,'zusätzliche Prüfung');
+});
+
+test('Eine Matrixzeile schreibt in einen aktuell abgeglichenen materialisierten Körper',()=>{
+  const catalog=clone(baseCatalog),scenario=baseScenario();scenario.blocks[0].children=clone(outer.body!);scenario.blocks[0].children![0].children=clone(middle.body!);
+  scenario.matrix=matrix([column('erwartet','aussen/mitte/pruefen','expected','text')],{erwartet:'aktuell gesetzt'});
+  catalog.definitions.push({...clone(middle),version:'1.0.1',body:[...clone(middle.body!),instance('zusatz',leaf.id,{expected:'zusatz'})]});
+  const row=scenarioForTestingMatrixRow(scenario,catalog,'fall-1');
+  assert.equal(row.blocks[0].children?.[0].children?.find(block=>block.id==='pruefen')?.inputs.expected,'aktuell gesetzt');
+  assert.equal(row.blocks[0].children?.[0].children?.some(block=>block.id==='zusatz'),true);
 });

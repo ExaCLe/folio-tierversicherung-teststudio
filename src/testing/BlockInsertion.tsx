@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowDown, MousePointer2, Plus, Search } from 'lucide-react';
 import type { TestingBlockDefinition, TestingCatalog } from '../../shared/testing';
+import { currentTestingDefinitions } from '../../shared/testing';
 import type { BlockEntry } from './model';
 import { kindLabels } from './model';
 import { Modal } from './ui';
@@ -17,8 +18,9 @@ export function BlockInsertion({ scenarioId, entry, catalog, onAdd, onDefine }: 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string>();
   const container = entry && ['workflow', 'context'].includes(entry.definition?.kind ?? '') ? entry : undefined;
-  const matches = catalog.definitions.filter(definition => `${definition.name} ${definition.description} ${definition.category}`.toLocaleLowerCase('de').includes(query.toLocaleLowerCase('de')));
-  const chosen = catalog.definitions.find(definition => `${definition.id}@${definition.version}` === selected);
+  const definitions=currentTestingDefinitions(catalog);
+  const matches = definitions.filter(definition => `${definition.name} ${definition.description} ${definition.category}`.toLocaleLowerCase('de').includes(query.toLocaleLowerCase('de')));
+  const chosen = definitions.find(definition => `${definition.id}@${definition.version}` === selected);
   const add = (placement: 'canvas' | 'end') => { if (!chosen) return; onAdd(chosen, { scenarioId, placement, ...(placement === 'end' && within && container ? { parentPath: container.path } : {}) }); setPicker(false); };
   return <section className="t-block-insertion" aria-label="Block hinzufügen">
     <button className="t-button" onClick={() => { setQuery(''); setSelected(undefined); setPicker(true); }}><Plus size={16}/>Block hinzufügen</button>

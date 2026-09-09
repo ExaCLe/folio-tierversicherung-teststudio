@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import type {TestingApproval,TestingBlockDefinition,TestingBlockInstance,TestingBusinessDraft,TestingCatalog,TestingRun,TestingScenario,TestingTechnicalBinding} from '../../shared/testing';
+import {createTestingInstance,currentTestingChildren} from '../../shared/testing';
 import {compileTestingScenario,findTestingDuplicates,testingFingerprint} from './compiler';
 
 const directory=mkdtempSync(join(tmpdir(),'folio-tiermodell-'));
@@ -34,6 +35,56 @@ test('Freigabe bindet lokale Werte, Definitionskörper und Regeln, aber keine te
   const localBody=clone(s);localBody.blocks[0].children=clone(def(c,'ablauf.kuh-vorschlag').body!);localBody.blocks[0].children![0].inputs.name='Anderer Kunde';assert.notEqual(testingFingerprint(localBody,c),a.fingerprint);
   const knowledge=clone(c);knowledge.knowledge.find(k=>k.id==='regel.direktionsanfrage')!.content+='\nNeue fachliche Grenze.';assert.notEqual(testingFingerprint(s,knowledge),a.fingerprint);
   const technical=clone(c);technical.bindings.push({...technical.bindings[0],revision:3,locators:[{key:'speichern',method:'role',role:'button',value:'Kunde übernehmen'}]});assert.equal(testingFingerprint(s,technical),a.fingerprint);assert.equal(compileTestingScenario(s,technical,a).bindings.find(b=>b.id===technical.bindings[0].id)?.revision,3);
+});
+test('Gespeicherte Verwendungen folgen der aktuellen gemeinsamen Definition und frieren den wirksamen Stand ein',()=>{
+  const c=catalog(),scenario=clone(seeds()[0]),workflow=clone(def(c,'ablauf.kuh-vorschlag'));
+  scenario.blocks[0].definition={id:workflow.id,version:workflow.version};
+  scenario.blocks[0].children=clone(workflow.body!);
+  scenario.blocks[0].children![0].inputs.name='Expliziter Kundenname';
+  const before=testingFingerprint(scenario,c);
+  const next=clone(workflow);next.version='1.0.1';next.supersedes={id:workflow.id,version:workflow.version};
+  const added=clone(workflow.body![0]);added.id='zusatz';added.outputs={customer:'zusatzkunde'};
+  next.body=[...clone(workflow.body!),added];c.definitions.push(next);
+  const compiled=compileTestingScenario(scenario,c);
+  assert.notEqual(testingFingerprint(scenario,c),before);
+  assert.equal(compiled.scenario.blocks[0].definition.version,'1.0.1');
+  assert.equal(compiled.scenario.blocks[0].children?.some(block=>block.id==='zusatz'),true);
+  assert.equal(compiled.steps.find(step=>step.path.endsWith('/kunde'))?.inputs.name,'Expliziter Kundenname');
+  assert.equal(compiled.steps.some(step=>step.path.endsWith('/zusatz')),true);
+  const frozen={revision:'eingefroren',definitions:compiled.definitions,bindings:compiled.bindings,knowledge:compiled.knowledge};
+  c.definitions.push({...clone(next),version:'1.0.2',body:[]});
+  assert.equal(compileTestingScenario(compiled.scenario,frozen).steps.some(step=>step.path.endsWith('/zusatz')),true);
+});
+test('Neue Pflichtfelder der aktuellen Definition werden in allen alten Verwendungen konkret gemeldet',()=>{
+  const c=catalog(),scenario={...clone(seeds()[0]),blocks:[inst('kunde','kunde.anlegen')]};
+  const original=clone(def(c,'kunde.anlegen'));
+  c.definitions.push({...original,version:'1.0.1',supersedes:{id:original.id,version:original.version},inputs:[...original.inputs,{key:'policenwert',label:'Policenwert',type:'text',required:true}]});
+  const compiled=compileTestingScenario(scenario,c);
+  assert.equal(compiled.steps[0].definition.version,'1.0.1');
+  assert.match(compiled.issues.find(issue=>issue.code==='INPUT_REQUIRED'&&issue.field==='policenwert')?.message??'',/Policenwert/);
+  assert.equal(compiled.executable,false);
+});
+test('Der Dreiwegeabgleich übernimmt neue gemeinsame Schritte und bewahrt lokale Struktur und Werte',()=>{
+  const c=catalog(),base=clone(def(c,'ablauf.kuh-vorschlag')),local=clone(base.body!);
+  local.reverse();local[0].inputs={...local[0].inputs,sumInsured:17500};
+  const removedId=base.body![1].id;local.splice(local.findIndex(block=>block.id===removedId),1);const own=clone(base.body![0]);own.id='lokal';local.push(own);
+  const remote=clone(base);remote.version='1.0.1';remote.body=clone(base.body!);
+  const added=clone(base.body![0]);added.id='gemeinsam-neu';remote.body.splice(1,0,added);c.definitions.push(remote);
+  const resolved=currentTestingChildren({id:'ablauf',definition:{id:base.id,version:base.version},inputs:{},children:local},c);
+  assert.equal(resolved[0].id,local[0].id);
+  assert.equal(resolved.some(block=>block.id==='gemeinsam-neu'),true);
+  assert.equal(resolved.some(block=>block.id==='lokal'),true);
+  assert.equal(resolved.some(block=>block.id===removedId),false);
+  assert.equal(resolved.find(block=>block.id===local[0].id)?.inputs.sumInsured,17500);
+});
+test('Neue Verwendungen speichern keine Defaults; gespeicherte Werte bleiben ausdrückliche Abweichungen',()=>{
+  const c=catalog(),original=clone(def(c,'kunde.anlegen')),instance=createTestingInstance(original,'kunde');
+  assert.deepEqual(instance.inputs,{});
+  const defaultInput=original.inputs.find(input=>input.default!==undefined)!;
+  instance.inputs[defaultInput.key]=clone(defaultInput.default!);
+  c.definitions.push({...clone(original),version:'1.0.1',inputs:original.inputs.map(input=>input.key===defaultInput.key?{...input,default:'Neuer Standard'}:input)});
+  const compiled=compileTestingScenario({...clone(seeds()[0]),blocks:[instance]},c);
+  assert.deepEqual(compiled.steps[0].inputs[defaultInput.key],defaultInput.default);
 });
 test('Nur Wissensrückverweise ändern keine Fachfreigabe; der eingefrorene Wissensstand bleibt nachweisbar',()=>{
   const s=seeds()[0],c=catalog(),before=testingFingerprint(s,c);const changed=clone(c);const doc=changed.knowledge.find(d=>d.id==='fach.kunde-betrieb')!;doc.revision++;doc.definitionRefs.push({id:'neuer.block',version:'1.0.0'});assert.equal(testingFingerprint(s,changed),before);
@@ -93,6 +144,13 @@ test('Andere Versionen derselben Komponente sind keine Dubletten, andere Kompone
   assert.deepEqual(comparison.candidates.map(item=>item.definition),[{id:other.id,version:other.version}]);
   assert.equal(comparison.decision,'reuse');assert.deepEqual(comparison.chosen,{id:other.id,version:other.version});
 });
+test('Dublettenprüfung verwendet keine fachlich abweichende aktuelle Definition über einen Treffer der Historie',()=>{
+  const c=catalog(),proposed={...clone(def(c,'kunde.anlegen')),id:'vorschlag.aktuell'};
+  const old={...clone(proposed),id:'alternative.mit-historie',version:'1.0.0'};
+  const current={...clone(old),version:'1.0.1',semanticKey:'fachlich.anders',operation:'otherOperation',description:'Eine inzwischen andere Fähigkeit.'};
+  const report=findTestingDuplicates(proposed,{...c,definitions:[proposed,old,current]});
+  assert.equal(report.candidates.some(candidate=>candidate.definition.id===old.id&&candidate.decision==='reuse'),false);
+});
 test('Leere options bei Text ist keine Auswahlbeschränkung; unbekannte Typen werden gespeichert nicht akzeptiert',()=>{
   const c=catalog();def(c,'kunde.anlegen').inputs[0].options=[];assert.equal(compileTestingScenario({...seeds()[0],blocks:[inst('kunde','kunde.anlegen')]},c).valid,true);
   const bad=clone(def(c,'kunde.anlegen'));bad.inputs[0].type='erfunden' as never;assert.throws(()=>repository.assertTestingDefinition(bad),/bekannten Werttyp/);
@@ -150,6 +208,15 @@ test('Promotion innerhalb eines Workflows führt dessen Parameter und externe Er
   const s=repository.saveTestingScenario({...clone(seeds()[0]),id:'workflow-promotion'},0);
   const result=repository.promoteTestingBlocks({scenarioId:s.id,expectedRevision:1,parentPath:'kuhvorschlag',instanceIds:['betrieb','tier'],name:'Betrieb und Kuh erfassen',description:'Erfasst den Betrieb und dessen Kuh.',parameters:[],replaceSelection:true});
   const compiled=compileTestingScenario(result.scenario,getTestingCatalog());assert.equal(compiled.valid,true,JSON.stringify(compiled.issues));assert.equal(compiled.steps.find(step=>step.operation==='createAnimal')?.inputs.sumInsured,15000);assert.equal(compiled.steps.length,7);
+});
+test('Promotion erreicht einen neu ergänzten Schritt in einer alten materialisierten Workflowverwendung',()=>{
+  const c=getTestingCatalog(),source=clone(def(c,'ablauf.kuh-vorschlag')),id=`ablauf.promotion-aktuell-${Date.now()}`;
+  const old={...source,id,semanticKey:`workflow.${id}`,version:'1.0.0',origin:'human' as const};repository.saveTestingDefinition(old);
+  const added=clone(source.body![0]);added.id='gemeinsam-neu';added.outputs={customer:'zusatzkunde'};
+  const current={...clone(old),version:'1.0.1',supersedes:{id,version:'1.0.0'},body:[...clone(old.body!),added]};repository.saveTestingDefinition(current);
+  const scenario=repository.saveTestingScenario({...clone(seeds()[0]),id:`promotion-aktuell-${Date.now()}`,blocks:[{id:'workflow',definition:{id,version:'1.0.0'},inputs:{},children:clone(old.body!)}]},0);
+  const promoted=repository.promoteTestingBlocks({scenarioId:scenario.id,expectedRevision:scenario.revision,parentPath:'workflow',instanceIds:['gemeinsam-neu'],name:'Neuen gemeinsamen Schritt bündeln',description:'Bündelt den aktuellen gemeinsamen Schritt.',parameters:[],replaceSelection:false});
+  assert.equal(promoted.definition.body?.[0].id,'gemeinsam-neu');
 });
 test('Explizit umbenannte Parameter eines inneren Workflows erhalten eigenständig nutzbare Standardwerte',()=>{
   const original=clone(seeds()[0]);original.blocks[0].inputs={...original.blocks[0].inputs,customerName:'Klara Beispiel',state:'Bayern',farmStreet:'Hauptstraße 4',farmPostalCode:'87437',farmCity:'Kempten'};

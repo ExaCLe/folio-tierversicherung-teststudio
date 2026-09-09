@@ -3,6 +3,7 @@ import { basename, resolve, sep } from 'node:path';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import type { TestingAgentJob, TestingApproval, TestingBlockInstance, TestingReuseSuggestion, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingTechnicalIssue } from '../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition, testingVersionKey } from '../../shared/testing';
 import { db } from '../store';
 import { getTestingCatalog } from './catalog';
 import { compileTestingScenario, testingFingerprint } from './compiler';
@@ -91,7 +92,7 @@ export function createTestingRouter(): Router {
   router.get('/bindings/:id/impact', guard((req, res) => res.json(getTestingImpact(req.params.id))));
   router.get('/definitions/:id/impact', guard((req, res) => {
     const catalog = getTestingCatalog();
-    const definition = catalog.definitions.filter(item => item.id === req.params.id).at(-1);
+    const definition = currentTestingDefinition(catalog, req.params.id);
     const binding = definition?.bindingId ?? catalog.bindings.find(item => item.definitionRefs.some(ref => ref.id === req.params.id))?.id ?? req.params.id;
     res.json(getTestingImpact(binding));
   }));
@@ -112,14 +113,14 @@ export function createTestingRouter(): Router {
     function replace(blocks: TestingBlockInstance[], active: string[] = []): { blocks: TestingBlockInstance[]; changed: boolean } {
       let changed = false;
       const next = blocks.map(block => {
-        const choice = choices.find(item => item.proposed.id === block.definition.id && item.proposed.version === block.definition.version);
+        const choice = choices.find(item => item.proposed.id === block.definition.id);
         if (choice) { changed = true; return { ...block, definition: choice.chosen }; }
-        const key = `${block.definition.id}@${block.definition.version}`;
+        const definition = currentTestingDefinition(catalog,block.definition);
+        const key = definition ? testingVersionKey(definition) : block.definition.id;
         if (active.includes(key)) return block;
-        const definition = catalog.definitions.find(item => item.id === block.definition.id && item.version === block.definition.version);
-        const nested = replace(block.children ?? definition?.body ?? [], [...active, key]);
+        const nested = replace(currentTestingChildren(block,catalog), [...active, key]);
         if (!nested.changed) return block;
-        changed = true; return { ...block, children: nested.blocks };
+        changed = true; return { ...block,definition:definition?{id:definition.id,version:definition.version}:block.definition, children: nested.blocks };
       });
       return { blocks: next, changed };
     }

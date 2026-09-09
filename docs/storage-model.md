@@ -7,7 +7,7 @@ Die Testwerkstatt speichert fachliche Bedeutung, konkrete Verwendung und technis
 | Datensatz | Identität | Enthält |
 | --- | --- | --- |
 | Blockdefinition | stabile ID und semantische Version | Bedeutung, Eingabeschema, Ergebnisse, Wissen, Vor- und Nachbedingungen, optional enthaltene Blöcke |
-| Blockverwendung | lokale ID innerhalb einer Komposition | gepinnte Definitionsversion, konkrete Werte, Ergebnisnamen, lokale Abweichungen |
+| Blockverwendung | lokale ID innerhalb einer Komposition | stabile Definitions-ID, konkrete Werte, Ergebnisnamen, lokale Abweichungen; die Revisionsnummer bleibt nur Herkunftsnachweis |
 | Testfall | stabile ID und Revision | Testziel, geordnete Startkette, Erwartung, Wissensverweise |
 | Editorzustand | Testfall-ID | Positionen, Zoom, Auswahl, eingeklappte Gruppen und lose Blöcke |
 | Wissensdokument | stabile ID und Revision | Fachregel oder Verfahren, erforderliche Felder, Bedingungen und Definitionsverweise |
@@ -62,13 +62,15 @@ Eine zusammenhängende Auswahl kann auch innerhalb eines Rollen- oder Workflowbl
 | Änderung | Neuer Datensatz | Folge |
 | --- | --- | --- |
 | In einem Test die Summe auf 15.000 EUR setzen | neue Testfallrevision | Fachfreigabe wird veraltet |
-| Ein neues fachliches Pflichtfeld ergänzen | neue Definitionsversion und eventuell Wissensrevision | betroffene Verwendungen müssen bewusst auf die neue Version wechseln |
+| Ein neues fachliches Pflichtfeld ergänzen | neue interne Definitionsrevision und eventuell Wissensrevision | alle bearbeitbaren Testfälle verwenden die aktuelle Definition; ein fehlender Wert wird am betroffenen Block gemeldet |
 | Einen Button-Locator reparieren | neue technische Bindungsrevision | Fachfreigabe bleibt gültig; betroffene Tests erneut ausführen |
 | Einen Block im Arbeitsbereich verschieben | neuer Editorzustand | fachlicher Ablauf und Freigabe bleiben gleich |
 
 Definitionen, Wissensrevisionen und technische Bindungsrevisionen sind unveränderlich. Dieselbe ID-Version-Kombination darf nicht still mit anderem Inhalt überschrieben werden. Das Repository weist einen solchen Versuch mit HTTP 409 zurück.
 
-Eine neue Definitionsversion aktualisiert keine bestehenden Verwendungen automatisch. Das schützt Tests vor unbemerkten Änderungen gemeinsamer Standards. Die technische Bindung kann dagegen zentral repariert werden, weil sie die unveränderte fachliche Fähigkeit ausführt.
+Eine neue Definitionsrevision ist der neue gemeinsame Stand des Blocks. Alle bearbeitbaren Testfälle lösen dieselbe stabile Block-ID auf diesen Stand auf, auch in verschachtelten Bausteinen, Referenzauswahlen und Testmatrizen. Konkrete gespeicherte Werte und lokale Overrides bleiben erhalten. Neue Verwendungen speichern Standardwerte nicht als lokale Kopie, sodass spätere Standardänderungen zentral greifen. Ältere ausdrücklich gespeicherte Werte bleiben absichtlich lokal; ihre frühere Herkunft lässt sich im alten Datenmodell nicht sicher von einer bewussten Eingabe unterscheiden.
+
+Enthält die neue Definition ein Pflichtfeld ohne Standardwert, erfindet das System keinen Wert. Die Validierung nennt Block, Pfad und Feld, damit der Testfall gezielt ergänzt werden kann. Eine Definitionsänderung verändert den fachlichen Fingerprint und macht vorhandene Freigaben für die aktuellen Testfälle ungültig. Bereits gestartete oder gespeicherte Läufe behalten dagegen ihren eingefrorenen Definitions-, Bindungs- und Kompilierungsstand.
 
 ## Was eine Fachfreigabe genau bestätigt
 

@@ -1,5 +1,5 @@
 import type { TestingBlockInstance, TestingCatalog, TestingScenario, TestingScenarioEditChange, TestingModel, TestingAgentEvent } from '../../../shared/testing';
-import { testingVersionKey } from '../../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition, testingVersionKey } from '../../../shared/testing';
 import { stableTestingStringify } from '../compiler';
 import { previewTestingScenarioEdit } from '../repository';
 import { agentContext, flowRevisionPrompt } from './prompts';
@@ -44,10 +44,10 @@ export function decodeScenarioEdit(raw: unknown) {
 type FlowEntry = { path: string; parent: string; index: number; label: string; block: TestingBlockInstance };
 export function flowEntries(blocks: TestingBlockInstance[], catalog: TestingCatalog, parent = '', active: string[] = []): FlowEntry[] {
   return blocks.flatMap((block, index) => {
-    const definition = catalog.definitions.find(item => testingVersionKey(item) === testingVersionKey(block.definition));
+    const definition = currentTestingDefinition(catalog, block.definition);
     const path = parent ? `${parent}/${block.id}` : block.id;
     const key = testingVersionKey(block.definition);
-    return [{ path, parent, index, label: block.label || definition?.name || block.definition.id, block }, ...(!active.includes(key) ? flowEntries(block.children ?? definition?.body ?? [], catalog, path, [...active, key]) : [])];
+    return [{ path, parent, index, label: block.label || definition?.name || block.definition.id, block }, ...(!active.includes(key) ? flowEntries(currentTestingChildren(block,catalog), catalog, path, [...active, key]) : [])];
   });
 }
 function previousFlowEntries(before:FlowEntry[],after:FlowEntry[]):Map<string,FlowEntry> {

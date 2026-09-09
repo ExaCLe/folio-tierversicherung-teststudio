@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { TestingApproval, TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingInput, TestingKnowledgeDocument, TestingModel, TestingPromotionRequest, TestingPromotionResult, TestingRun, TestingScenario, TestingScenarioLayout, TestingTechnicalBinding, TestingValue, TestingVersionRef } from '../../shared/testing';
-import { isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
+import { currentTestingChildren, currentTestingDefinition, isTestingParameter, isTestingReference, testingVersionKey } from '../../shared/testing';
 import { dataFile, db } from '../store';
 import { getTestingCatalog, loadTestingSeedScenarios } from './catalog';
 import { compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from './compiler';
@@ -160,10 +160,10 @@ function values(value:TestingValue,visit:(value:TestingValue)=>void) {visit(valu
 function mapValues(value:TestingValue,transform:(value:TestingValue)=>TestingValue):TestingValue {const transformed=transform(value);if(transformed!==value)return transformed;if(Array.isArray(value))return value.map(v=>mapValues(v,transform));if(value&&typeof value==='object'&&!isTestingReference(value))return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,mapValues(v,transform)]));return value;}
 export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPromotionResult {
   const scenario=getTestingScenario(request.scenarioId);if(scenario.revision!==request.expectedRevision)throw new TestingModelError('Der Testfall hat sich seit dem Wiederverwendungsvorschlag geändert.',409,'REVISION_CONFLICT');
-  const catalog=getTestingCatalog();const defs=new Map(catalog.definitions.map(d=>[testingVersionKey(d),d]));
+  const catalog=getTestingCatalog();const defs=new Map(catalog.definitions.map(d=>[d.id,currentTestingDefinition(catalog,d.id)!]));
   let siblings=scenario.blocks;let parent:TestingBlockInstance|undefined;
   const enclosing:TestingBlockInstance[]=[];
-  for(const part of (request.parentPath??'').split('/').filter(Boolean)){parent=siblings.find(b=>b.id===part);if(!parent)throw new TestingModelError('Der übergeordnete Blockpfad ist nicht mehr vorhanden.');const parentDefinition=defs.get(testingVersionKey(parent.definition));if(!parentDefinition||!['context','workflow'].includes(parentDefinition.kind))throw new TestingModelError('Die Auswahl muss innerhalb einer zusammengesetzten Folge oder Rolle liegen.');enclosing.push(parent);parent.children??=clone(parentDefinition.body??[]);siblings=parent.children;}
+  for(const part of (request.parentPath??'').split('/').filter(Boolean)){parent=siblings.find(b=>b.id===part);if(!parent)throw new TestingModelError('Der übergeordnete Blockpfad ist nicht mehr vorhanden.');const parentDefinition=defs.get(parent.definition.id);if(!parentDefinition||!['context','workflow'].includes(parentDefinition.kind))throw new TestingModelError('Die Auswahl muss innerhalb einer zusammengesetzten Folge oder Rolle liegen.');enclosing.push(parent);parent.children=clone(currentTestingChildren(parent,catalog));parent.definition={id:parentDefinition.id,version:parentDefinition.version};siblings=parent.children;}
   const selected=new Set(request.instanceIds);const positions=siblings.map((b,i)=>selected.has(b.id)?i:-1).filter(i=>i>=0);
   if(!positions.length||positions.length!==selected.size||positions.at(-1)!-positions[0]+1!==positions.length)throw new TestingModelError('Wähle eine zusammenhängende Folge auf derselben Ablaufebene.');
   const body=clone(siblings.slice(positions[0],positions.at(-1)!+1));
@@ -179,9 +179,9 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
     if(value&&typeof value==='object'&&!isTestingReference(value))return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,resolveOuter(v,params,active)]));
     return clone(value);
   };
-  for(const ancestor of enclosing){const d=defs.get(testingVersionKey(ancestor.definition));if(d?.kind==='workflow'){d.inputs.forEach(input=>outerSchemas.set(input.key,input));const effective={...Object.fromEntries(d.inputs.filter(i=>i.default!==undefined).map(i=>[i.key,i.default!])),...ancestor.inputs};outerValues=Object.fromEntries(Object.entries(effective).map(([k,v])=>[k,resolveOuter(v,outerValues)]));}}
+  for(const ancestor of enclosing){const d=defs.get(ancestor.definition.id);if(d?.kind==='workflow'){d.inputs.forEach(input=>outerSchemas.set(input.key,input));const effective={...Object.fromEntries(d.inputs.filter(i=>i.default!==undefined).map(i=>[i.key,i.default!])),...ancestor.inputs};outerValues=Object.fromEntries(Object.entries(effective).map(([k,v])=>[k,resolveOuter(v,outerValues)]));}}
   for(const parameter of request.parameters) {
-    const block=body.find(b=>b.id===parameter.instanceId);const schema=block&&defs.get(testingVersionKey(block.definition))?.inputs.find(i=>i.key===parameter.input);
+    const block=body.find(b=>b.id===parameter.instanceId);const schema=block&&defs.get(block.definition.id)?.inputs.find(i=>i.key===parameter.input);
     if(!block||!schema||!safeKey(parameter.key)||inputs.some(i=>i.key===parameter.key))throw new TestingModelError('Ein vorgeschlagener Parameter ist unbekannt oder mehrfach benannt.');
     const value=block.inputs[parameter.input]??schema.default;if(value===undefined)throw new TestingModelError(`„${schema.label}“ hat noch keinen Ausgangswert.`);
     const resolved=resolveOuter(value,outerValues);let hasReference=false;values(resolved,v=>{if(isTestingReference(v))hasReference=true;});
@@ -192,7 +192,7 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
   }
   const localAliases=new Map<string,{key:string;type:TestingBlockDefinition['outputs'][number]['type']}>();
   const knownAliases=new Map<string,TestingBlockDefinition['outputs'][number]['type']>();
-  function collectAliases(blocks:TestingBlockInstance[],target:Map<string,TestingBlockDefinition['outputs'][number]['type']>) {for(const block of blocks){const definition=defs.get(testingVersionKey(block.definition));for(const output of definition?.outputs??[])target.set(block.outputs?.[output.key]??`${block.id}.${output.key}`,output.type);if(definition?.kind==='context')collectAliases(block.children??[],target);}}
+  function collectAliases(blocks:TestingBlockInstance[],target:Map<string,TestingBlockDefinition['outputs'][number]['type']>) {for(const block of blocks){const definition=defs.get(block.definition.id);for(const output of definition?.outputs??[])target.set(block.outputs?.[output.key]??`${block.id}.${output.key}`,output.type);if(definition?.kind==='context')collectAliases(currentTestingChildren(block,catalog),target);}}
   collectAliases(scenario.blocks,knownAliases);for(const ancestor of enclosing)collectAliases(ancestor.children??[],knownAliases);collectAliases(siblings.slice(0,positions[0]),knownAliases);
   const bodyAliases=new Map<string,TestingBlockDefinition['outputs'][number]['type']>();collectAliases(body,bodyAliases);
   for(const [alias,type] of bodyAliases)localAliases.set(alias,{key:alias,type});
@@ -216,11 +216,11 @@ export function promoteTestingBlocks(request:TestingPromotionRequest):TestingPro
   });
   const outputs=[...localAliases].map(([alias,value],index)=>({key:`ergebnis${index+1}`,label:alias,type:value.type}));
   const exports=Object.fromEntries([...localAliases.keys()].map((alias,index)=>[`ergebnis${index+1}`,{ref:alias}]));
-  const knowledgeRefs=[...new Set(body.flatMap(b=>defs.get(testingVersionKey(b.definition))?.knowledgeRefs??[]))];
+  const knowledgeRefs=[...new Set(body.flatMap(b=>defs.get(b.definition.id)?.knowledgeRefs??[]))];
   const definition:TestingBlockDefinition={id:`ablauf.${randomUUID()}`,version:'1.0.0',name:request.name,description:request.description,kind:'workflow',category:'Wiederverwendung',semanticKey:`workflow.${request.name.toLocaleLowerCase('de-DE').replace(/[^\p{L}\p{N}]+/gu,'.')}`,inputs,outputs,body,exports,knowledgeRefs,preconditions:['Die erforderlichen Parameter sind belegt.'],postconditions:[request.description||request.name],status:'draft',createdAt:now(),origin:'human'};
   const duplicateReport=findTestingDuplicates(definition,catalog);
   const reusesExisting=duplicateReport.decision==='reuse'&&!!duplicateReport.chosen;
-  const selectedDefinition=reusesExisting?defs.get(testingVersionKey(duplicateReport.chosen!))!:definition;
+  const selectedDefinition=reusesExisting?defs.get(duplicateReport.chosen!.id)!:definition;
   let saved=scenario;
   if(request.replaceSelection) {
     const replacement:TestingBlockInstance={id:`wiederverwendung-${randomUUID()}`,definition:{id:selectedDefinition.id,version:selectedDefinition.version},inputs:replacementInputs,outputs:Object.fromEntries([...localAliases.keys()].map((alias,index)=>[`ergebnis${index+1}`,alias]))};
