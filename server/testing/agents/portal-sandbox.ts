@@ -33,16 +33,15 @@ export async function startPortalSandbox(signal?: AbortSignal): Promise<PortalSa
     });
     signal?.addEventListener('abort', abort, { once: true });
     const origin = await new Promise<string>((done, reject) => {
-      const timer = setTimeout(() => reject(new Error('Die isolierte Anwendung konnte nicht rechtzeitig gestartet werden.')), 30_000);
-      const fail = () => { clearTimeout(timer); reject(new Error('Die isolierte Anwendung wurde beendet oder abgebrochen.')); };
+      const fail = () => { reject(new Error('Die isolierte Anwendung wurde beendet oder abgebrochen.')); };
       child!.once('error', fail); child!.once('exit', fail);
       child!.on('message', value => {
         if (typeof (value as { error?: unknown })?.error === 'string') {
-          clearTimeout(timer); reject(new Error(`Die isolierte Anwendung konnte nicht gestartet werden: ${(value as { error: string }).error}`)); return;
+          reject(new Error(`Die isolierte Anwendung konnte nicht gestartet werden: ${(value as { error: string }).error}`)); return;
         }
         const port = (value as { port?: number })?.port;
         if (!Number.isInteger(port) || port! < 1 || port! > 65535) return;
-        clearTimeout(timer); child!.removeListener('error', fail); child!.removeListener('exit', fail);
+        child!.removeListener('error', fail); child!.removeListener('exit', fail);
         done(`http://127.0.0.1:${port}`);
       });
       // Drain output, but never expose source paths or ambient process data.

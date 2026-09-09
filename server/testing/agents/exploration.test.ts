@@ -127,7 +127,7 @@ test('Abschlusssteuerung erkennt leere Fragen, Budget und wiederkehrende Zustän
   assert.deepEqual(explorationCompletion(evidence,['Rollenberechtigung prüfen'],5).repeatedStateIds,['1','3','5']);
   assert.equal(explorationCompletion([evidence[0]],[],1).reason,'no_open_gaps');
   assert.equal(explorationCompletion([evidence[0]],['Ungeklärt'],32).reason,'action_limit');
-  assert.equal(explorationCompletion([evidence[0]],['Ungeklärt'],1,40_000).reason,'time_limit');
+  assert.equal(explorationCompletion([evidence[0]],['Ungeklärt'],1).reason,null);
   assert.equal(explorationCompletion(evidence.slice(0,4),['Ungeklärt'],4).finishRequired,false);
 });
 
@@ -189,16 +189,20 @@ test('Abbruch während einer echten Browsererkundung beendet den begrenzten Abla
   assert(!existsSync(join(directory,'agents/abort-browser-observation-1/result.json')),'Nach Abbruch startet kein weiterer Modellaufruf.');
 });
 
-test('Internes Zeitlimit wird als unvollständige Prüfung statt menschlichem Abbruch gespeichert', async context=>{
+test('Erkundung und Modellaufruf laufen ohne Zeitlimit weiter', async context=>{
   context.mock.timers.enable({apis:['setTimeout']});
   try {
-    const result=await exploreBusinessKnowledge({id:'internal-deadline',request:'NUR_VORHANDEN',model:'luna',catalog,
-      onProgress:value=>{if(value.status==='waiting-model')context.mock.timers.tick(360_000);}});
-    assert.equal(result.termination?.cause,'time_limit');
-    assert(result.openQuestions.length>0);
-    assert.deepEqual(result.newKnowledge,[]);
-    assert.doesNotMatch(result.explanation,/Menschen/);
-    assert(existsSync(join(directory,'agents/internal-deadline/exploration-result.json')));
+    const result=await exploreBusinessKnowledge({id:'without-deadline',request:'NUR_VORHANDEN KORREKTUR_TEST',model:'luna',catalog,
+      onProgress:value=>{assert.equal(value.deadlineAt,undefined);if(value.status==='waiting-model')context.mock.timers.tick(3_600_000);},
+      onEvent:event=>{if(event.message==='Codex hat ein Ergebnis geliefert.')context.mock.timers.tick(3_600_000);}});
+    assert.equal(result.termination,undefined);
+    assert.equal(result.openQuestions.length,0);
+    const manifest=JSON.parse(readFileSync(join(directory,'agents/without-deadline-observation-0/manifest.json'),'utf8'));
+    assert.equal(manifest.timeoutMs,0);
+    const correction=JSON.parse(readFileSync(join(directory,'agents/without-deadline-observation-0-korrektur/manifest.json'),'utf8'));
+    assert.equal(correction.timeoutMs,0);
+    const prompt=JSON.parse(readFileSync(join(directory,'agents/without-deadline-observation-0/prompt-kontext.json'),'utf8'));
+    assert.equal(prompt.remainingMs,undefined);
   } finally {context.mock.timers.reset();}
 });
 
@@ -260,4 +264,21 @@ test('Timeout/Abbruch beendet isolierten Server und entfernt seine synthetische 
   const controller=new AbortController(),sandbox=await startPortalSandbox(controller.signal);
   controller.abort(); await sandbox.close();assert(!existsSync(sandbox.directory));await assert.rejects(fetch(sandbox.origin+'/portal'));
   await assert.rejects(startPortalSandbox(AbortSignal.timeout(1)),/abgebrochen|beendet/);
+});
+
+test('Langsame Browseraktionen haben kein Zeitlimit und bleiben abbrechbar', {timeout:20_000}, async()=>{
+  const browser=await chromium.launch({headless:true});
+  try {
+    const page=await browser.newPage();
+    await page.setContent('<button disabled>Fortsetzen</button>');
+    const observation={id:'slow',action:'readSnapshot',path:'/portal',snapshot:'',screenshot:'',observedAt:'',targets:[{id:'slow-button',role:'button' as const,name:'Fortsetzen'}],paths:[]};
+    const action={op:'click',targetId:'slow-button',path:null,value:null,checked:null};
+    const pending=performExplorationAction(page,action,observation,'http://localhost');
+    await page.evaluate(()=>setTimeout(()=>{document.querySelector('button')!.disabled=false;},5500));
+    await pending;
+    await page.getByRole('button').evaluate(button=>(button as HTMLButtonElement).disabled=true);
+    const cancelled=assert.rejects(performExplorationAction(page,action,observation,'http://localhost'),/closed/);
+    await page.close();
+    await cancelled;
+  } finally {await browser.close();}
 });
