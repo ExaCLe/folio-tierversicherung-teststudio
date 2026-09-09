@@ -5,6 +5,7 @@ import {
   FEDERAL_STATES,
   STANDARD_CUSTOMER,
   agricultureMoney,
+  referralThreshold,
   standardCow,
   standardFarm,
   type AgricultureAnimal,
@@ -390,7 +391,7 @@ export function ProposalIntake({ role, onNavigate, onCreated }: ProposalIntakePr
                 <label className="agr-field" htmlFor="agr-animal-biosecurity">Biosicherheit<select id="agr-animal-biosecurity" aria-label="Biosicherheit" value={draft.biosecurity} onChange={event => setDraft({ ...draft, biosecurity: event.target.value as AnimalDraft['biosecurity'] })}><option>Erfüllt</option><option>Klärung erforderlich</option></select></label>
               </>}
             </div>
-            <p className="agr-intake-rule">Ab mehr als {agricultureMoney(AGRICULTURE_RULES.referralThresholds[draft.species])} je {draft.species === 'Schwein' ? 'Bestand' : 'Tier'} ist eine Direktionsanfrage erforderlich.{draft.species === 'Pferd' ? ' Vorerkrankungen erfordern ebenfalls eine Direktionsentscheidung.' : draft.species === 'Schwein' ? ' Dies gilt auch bei ungeklärter Biosicherheit.' : ''}</p>
+            <p className="agr-intake-rule">Ab mehr als {agricultureMoney(referralThreshold(draft.species, farm?.state ?? 'Niedersachsen'))} je {draft.species === 'Schwein' ? 'Bestand' : 'Tier'} ist eine Direktionsanfrage erforderlich.{draft.species === 'Pferd' ? ' Vorerkrankungen erfordern ebenfalls eine Direktionsentscheidung.' : draft.species === 'Schwein' ? ' Dies gilt auch bei ungeklärter Biosicherheit.' : ''}</p>
             <div className="agr-intake-form-actions"><button type="submit" className="agr-button agr-primary">{saving ? 'Tier wird gespeichert …' : 'Tier speichern'}</button><button type="button" className="agr-button" onClick={() => setNewAnimal(false)}>Auswahl anzeigen</button></div>
           </fieldset></form>}
           <div className="agr-intake-footer"><button type="button" className="agr-button" disabled={saving} onClick={() => goToStep(1)}>Zurück zu Betrieb</button><button type="button" className="agr-button agr-primary" disabled={selectedAnimals.length === 0 || saving || loadingAnimals} onClick={() => goToStep(3)}>Weiter zu Vorschlag</button></div>

@@ -94,7 +94,7 @@
   },
   {
     "id": "regel.direktionsanfrage",
-    "revision": 1,
+    "revision": 2,
     "title": "Wann eine Direktionsanfrage entsteht",
     "kind": "rule",
     "summary": "Hohe Versicherungssummen und bestimmte Gesundheits- oder Biosicherheitsangaben benötigen eine Direktionsentscheidung.",
@@ -130,6 +130,7 @@
     "requiredFields": [
       "Versicherungssumme",
       "Tierart",
+      "Bundesland",
       "erwarteter Zustand"
     ],
     "preconditions": [

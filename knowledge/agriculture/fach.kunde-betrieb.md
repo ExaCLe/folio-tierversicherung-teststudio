@@ -8,6 +8,6 @@ Beim Kunden: name, email, phone, street, postalCode, city. Beim Betrieb: custome
 
 ## Standard und Ausnahme
 
-Der Standardbetrieb liegt in Niedersachsen, Hofweg 8, 29525 Uelzen. Ein Wunsch „Betrieb in Bayern“ ändert die Daten dieser einen Betriebsverwendung. Ein stimmiges Demo-Beispiel ist Bayern, Dorfstraße 12, 87437 Kempten. Zeige alle geänderten Betriebsfelder zur Prüfung. Die Kundenadresse wird dadurch nicht automatisch geändert. Das Bundesland verändert im fiktiven Produkt keine Direktionsgrenze.
+Der Standardbetrieb liegt in Niedersachsen, Hofweg 8, 29525 Uelzen. Ein Wunsch „Betrieb in Bayern“ ändert die Daten dieser einen Betriebsverwendung. Ein stimmiges Demo-Beispiel ist Bayern, Dorfstraße 12, 87437 Kempten. Zeige alle geänderten Betriebsfelder zur Prüfung. Die Kundenadresse wird dadurch nicht automatisch geändert. Für Rinder gilt in Bayern eine Direktionsgrenze von 11.000 EUR statt 10.000 EUR; die übrigen Grenzen bleiben gleich.
 
 Die Referenzen auf Kunde, Betrieb und Tier müssen zusammenpassen. Ein Vorschlag darf kein Tier eines anderen Betriebs versichern.

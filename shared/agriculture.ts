@@ -56,9 +56,15 @@ export interface ProposalDetail {
 }
 export interface AgriculturePolicyDetail { policy: AgriculturePolicy; contract: AgricultureContract; customer: AgricultureCustomer; farm: Farm; animals: AgricultureAnimal[]; documents: PolicyDocument[]; printEvents: AgriculturePrintEvent[]; }
 export const AGRICULTURE_RULES = {
-  version: 'TierSchutz 1.0', currency: 'EUR', referralThresholds: { Rind: 10_000, Pferd: 50_000, Hund: 10_000, Schwein: 500_000 },
+  version: 'TierSchutz 1.1', currency: 'EUR', referralThresholds: { Rind: 10_000, Pferd: 50_000, Hund: 10_000, Schwein: 500_000 },
+  bavariaCattleReferralThreshold: 11_000,
   annualRates: { Rind: 0.035, Pferd: 0.04, Hund: 0.05, Schwein: 0.018 }, minimumAnnualPremium: 60,
 } as const;
+export function referralThreshold(species: AnimalSpecies, state: FederalState): number {
+  return species === 'Rind' && state === 'Bayern'
+    ? AGRICULTURE_RULES.bavariaCattleReferralThreshold
+    : AGRICULTURE_RULES.referralThresholds[species];
+}
 export function standardCow(farmId = ''): AgricultureAnimalInput {
   return { farmId, species: 'Rind', name: 'Alma', earTag: 'DE 09 123 45678', breed: 'Fleckvieh', birthDate: '2022-04-15', use: 'Milchkuh', sumInsured: 3_500 };
 }

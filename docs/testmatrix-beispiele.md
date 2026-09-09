@@ -6,7 +6,7 @@ Diese beiden Texte können im Teststudio in Schritt 1 unter „Deine Anforderung
 
 > Erstelle einen normalen End-to-End-Test für eine Kuhlebensversicherung. Lege einen Kunden, einen Betrieb in Bayern und die Kuh Berta mit einer Versicherungssumme von 15.000 Euro an. Berechne das Angebot und reiche den Antrag ein. Prüfe als fachliche Assertions, dass der gespeicherte Betrieb das Bundesland Bayern enthält, dass der Vorschlag danach den Status „Direktionsprüfung“ hat und dass eine offene Direktionsanfrage sichtbar ist. Beende den Test nach diesen Prüfungen; die Direktionsentscheidung und der Vertragsabschluss gehören nicht zu diesem Testziel.
 
-Die Assertion ist hier das fachliche Ergebnis des Laufs: Eine Rinderversicherung über 10.000 EUR erzeugt eine Direktionsanfrage. Die 15.000 EUR liegen eindeutig über dieser Grenze. Das Bundesland Bayern prüft zusätzlich, dass die Betriebsdaten durch den Ablauf erhalten bleiben; es ändert die fiktive Direktionsgrenze nicht.
+Die Assertion ist hier das fachliche Ergebnis des Laufs: Eine Rinderversicherung in Bayern über 11.000 EUR erzeugt eine Direktionsanfrage. Die 15.000 EUR liegen eindeutig über dieser Grenze. Das Bundesland ist Teil der Annahmeregel und muss durch den Ablauf erhalten bleiben.
 
 ## 2. Parametrisierter End-to-End-Test: Versicherungssumme und Betriebsstandort
 
@@ -17,10 +17,12 @@ Die Assertion ist hier das fachliche Ergebnis des Laufs: Eine Rinderversicherung
 > Niedersachsen   | 10.000 EUR         | Freigegeben
 > Niedersachsen   | 10.001 EUR         | Direktionsprüfung
 > Bayern          | 10.000 EUR         | Freigegeben
-> Bayern          | 10.001 EUR         | Direktionsprüfung
+> Bayern          | 10.001 EUR         | Freigegeben
+> Bayern          | 11.000 EUR         | Freigegeben
+> Bayern          | 11.001 EUR         | Direktionsprüfung
 > ```
 
-Die beiden Beträge prüfen die Grenze selbst und knapp darüber. Die beiden Bundesländer prüfen, dass der Standort als Eingabe variiert und gespeichert wird, ohne die Annahmeregel ungewollt zu verändern. Der erwartete Status ist pro Zeile Teil der Testdefinition und damit die Prüfvorlage; ein Lauf darf ihn nicht aus seinem tatsächlichen Ergebnis berechnen. Für einen konkreten 100-Zeilen-Lauf kann die UI zehn tatsächlich angebotene Bundesländer (zum Beispiel Baden-Württemberg, Bayern, Berlin, Brandenburg, Bremen, Hamburg, Hessen, Mecklenburg-Vorpommern, Niedersachsen und Nordrhein-Westfalen) mit den zehn Summenwerten 10.001, 11.000, 12.000, 13.000, 14.000, 15.000, 16.000, 17.000, 18.000 und 19.000 EUR kombinieren. Alle 100 Zeilen erhalten dabei den expliziten erwarteten Status `Direktionsprüfung`; es entstehen 100 Testdatenzeilen, nicht 100 Kopien des Scratch-Ablaufs. Die kleine Vierzeilenmatrix oben bleibt der Grenzfallnachweis.
+Die Zeilen prüfen beide standortabhängigen Grenzen und die Werte direkt darüber. Der erwartete Status ist pro Zeile Teil der Testdefinition und damit die Prüfvorlage; ein Lauf darf ihn nicht aus seinem tatsächlichen Ergebnis berechnen. Für einen konkreten 100-Zeilen-Lauf kann die UI zehn tatsächlich angebotene Bundesländer (zum Beispiel Baden-Württemberg, Bayern, Berlin, Brandenburg, Bremen, Hamburg, Hessen, Mecklenburg-Vorpommern, Niedersachsen und Nordrhein-Westfalen) mit den zehn Summenwerten 11.001, 12.000, 13.000, 14.000, 15.000, 16.000, 17.000, 18.000, 19.000 und 20.000 EUR kombinieren. Alle 100 Zeilen erhalten dabei den expliziten erwarteten Status `Direktionsprüfung`; es entstehen 100 Testdatenzeilen, nicht 100 Kopien des Scratch-Ablaufs. Die kleine Grenzwertmatrix oben bleibt der Grenzfallnachweis.
 
 ## Bedienung der Matrix im Teststudio
 
@@ -39,4 +41,4 @@ Das Geburtsdatum ist für ein Rind ein Pflichtfeld und eignet sich als variable 
 
 Sobald eine Altersregel fachlich dokumentiert ist, kann `Geburtsdatum` oder ein daraus berechnetes `Alter` die zweite Matrixspalte ersetzen oder ergänzen. Die Regel braucht dann eine klare Grenze und ein erwartetes Ergebnis je Bereich, damit die Matrix eine echte Assertion besitzt.
 
-Die zugrunde liegenden Produktdaten stehen in [fach.kunde-betrieb.md](../knowledge/agriculture/fach.kunde-betrieb.md), [fach.tierarten.md](../knowledge/agriculture/fach.tierarten.md) und [regel.direktionsanfrage.md](../knowledge/agriculture/regel.direktionsanfrage.md). Die dort beschriebene Grenze gilt strikt: Genau 10.000 EUR lösen keine Direktionsanfrage aus, 10.001 EUR schon.
+Die zugrunde liegenden Produktdaten stehen in [fach.kunde-betrieb.md](../knowledge/agriculture/fach.kunde-betrieb.md), [fach.tierarten.md](../knowledge/agriculture/fach.tierarten.md) und [regel.direktionsanfrage.md](../knowledge/agriculture/regel.direktionsanfrage.md). Die dort beschriebenen Grenzen gelten strikt: Außerhalb Bayerns lösen 10.001 EUR eine Direktionsanfrage aus, in Bayern erst 11.001 EUR.

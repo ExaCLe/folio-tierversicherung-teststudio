@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { FileText, LogIn, Printer, RefreshCw, Search, ShieldCheck, UserRound } from 'lucide-react';
-import { AGRICULTURE_ROLES, agricultureMoney, type AgricultureOverview, type AgricultureRole, type AgricultureProposal, type AgriculturePolicyDetail } from '../../shared/agriculture';
+import { AGRICULTURE_ROLES, AGRICULTURE_RULES, agricultureMoney, type AgricultureOverview, type AgricultureRole, type AgricultureProposal, type AgriculturePolicyDetail } from '../../shared/agriculture';
 import { agricultureApi } from './api';
 import { ProposalIntake } from './ProposalIntake';
 import { ProposalDetail } from './ProposalDetail';
@@ -28,7 +28,7 @@ export function PortalApp() {
     </header>
     <nav className="agr-navigation" aria-label="Versicherungsbereiche">{tabs.map(tab => <a key={tab.path} href={tab.path} onClick={event => { event.preventDefault(); navigate(tab.path); }} aria-current={path === tab.path || (tab.path === '/portal' && (path === '/portal/neu' || Boolean(proposalId))) || (tab.path === '/portal/policen' && Boolean(policyId)) ? 'page' : undefined}>{tab.label}</a>)}</nav>
     <main id="portal-inhalt" className="agr-main" tabIndex={-1}>
-      <div className="agr-breadcrumb"><span>Tierversicherung</span><span aria-hidden="true">›</span><strong>{path === '/portal/neu' ? 'Neuer Versicherungsvorschlag' : proposalId ? 'Vorgang bearbeiten' : policyId ? 'Police bearbeiten' : tabs.find(tab => tab.path === path)?.label ?? 'Vorgangsübersicht'}</strong><span className="agr-breadcrumb-right">Tarifstand TierSchutz 1.0</span></div>
+      <div className="agr-breadcrumb"><span>Tierversicherung</span><span aria-hidden="true">›</span><strong>{path === '/portal/neu' ? 'Neuer Versicherungsvorschlag' : proposalId ? 'Vorgang bearbeiten' : policyId ? 'Police bearbeiten' : tabs.find(tab => tab.path === path)?.label ?? 'Vorgangsübersicht'}</strong><span className="agr-breadcrumb-right">Tarifstand {AGRICULTURE_RULES.version}</span></div>
       {path === '/portal/neu' ? <ProposalIntake role={role} onNavigate={navigate} onCreated={id => navigate(`/portal/vorschlaege/${id}`)} /> : proposalId ? <ProposalDetail key={proposalId} proposalId={decodeURIComponent(proposalId)} role={role} onNavigate={navigate} /> : policyId ? <PolicyRoute key={policyId} policyId={decodeURIComponent(policyId)} role={role} onNavigate={navigate} /> : <PortalDesk key={path} section={path} role={role} onNavigate={navigate} />}
     </main>
     <footer className="agr-statusbar"><span><i /> System bereit</span><span>Arbeitsplatz {role === 'Direktion' ? 'Direktion' : role === 'Sachbearbeiter' ? 'Vertragsservice' : 'Vermittlung'}</span><span>Land & Tier · Fiktive Tierversicherung</span></footer>
@@ -80,7 +80,7 @@ function PortalDesk({ section, role, onNavigate }: { section: string; role: Agri
       </section>
       <aside className="agr-desk-aside">
         <section className="agr-panel"><div className="agr-panel-heading"><h2>Arbeitsvorrat</h2><span>{openReferrals.length} offen</span></div>{openReferrals.length ? openReferrals.slice(0, 3).map(referral => <button key={referral.id} className="agr-work-item" onClick={() => openProposal(referral.proposalId)}><b>{referral.number}</b><span>{customerName(referral.customerId)}</span><small>{referral.reasons[0]}</small><em>Vorgang öffnen ›</em></button>) : <p className="agr-panel-copy">Keine offenen Direktionsanfragen.</p>}</section>
-        <section className="agr-panel"><div className="agr-panel-heading"><h2>Tarifhinweise</h2><span>TierSchutz 1.0</span></div><div className="agr-panel-copy"><strong>Annahmegrenzen</strong><dl className="agr-rate-list"><dt>Kuh / Rind</dt><dd>10.000 EUR</dd><dt>Pferd</dt><dd>50.000 EUR</dd><dt>Hund</dt><dd>10.000 EUR</dd><dt>Schweinebestand</dt><dd>500.000 EUR</dd></dl><p>Oberhalb dieser Summen entscheidet die Direktion. Vorerkrankungen bei Pferden und ungeklärte Biosicherheit bei Schweinen sind ebenfalls vorzulegen.</p><small>Fiktive Regeln für die Tierversicherung. Der Standort Bayern ändert die Annahmegrenze nicht.</small></div></section>
+        <section className="agr-panel"><div className="agr-panel-heading"><h2>Tarifhinweise</h2><span>{AGRICULTURE_RULES.version}</span></div><div className="agr-panel-copy"><strong>Annahmegrenzen</strong><dl className="agr-rate-list"><dt>Kuh / Rind</dt><dd>10.000 EUR</dd><dt>Kuh / Rind in Bayern</dt><dd>11.000 EUR</dd><dt>Pferd</dt><dd>50.000 EUR</dd><dt>Hund</dt><dd>10.000 EUR</dd><dt>Schweinebestand</dt><dd>500.000 EUR</dd></dl><p>Oberhalb dieser Summen entscheidet die Direktion. Vorerkrankungen bei Pferden und ungeklärte Biosicherheit bei Schweinen sind ebenfalls vorzulegen.</p><small>Fiktive Regeln für die Tierversicherung.</small></div></section>
         <div className="agr-aside-note"><LogIn size={15} /><span>Für Policenausgabe und Druck wechseln Sie zur Rolle Sachbearbeiter.</span></div>
       </aside>
     </div>

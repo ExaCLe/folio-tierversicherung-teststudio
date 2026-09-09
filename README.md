@@ -98,12 +98,12 @@ Jedes Tier und jeder Bestand gehört genau einem Betrieb. Ein Vorschlag darf aus
 
 | Tierart | Direktionsanfrage bei mehr als | Jahresbeitrag |
 | --- | --- | --- |
-| Kuh / Rind | 10.000 EUR je Tier | 3,5 % der Summe |
+| Kuh / Rind | 10.000 EUR je Tier; in Bayern 11.000 EUR | 3,5 % der Summe |
 | Pferd | 50.000 EUR je Tier | 4 % der Summe |
 | Hund | 10.000 EUR je Tier | 5 % der Summe |
 | Schweinebestand | 500.000 EUR je Bestand | 1,8 % der Summe |
 
-Der Grenzwert selbst löst keine Anfrage aus. Eine Vorerkrankung beim Pferd und ungeklärte Biosicherheit beim Schweinebestand erfordern ebenfalls eine Direktionsentscheidung. Das Bundesland verändert diese Regeln nicht. Die Beiträge der versicherten Positionen werden addiert; je Vorschlag gilt ein Mindestjahresbeitrag von 60 EUR. Die Laufzeit beträgt zwölf Monate.
+Der Grenzwert selbst löst keine Anfrage aus. Für Rinder in Bayern gilt die höhere Grenze von 11.000 EUR; die übrigen Bundesländer und Tierarten behalten ihre genannten Grenzen. Eine Vorerkrankung beim Pferd und ungeklärte Biosicherheit beim Schweinebestand erfordern ebenfalls eine Direktionsentscheidung. Die Beiträge der versicherten Positionen werden addiert; je Vorschlag gilt ein Mindestjahresbeitrag von 60 EUR. Die Laufzeit beträgt zwölf Monate.
 
 Die Rollenprüfung erfolgt auch in der API. Nur die Direktion entscheidet über offene Direktionsanfragen. Ein abgelehnter oder noch nicht freigegebener Antrag kann nicht abgeschlossen werden. Nur Sachbearbeiter geben bestehende Policen erneut aus und erfassen Druckaufträge. Die Rollenwahl ist eine lokale Simulation und ersetzt keine Anmeldung für ein produktives Versicherungssystem.
 

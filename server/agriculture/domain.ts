@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AGRICULTURE_RULES, agricultureMoney } from '../../shared/agriculture';
+import { AGRICULTURE_RULES, agricultureMoney, referralThreshold } from '../../shared/agriculture';
 import type {
   AgricultureAnimal, AgricultureAnimalInput, AgricultureAuditEvent, AgricultureContract, AgricultureCustomer,
   AgricultureCustomerInput, AgricultureOverview, AgriculturePolicy, AgriculturePolicyDetail, AgriculturePrintEvent,
@@ -120,15 +120,30 @@ export function rateAnimals(animals: AgricultureAnimal[]): number {
   return Math.max(AGRICULTURE_RULES.minimumAnnualPremium, round(animals.reduce((sum, animal) => sum + animal.sumInsured * AGRICULTURE_RULES.annualRates[animal.species], 0)));
 }
 
-export function referralReasonsFor(animals: AgricultureAnimal[]): string[] {
+export function referralReasonsFor(animals: AgricultureAnimal[], farm: Farm): string[] {
   return animals.flatMap(animal => {
     const reasons: string[] = [];
-    const threshold = AGRICULTURE_RULES.referralThresholds[animal.species];
+    const threshold = referralThreshold(animal.species, farm.state);
     if (animal.sumInsured > threshold) reasons.push(`${animal.name}: Versicherungssumme ${agricultureMoney(animal.sumInsured)} übersteigt die Direktionsgrenze von ${agricultureMoney(threshold)} je ${animal.species === 'Schwein' ? 'Bestand' : 'Tier'}.`);
     if (animal.species === 'Pferd' && animal.health === 'Vorerkrankung') reasons.push(`${animal.name}: Eine Vorerkrankung erfordert die Prüfung durch die Direktion.`);
     if (animal.species === 'Schwein' && animal.biosecurity === 'Klärung erforderlich') reasons.push(`${animal.name}: Die Biosicherheit muss durch die Direktion geklärt werden.`);
     return reasons;
   });
+}
+
+function referralReasonsForRuleVersion(animals: AgricultureAnimal[], farm: Farm, ruleVersion: string): string[] {
+  if (ruleVersion === 'TierSchutz 1.0') {
+    return animals.flatMap(animal => {
+      const reasons: string[] = [];
+      const threshold = AGRICULTURE_RULES.referralThresholds[animal.species];
+      if (animal.sumInsured > threshold) reasons.push(`${animal.name}: Versicherungssumme ${agricultureMoney(animal.sumInsured)} übersteigt die Direktionsgrenze von ${agricultureMoney(threshold)} je ${animal.species === 'Schwein' ? 'Bestand' : 'Tier'}.`);
+      if (animal.species === 'Pferd' && animal.health === 'Vorerkrankung') reasons.push(`${animal.name}: Eine Vorerkrankung erfordert die Prüfung durch die Direktion.`);
+      if (animal.species === 'Schwein' && animal.biosecurity === 'Klärung erforderlich') reasons.push(`${animal.name}: Die Biosicherheit muss durch die Direktion geklärt werden.`);
+      return reasons;
+    });
+  }
+  if (ruleVersion === AGRICULTURE_RULES.version) return referralReasonsFor(animals, farm);
+  throw new AgricultureError(409, 'OFFER_CHANGED', `Die Regelversion ${ruleVersion} wird nicht unterstützt.`);
 }
 
 export function createProposal(input: ProposalInput, role: AgricultureRole): AgricultureProposal {
@@ -150,7 +165,7 @@ export function makeOffer(proposalId: string, role: AgricultureRole): { proposal
   if (proposal.status !== 'Entwurf' && proposal.status !== 'Angebot') throw new AgricultureError(409, 'OFFER_NOT_ALLOWED', 'Ein Angebot kann nur für einen Entwurf oder ein noch nicht eingereichtes Angebot berechnet werden.');
   const facts = riskFacts(inputOf(proposal));
   const snapshot: OfferSnapshot = { ...copy(facts), id: id('offer'), proposalId, createdAt: now(), ruleVersion: AGRICULTURE_RULES.version,
-    annualPremium: rateAnimals(facts.animals), totalSumInsured: round(facts.animals.reduce((sum, animal) => sum + animal.sumInsured, 0)), referralReasons: referralReasonsFor(facts.animals) };
+    annualPremium: rateAnimals(facts.animals), totalSumInsured: round(facts.animals.reduce((sum, animal) => sum + animal.sumInsured, 0)), referralReasons: referralReasonsFor(facts.animals, facts.farm) };
   const updated: AgricultureProposal = { ...proposal, status: 'Angebot', annualPremium: snapshot.annualPremium,
     totalSumInsured: snapshot.totalSumInsured, referralReasons: [...snapshot.referralReasons], updatedAt: now() };
   db.upsert(collections.offers, snapshot);
@@ -159,17 +174,20 @@ export function makeOffer(proposalId: string, role: AgricultureRole): { proposal
   return { proposal: updated };
 }
 
-function currentOffer(proposal: AgricultureProposal): OfferSnapshot {
+function currentOffer(proposal: AgricultureProposal, preserveCompletedRuleVersion = false): OfferSnapshot {
   const snapshot = db.read<OfferSnapshot>(collections.offers).filter(offer => offer.proposalId === proposal.id).at(-1);
   if (!snapshot) throw new AgricultureError(409, 'OFFER_REQUIRED', 'Berechnen Sie vor dem Einreichen ein Angebot.');
+  const expectedRuleVersion = preserveCompletedRuleVersion && proposal.status !== 'Entwurf' && proposal.status !== 'Angebot'
+    ? snapshot.ruleVersion
+    : AGRICULTURE_RULES.version;
   const facts = riskFacts(inputOf(proposal));
   const savedFacts: RiskFacts = { input: snapshot.input, customer: snapshot.customer, farm: snapshot.farm, animals: snapshot.animals };
-  if (JSON.stringify(facts) !== JSON.stringify(savedFacts) || snapshot.ruleVersion !== AGRICULTURE_RULES.version
+  if (JSON.stringify(facts) !== JSON.stringify(savedFacts) || snapshot.ruleVersion !== expectedRuleVersion
     || proposal.annualPremium !== snapshot.annualPremium || proposal.totalSumInsured !== snapshot.totalSumInsured
     || JSON.stringify(proposal.referralReasons) !== JSON.stringify(snapshot.referralReasons)
     || snapshot.annualPremium !== rateAnimals(snapshot.animals)
     || snapshot.totalSumInsured !== round(snapshot.animals.reduce((sum, animal) => sum + animal.sumInsured, 0))
-    || JSON.stringify(snapshot.referralReasons) !== JSON.stringify(referralReasonsFor(snapshot.animals))) {
+    || JSON.stringify(snapshot.referralReasons) !== JSON.stringify(referralReasonsForRuleVersion(snapshot.animals, snapshot.farm, snapshot.ruleVersion))) {
     throw new AgricultureError(409, 'OFFER_CHANGED', 'Das Angebot stimmt nicht mehr mit den erfassten Angaben überein. Ein Abschluss ist nicht zulässig.');
   }
   return snapshot;
@@ -208,7 +226,7 @@ export function decideReferral(referralId: string, input: { decision: 'Freigeben
   const referral = getReferral(referralId), proposal = getProposal(referral.proposalId);
   assertReferral(proposal, referral);
   if (referral.status !== 'Offen' || referral.decision !== null || proposal.status !== 'Direktionsprüfung') throw new AgricultureError(409, 'REFERRAL_NOT_OPEN', 'Nur eine offene Direktionsanfrage kann entschieden werden.');
-  currentOffer(proposal);
+  currentOffer(proposal, true);
   const decided: DirectorateReferral = { ...referral, status: values.decision === 'Freigeben' ? 'Freigegeben' : 'Abgelehnt',
     decision: values.decision, decisionReason: values.reason, decidedAt: now(), decidedBy: 'Direktion' };
   const updated: AgricultureProposal = { ...proposal, status: decided.status === 'Freigegeben' ? 'Freigegeben' : 'Abgelehnt', updatedAt: now() };
@@ -234,7 +252,7 @@ export function completeProposal(proposalId: string, role: AgricultureRole): { p
     throw new AgricultureError(409, 'ALREADY_COMPLETED', 'Dieser Vorschlag wurde bereits abgeschlossen. Es wird kein weiterer Vertrag angelegt.');
   }
   if (proposal.status !== 'Freigegeben') throw new AgricultureError(409, 'COMPLETION_NOT_ALLOWED', 'Ein Vertrag kann nur aus einem freigegebenen Antrag abgeschlossen werden.');
-  const snapshot = currentOffer(proposal);
+  const snapshot = currentOffer(proposal, true);
   if (snapshot.referralReasons.length) {
     if (!proposal.referralId) throw new AgricultureError(409, 'DIRECTORATE_APPROVAL_REQUIRED', 'Die erforderliche Freigabe der Direktion fehlt.');
     const referral = getReferral(proposal.referralId);
@@ -274,7 +292,7 @@ function policyContext(policyId: string): { policy: AgriculturePolicy; contract:
     || contract.annualPremium !== proposal.annualPremium || contract.totalSumInsured !== proposal.totalSumInsured) {
     throw new AgricultureError(409, 'POLICY_LINKS_INVALID', 'Die Police stimmt nicht mit dem abgeschlossenen Vertrag überein.');
   }
-  const snapshot = currentOffer(proposal);
+  const snapshot = currentOffer(proposal, true);
   const currentDocument = getDocument(policy.documentId);
   if (currentDocument.policyId !== policy.id || currentDocument.contractId !== contract.id || currentDocument.version !== policy.version) {
     throw new AgricultureError(409, 'DOCUMENT_POLICY_MISMATCH', 'Die aktuelle Dokumentausgabe gehört nicht zu dieser Police.');

@@ -118,6 +118,48 @@ test('Direktionsgrenzen gelten strikt oberhalb des Grenzwerts für jede einzelne
   }
 });
 
+test('Rinder in Bayern benötigen erst oberhalb von 11.000 EUR eine Direktionsanfrage', () => {
+  const customer = createCustomer(STANDARD_CUSTOMER, 'Vermittler');
+  const cases = [
+    { state: 'Bayern' as const, sumInsured: 10_000, expected: 'Freigegeben' },
+    { state: 'Bayern' as const, sumInsured: 10_001, expected: 'Freigegeben' },
+    { state: 'Bayern' as const, sumInsured: 11_000, expected: 'Freigegeben' },
+    { state: 'Bayern' as const, sumInsured: 11_001, expected: 'Direktionsprüfung' },
+    { state: 'Niedersachsen' as const, sumInsured: 10_001, expected: 'Direktionsprüfung' },
+  ];
+  for (const [index, item] of cases.entries()) {
+    const farmInput = item.state === 'Bayern' ? bayernFarm(customer.id) : standardFarm(customer.id);
+    const farm = createFarm({ ...farmInput, name: `Grenzbetrieb ${index}` }, 'Vermittler');
+    const cow = standardCow(farm.id);
+    if (cow.species !== 'Rind') throw new Error('Die Standardkuh muss ein Rind sein.');
+    const animal = createAnimal({ ...cow, name: `Grenzkuh ${index}`, earTag: `DE 09 123 45${index}78`, sumInsured: item.sumInsured }, 'Vermittler');
+    const proposal = draft({ customer, farm, animal });
+    makeOffer(proposal.id, 'Vermittler');
+    const result = submitProposal(proposal.id, 'Vermittler');
+    assert.equal(result.proposal.status, item.expected, `${item.state} mit ${item.sumInsured}`);
+    assert.equal(Boolean(result.referral), item.expected === 'Direktionsprüfung');
+    if (result.referral) assert.match(result.referral.reasons[0], item.state === 'Bayern' ? /11\.000,00/ : /10\.000,00/);
+  }
+});
+
+test('Bereits eingereichte Angebote und Policen behalten die geprüfte Regelversion 1.0', () => {
+  const pendingData = basics(highCow);
+  const pendingProposal = draft(pendingData);
+  makeOffer(pendingProposal.id, 'Vermittler');
+  const pending = submitProposal(pendingProposal.id, 'Vermittler');
+  const pendingOffer = db.read<any>(collections.offers).find(offer => offer.proposalId === pendingProposal.id);
+  db.upsert(collections.offers, { ...pendingOffer, ruleVersion: 'TierSchutz 1.0' });
+  decideReferral(pending.referral!.id, { decision: 'Freigeben', reason: 'Historisches Angebot wurde fachlich geprüft.' }, 'Direktion');
+  assert.equal(completeProposal(pendingProposal.id, 'Vermittler').proposal.status, 'Abgeschlossen');
+
+  const completed = finish();
+  const completedOffer = db.read<any>(collections.offers).find(offer => offer.proposalId === completed.proposal.id);
+  db.upsert(collections.offers, { ...completedOffer, ruleVersion: 'TierSchutz 1.0' });
+  assert.equal(getPolicyDetail(completed.policy.id).policy.id, completed.policy.id);
+  const reissued = reissuePolicy(completed.policy.id, { reason: 'Historische Police erneut ausgegeben.' }, 'Sachbearbeiter');
+  assert.equal(printPolicy(completed.policy.id, reissued.document.id, 'Sachbearbeiter').document.id, reissued.document.id);
+});
+
 test('Summen mehrerer Tiere addieren den Beitrag, lösen aber keine gemeinsame Direktionsgrenze aus', () => {
   const data = basics(farmId => ({ ...standardCow(farmId), sumInsured: 10_000 }));
   const second = createAnimal({ ...standardCow(data.farm.id), name: 'Berta', sumInsured: 10_000 }, 'Vermittler');

@@ -20,12 +20,12 @@ Ein Kunde kann mehrere Betriebe besitzen. Ein Betrieb hat eine eigene Anschrift 
 
 | Tierart | Beispiele für eigene Angaben | Direktionsanfrage bei einer Summe |
 | --- | --- | --- |
-| Rind | Ohrmarke, Rasse, Geburtsdatum, Nutzung | über 10.000 EUR |
+| Rind | Ohrmarke, Rasse, Geburtsdatum, Nutzung | über 10.000 EUR; in Bayern über 11.000 EUR |
 | Pferd | Chipnummer, Nutzung, Gesundheitszustand | über 50.000 EUR |
 | Hund | Chipnummer, Rasse, Nutzung | über 10.000 EUR |
 | Schweinebestand | Anzahl, Haltungsform, Biosicherheit | über 500.000 EUR für den Bestand |
 
-Pferde mit Vorerkrankung und Schweinebestände mit ungeklärter Biosicherheit brauchen ebenfalls eine Entscheidung. Der Grenzwert selbst löst keine Anfrage aus. Ein Rind mit 10.000 EUR bleibt innerhalb der Grenze; 10.001 EUR liegt darüber. Das Bundesland verändert diese Regeln nicht.
+Pferde mit Vorerkrankung und Schweinebestände mit ungeklärter Biosicherheit brauchen ebenfalls eine Entscheidung. Der Grenzwert selbst löst keine Anfrage aus. Außerhalb Bayerns liegt ein Rind mit 10.001 EUR über der Grenze. In Bayern bleiben 10.001 EUR und 11.000 EUR innerhalb der Grenze; 11.001 EUR liegt darüber.
 
 ```mermaid
 flowchart LR
