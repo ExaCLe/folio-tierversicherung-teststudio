@@ -300,16 +300,12 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       canvasDeselectPending.current = canvasBackground;
       if (canvasBackground) current.current.onSelect(undefined);
     };
-    const finishCanvasIntent = () => {
-      if (!canvasDeselectPending.current) return;
-      current.current.onSelect(undefined);
-      canvasDeselectPending.current = false;
-    };
+    const clearCanvasIntentForKeyboard = () => { canvasDeselectPending.current = false; };
     // Track the complete pointer interaction at document level. Scratch stops
     // some canvas clicks before they bubble back to the workspace container.
     // The next pointerdown also clears an abandoned canvas intent after a drag.
     document.addEventListener('pointerdown', trackCanvasIntent, true);
-    document.addEventListener('pointerup', finishCanvasIntent, true);
+    document.addEventListener('keydown', clearCanvasIntentForKeyboard, true);
     const onChange = (event: Scratch.Events.Abstract) => {
       if (applying.current) return;
       if (event.type === Scratch.Events.SELECTED) {
@@ -401,7 +397,7 @@ export const ScratchWorkspace = forwardRef<ScratchWorkspaceHandle, Props>(functi
       Scratch.svgResize(ws);
     };
     render();
-    return () => { canvasDeselectPending.current = false; document.removeEventListener('pointerdown', trackCanvasIntent, true); document.removeEventListener('pointerup', finishCanvasIntent, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
+    return () => { canvasDeselectPending.current = false; document.removeEventListener('pointerdown', trackCanvasIntent, true); document.removeEventListener('keydown', clearCanvasIntentForKeyboard, true); resize.disconnect(); ws.removeChangeListener(onChange); ws.dispose(); workspace.current = null; };
   }, [catalogueKey, props.readOnly]);
   useEffect(() => {
     const ws = workspace.current;
