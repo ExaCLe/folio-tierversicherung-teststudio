@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingScenarioEditProposal, TestingTechnicalPlan, TestingAgentStage, TestingAgentTermination } from '../../../shared/testing';
+import { normalizeTestingWorkStages, transitionTestingWorkStages } from '../../../shared/testing-work-stages';
 import { db } from '../../store';
 import { getTestingCatalog } from '../catalog';
 import { compileTestingMatrixRow, compileTestingScenario, findTestingDuplicates, stableTestingStringify, testingFingerprint } from '../compiler';
@@ -45,16 +46,15 @@ export function cancelTestingJob(id: string,cause:'user_cancelled'|'parent_cance
   return updateJob(id,{status:'cancelled',finishedAt:now(),error:stopped.message,termination:stopped.termination});
 }
 function updateJob(id: string, patch: Partial<TestingAgentJob>) {
-  const current=getTestingJob(id),at=now();let stages=[...(patch.workStages??current.workStages??[])];
-  if(patch.stage&&patch.stage!==current.stage){
-    stages=stages.map(item=>item.status==='running'?{...item,status:'completed' as const,finishedAt:at}:item);
-    stages=[...stages.filter(item=>item.stage!==patch.stage),{stage:patch.stage,status:'running',startedAt:at}];
-  }
+  const current=getTestingJob(id),at=now();
+  const supplied=patch.workStages ? normalizeTestingWorkStages(patch.workStages) : current.workStages ?? [];
+  let terminalStatus:'completed'|'failed'|undefined;
   if(patch.status&&['completed','failed','cancelled'].includes(patch.status)){
     const result=patch.result as {needsKnowledge?:boolean;run?:TestingRun;compiled?:{valid:boolean};termination?:TestingAgentTermination}|undefined;
     const failed=patch.status!=='completed'||!!result?.needsKnowledge||!!result?.termination||result?.run?.status==='failed'||result?.compiled?.valid===false;
-    stages=stages.map(item=>item.status==='running'?{...item,status:failed?'failed' as const:'completed' as const,finishedAt:at}:item);
+    terminalStatus=failed?'failed':'completed';
   }
+  const stages=transitionTestingWorkStages({stages:supplied,currentStage:current.stage,nextStage:patch.stage,terminalStatus,at});
   return saveJob({...current,...patch,...(stages.length?{workStages:stages}:{})});
 }
 function addEvent(id: string, event: TestingAgentJob['events'][number]) { const job = getTestingJob(id); saveJob({ ...job, events: [...job.events.slice(-299), event] }); }
@@ -192,7 +192,7 @@ export function startScenarioEditJob(input: { scenarioId: string; revision: numb
     if (signal.aborted) throw new Error('Die Ablaufüberarbeitung wurde abgebrochen.');
     assertFresh(scenario, fingerprint);
     return proposal;
-  }, scenario, fingerprint, { scope: 'scenario', applied: false }).job;
+  }, scenario, fingerprint, { scope: 'scenario', applied: false }, { stage: 'revising' }).job;
 }
 function scenarioEditProposal(job: TestingAgentJob): TestingScenarioEditProposal {
   const proposal = job.result as TestingScenarioEditProposal | undefined;

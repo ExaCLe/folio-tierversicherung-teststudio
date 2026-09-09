@@ -34,7 +34,7 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   const current = await scenario(request);
   const tool = { id: randomUUID(), at: new Date().toISOString(), kind: 'tool' as const, message: 'RAW_TOOL_COMMAND_MUST_STAY_HIDDEN' };
   const parent = job(current, { events: [tool], workStages: [{ stage: 'knowledge', status: 'running' }] });
-  const child = job(current, { phase: 'exploration', parentJobId: parent.id, events: [tool, { id: randomUUID(), at: new Date().toISOString(), kind: 'status', message: 'Die vorhandene Regel zur Sonderfreigabe wird geprüft.' }], workStages: [{ stage: 'knowledge', status: 'running' }] });
+  const child = job(current, { phase: 'exploration', parentJobId: parent.id, events: [tool, { id: randomUUID(), at: new Date().toISOString(), kind: 'message', message: 'Die Rollen Vermittler und Direktion werden fachlich voneinander abgegrenzt.' }, { id: randomUUID(), at: new Date().toISOString(), kind: 'status', message: 'Die vorhandene Regel zur Sonderfreigabe wird geprüft.' }], workStages: [{ stage: 'knowledge', status: 'running' }] });
   parent.childJobIds = [child.id]; const state = { jobs: [parent, child] }; await transport(page, state);
   await page.goto(`/testing/editor/${current.id}`);
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent');
@@ -47,6 +47,12 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   await expect(page.getByRole('dialog')).toContainText('1 protokollierte Werkzeugmeldung');
   await expect(activity(page)).not.toContainText('RAW_TOOL_COMMAND_MUST_STAY_HIDDEN');
   await page.getByRole('dialog').getByRole('button', { name: 'Dialog schließen', exact: true }).click();
+  await activity(page).getByRole('button', { name: 'Fachwissen prüfen: Ergebnis und Erläuterungen ansehen', exact: true }).click();
+  const knowledgeDialog = page.getByRole('dialog', { name: 'Fachwissen prüfen', exact: true });
+  await expect(knowledgeDialog.locator('.t-stage-message.status')).toContainText('Status');
+  await expect(knowledgeDialog.locator('.t-stage-message.message')).toContainText('Erläuterung');
+  await expect(knowledgeDialog).not.toContainText('RAW_TOOL_COMMAND_MUST_STAY_HIDDEN');
+  await knowledgeDialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
 
   const questions: TestingExplorationQuestion[] = [
     { id: 'vermittler', text: 'Darf die Rolle Vermittler eine Sonderfreigabe erteilen?', requiresBrowser: true, status: 'answered', answer: 'Die Entscheidung ist für Vermittler gesperrt.', evidenceIds: ['beobachtung-vermittler'], knowledgeIds: [] },
@@ -57,6 +63,14 @@ test('Business zeigt echte sequentielle Arbeit, deduplizierte Werkzeugzahlen und
   await expect(activity(page).locator('.t-activity-current')).toContainText(progress.summary, { timeout: 15_000 });
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 von 4 Arbeitsschritten erledigt');
   await expect(activity(page).getByLabel('Fortschritt des Auftrags')).toContainText('1 aktiver KI-Agent');
+  await activity(page).getByRole('button', { name: 'Die Anwendung erkunden: Ergebnis und Erläuterungen ansehen', exact: true }).click();
+  const explorationDialog = page.getByRole('dialog', { name: 'Die Anwendung erkunden', exact: true });
+  await expect(explorationDialog.locator('.t-exploration-question')).toHaveCount(2);
+  await expect(explorationDialog.locator('.t-exploration-question.answered')).toContainText('Frage 1');
+  await expect(explorationDialog.locator('.t-exploration-question.answered')).toContainText('Die Entscheidung ist für Vermittler gesperrt.');
+  await expect(explorationDialog.locator('.t-exploration-question.open')).toContainText('Frage 2');
+  await expect(explorationDialog.locator('.t-exploration-question.open')).toContainText('Für diese Frage liegt noch keine Antwort vor.');
+  await explorationDialog.getByRole('button', { name: 'Dialog schließen', exact: true }).click();
   const checklist = page.getByRole('region', { name: 'Erkundungsfragen', exact: true });
   await expect(checklist).toContainText('1 von 2 Erkundungsfragen beantwortet');
   await checklist.getByRole('button').click();
