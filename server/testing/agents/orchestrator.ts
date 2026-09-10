@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingScenarioEditProposal, TestingTechnicalPlan, TestingAgentStage, TestingAgentTermination } from '../../../shared/testing';
+import type { TestingAgentEvent, TestingAgentJob, TestingBlockInstance, TestingCatalog, TestingCompiledScenario, TestingModel, TestingReuseSuggestion, TestingRun, TestingScenario, TestingScenarioEditProposal, TestingTechnicalPlan, TestingAgentStage, TestingAgentTermination } from '../../../shared/testing';
 import { normalizeTestingWorkStages, transitionTestingWorkStages } from '../../../shared/testing-work-stages';
 import { db } from '../../store';
 import { getTestingCatalog } from '../catalog';
@@ -27,6 +27,7 @@ const controls = new Map<string, AbortController>();
 const completions = new Map<string, Promise<TestingAgentJob>>();
 const runningRuns = new Set<string>();
 const jobListeners = new Set<(job:TestingAgentJob)=>void>();
+const steeringBatches = new Map<string,{messages:string[];targetJobId:string;waiters:{resolve:(value:TestingSteeringResult)=>void;reject:(error:unknown)=>void}[]}>();
 let initialized = false;
 const now = () => new Date().toISOString();
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -39,13 +40,50 @@ const saveJob = (job: TestingAgentJob) => { const saved=db.upsert(jobs, structur
 export function subscribeTestingJobs(listener:(job:TestingAgentJob)=>void){jobListeners.add(listener);return()=>jobListeners.delete(listener);}
 export function listTestingJobs(): TestingAgentJob[] { return db.read<TestingAgentJob>(jobs).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export function getTestingJob(id: string): TestingAgentJob { const job = db.find<TestingAgentJob>(jobs, id); if (!job) throw new TestingModelError('Der Agentenlauf wurde nicht gefunden.', 404); return job; }
-export function cancelTestingJob(id: string,cause:'user_cancelled'|'parent_cancelled'='user_cancelled'): TestingAgentJob {
+export function cancelTestingJob(id: string,cause:'user_cancelled'|'parent_cancelled'|'interrupted'='user_cancelled'): TestingAgentJob {
   const job = getTestingJob(id);
   if (!['queued', 'running'].includes(job.status)) return job;
-  const stopped=new AgentTerminationError(cause,cause==='user_cancelled'?'Der Agentenlauf wurde vom Menschen abgebrochen.':'Der Unterauftrag wurde beendet, weil sein übergeordneter Auftrag beendet wurde.');
+  const stopped=new AgentTerminationError(cause,cause==='user_cancelled'?'Der Agentenlauf wurde vom Menschen abgebrochen.':cause==='parent_cancelled'?'Der Unterauftrag wurde beendet, weil sein übergeordneter Auftrag beendet wurde.':'Der Agentenlauf wurde durch eine neue Nachricht ersetzt und wird mit ihr neu geplant.');
   controls.get(id)?.abort(stopped);
   for(const child of listTestingJobs().filter(item=>item.parentJobId===id))cancelTestingJob(child.id,'parent_cancelled');
   return updateJob(id,{status:'cancelled',finishedAt:now(),error:stopped.message,termination:stopped.termination});
+}
+export interface TestingSteeringResult { state:'replanning';targetJobId:string;successorJobId:string;message:string }
+/** CLI print/exec invocations cannot accept another turn after stdin closes.
+ * Steering therefore supersedes the current root job and starts a fresh,
+ * revision-guarded plan. Requests arriving in the same event-loop window share
+ * one successor so a double submit does not create competing jobs. */
+export function steerTestingJob(input:{jobId:string;message:string;model?:TestingModel}):Promise<TestingSteeringResult>{
+  const message=input.message.trim();
+  if(message.length<1||message.length>15_000)return Promise.reject(new TestingModelError('Die neue Nachricht muss 1 bis 15.000 Zeichen enthalten.'));
+  const target=getTestingJob(input.jobId);
+  if(!target.scenarioId)return Promise.reject(new TestingModelError('Dieser Auftrag gehört zu keinem Testfall und kann nicht neu geplant werden.',409));
+  const active=listTestingJobs().find(job=>job.scenarioId===target.scenarioId&&!job.parentJobId&&['queued','running'].includes(job.status));
+  if(!active)return Promise.reject(new TestingModelError('Der angesprochene Agentenlauf arbeitet nicht mehr. Lade den aktuellen Stand und sende die Nachricht erneut.',409,'AGENT_REVISION_STALE'));
+  const key=target.scenarioId,existing=steeringBatches.get(key);
+  if(existing){existing.messages.push(message);return new Promise((resolve,reject)=>existing.waiters.push({resolve,reject}));}
+  const batch={messages:[message],targetJobId:active.id,waiters:[] as {resolve:(value:TestingSteeringResult)=>void;reject:(error:unknown)=>void}[]};steeringBatches.set(key,batch);
+  const promise=new Promise<TestingSteeringResult>((resolve,reject)=>batch.waiters.push({resolve,reject}));
+  setImmediate(()=>void (async()=>{
+    try{
+      const current=listTestingJobs().find(job=>job.scenarioId===key&&!job.parentJobId&&['queued','running'].includes(job.status));
+      if(!current)throw new TestingModelError('Der angesprochene Agentenlauf arbeitet nicht mehr. Lade den aktuellen Stand und sende die Nachricht erneut.',409,'AGENT_REVISION_STALE');
+      const answered=((current.result as {questions?:{text?:string;answer?:string}[]}|undefined)?.questions??[]).filter(item=>item.text&&item.answer).map(item=>`Frage: ${item.text}\nAntwort: ${item.answer}`).join('\n');
+      const instruction=batch.messages.map((text,index)=>`${index+1}. ${text}`).join('\n');
+      const request=`${current.prompt}${answered?`\n\nBereits geklärter fachlicher Kontext:\n${answered}`:''}\n\nNeue Hinweise während der laufenden Bearbeitung:\n${instruction}`;
+      if(request.length>15_000)throw new TestingModelError('Der bisherige Arbeitsauftrag und die neuen Hinweise überschreiten zusammen 15.000 Zeichen. Der laufende Auftrag bleibt erhalten; kürze bitte den Nachtrag.',400,'STEERING_TOO_LARGE');
+      cancelTestingJob(current.id,'interrupted');await waitTestingJob(current.id);
+      const scenario=getTestingScenario(key);
+      const model=input.model??current?.model??target.model;
+      const successor=scenario.blocks.length
+        ? startScenarioEditJob({scenarioId:key,revision:scenario.revision,text:request,model})
+        : startBusinessJob({scenarioId:key,revision:scenario.revision,request,model});
+      const result={state:'replanning' as const,targetJobId:batch.targetJobId,successorJobId:successor.id,message:'Die laufende, nicht interaktiv fortsetzbare CLI-Ausführung wurde ersetzt. Ein neuer Auftrag plant alle angenommenen Hinweise auf dem aktuellen Stand ein.'};
+      for(const waiter of batch.waiters)waiter.resolve(result);
+    }catch(error){for(const waiter of batch.waiters)waiter.reject(error);}
+    finally{steeringBatches.delete(key);}
+  })());
+  return promise;
 }
 function updateJob(id: string, patch: Partial<TestingAgentJob>) {
   const current=getTestingJob(id),at=now();
@@ -59,8 +97,22 @@ function updateJob(id: string, patch: Partial<TestingAgentJob>) {
   const stages=transitionTestingWorkStages({stages:supplied,currentStage:current.stage,nextStage:patch.stage,terminalStatus,at});
   return saveJob({...current,...patch,...(stages.length?{workStages:stages}:{})});
 }
-function addEvent(id: string, event: TestingAgentJob['events'][number]) { const job = getTestingJob(id); saveJob({ ...job, events: [...job.events.slice(-299), event] }); }
+function addEvent(id: string, event: TestingAgentJob['events'][number]) { const job = getTestingJob(id),context=event.content&&!event.context?{jobId:job.id,phase:job.phase,taskLabel:taskLabel(job.phase),modelId:job.model,...(job.agentConfig?.modelLabel?{modelLabel:job.agentConfig.modelLabel}:{}),...(job.agentConfig?.provider?{provider:job.agentConfig.provider}:{}),...(job.stage?{stage:job.stage}:{})}:event.context;saveJob({ ...job, events: [...job.events.slice(-299), { ...event,...(context?{context}:{}) }] }); }
 function status(id: string, text: string) { addEvent(id, { id: randomUUID(), at: now(), kind: 'status', message: text }); }
+const taskLabel=(phase:TestingAgentJob['phase'])=>phase==='exploration'?'Fachwissen prüfen':phase==='business'?'Fachlichen Ablauf planen':phase==='technical'?'Technisch vorbereiten':phase==='duplicates'?'Wiederverwendung prüfen':phase==='reuse'?'Bausteine vorschlagen':'Testfall benennen';
+export function addValidatedSummary(id:string,input:{title:string;summary:string;facts?:{label:string;value:string}[];sources?:TestingAgentEvent['sources']}){
+  const job=getTestingJob(id),summary=input.summary.trim().slice(0,5000);if(!summary)return;
+  const context:NonNullable<TestingAgentEvent['context']>={jobId:job.id,phase:job.phase,taskLabel:taskLabel(job.phase),modelId:job.model,...(job.agentConfig?.modelLabel?{modelLabel:job.agentConfig.modelLabel}:{}),...(job.agentConfig?.provider?{provider:job.agentConfig.provider}:{}),...(job.stage?{stage:job.stage}:{})};
+  addEvent(id,{id:randomUUID(),at:now(),kind:'message',message:summary,context,sources:input.sources?.slice(0,40),content:{type:'validated-summary',title:input.title.slice(0,200),summary,facts:input.facts?.filter(item=>item.label&&item.value).slice(0,12).map(item=>({label:item.label.slice(0,200),value:item.value.slice(0,1000)}))}});
+}
+function publishValidatedResult(id:string,result:unknown){
+  const job=getTestingJob(id),value=result as {title?:string;summary?:string;explanation?:string;draft?:{explanation?:string;assumptions?:string[]};plan?:{explanation?:string;unsupported?:{summary:string;suggestedBusinessRevision?:string}[]};scenario?:TestingScenario;compiled?:{valid?:boolean};attempts?:{valid:boolean}[]|number;catalog?:TestingCatalog;knowledgeIds?:string[];newKnowledge?:{id:string;title:string}[];evidence?:{id:string;path:string;screenshot:string}[];questions?:{text:string;status:string;answer?:string}[];suggestions?:{name:string;reason:string}[];decisions?:{reason?:string}[];duplicateDecisions?:{reason?:string}[]}|undefined;
+  if(job.phase==='business'&&value?.draft&&(value.compiled?.valid!==true||Array.isArray(value.attempts)&&value.attempts.at(-1)?.valid!==true))return;
+  const summary=value?.draft?.explanation?.trim()||value?.plan?.explanation?.trim()||value?.explanation?.trim()||value?.summary?.trim()||(job.phase==='naming'&&value?.title?`Der Testfall heißt „${value.title}“.`:undefined);if(!summary)return;
+  const facts=[...(value?.draft?.assumptions??[]).map((item,index)=>({label:`Annahme ${index+1}`,value:item})),...(value?.questions??[]).map(item=>({label:item.status==='open'?'Offene Frage':'Beantwortete Frage',value:item.status==='open'?item.text:item.answer||item.text})),...(value?.suggestions??[]).map(item=>({label:item.name,value:item.reason})),...((value?.decisions??value?.duplicateDecisions)??[]).flatMap(item=>item.reason?[{label:'Entscheidung',value:item.reason}]:[]),...(value?.plan?.unsupported??[]).map(item=>({label:'Technische Grenze',value:item.suggestedBusinessRevision?`${item.summary} Nächster fachlicher Schritt: ${item.suggestedBusinessRevision}`:item.summary}))];
+  const sources:NonNullable<TestingAgentEvent['sources']>=[...(value?.knowledgeIds??value?.scenario?.knowledgeRefs??[]).flatMap(ref=>{const document=value?.catalog?.knowledge.find(item=>item.id===ref);return document?[{label:document.title,kind:'knowledge' as const,ref}]:[]}),...(value?.newKnowledge??[]).map(item=>({label:item.title,kind:'knowledge' as const,ref:item.id})),...(value?.evidence??[]).map(item=>({label:`Browserbeobachtung ${item.id}: ${item.path}`,kind:'portal-evidence' as const,ref:item.screenshot})),...(value?.scenario?[{label:value.scenario.title,kind:'scenario' as const,ref:`${value.scenario.id}@${value.scenario.revision}`}]:[])];
+  addValidatedSummary(id,{title:job.phase==='exploration'?'Ergebnis der Wissensprüfung':job.phase==='business'?'Validierter fachlicher Entwurf':job.phase==='technical'?'Validierter technischer Plan':job.phase==='duplicates'?'Validierte Dublettenprüfung':job.phase==='reuse'?'Vorschläge zur Wiederverwendung':job.phase==='naming'?'Validierter Testfallname':'Validiertes Agentenergebnis',summary,facts,sources});
+}
 function launch(phase: TestingAgentJob['phase'], model: TestingModel, prompt: string, task: (job: TestingAgentJob, signal: AbortSignal) => Promise<unknown>, scenario?: TestingScenario, fingerprint?: string, initialResult?: unknown, metadata: {parentJobId?:string;stage?:TestingAgentStage}={}) {
   const agentConfig = resolveAgentConfiguration(model);
   if (listTestingJobs().filter(job => job.status === 'queued' || job.status === 'running').length >= 12) throw new TestingModelError('Es sind bereits zwölf Agentenaufträge offen. Bitte zuerst einen Auftrag abschließen oder abbrechen.', 429);
@@ -75,7 +127,7 @@ function launch(phase: TestingAgentJob['phase'], model: TestingModel, prompt: st
     updateJob(id, { status: 'running' });
     void withAgentConfiguration(agentConfig, () => task(job, controller.signal)).then(async result => {
       await Promise.all(listTestingJobs().filter(item=>item.parentJobId===job.id).map(item=>waitTestingJob(item.id)));
-      if (!controller.signal.aborted) updateJob(id, { status: 'completed', result, finishedAt: now(),...((result as {termination?:TestingAgentTermination})?.termination?{termination:(result as {termination:TestingAgentTermination}).termination}:{}) });
+      if (!controller.signal.aborted) {publishValidatedResult(id,result);updateJob(id, { status: 'completed', result, finishedAt: now(),...((result as {termination?:TestingAgentTermination})?.termination?{termination:(result as {termination:TestingAgentTermination}).termination}:{}) });}
     }).catch(error => {
       const stopped=controller.signal.aborted?agentAbortError(controller.signal):error,termination=agentTermination(stopped);
       updateJob(id, { status: controller.signal.aborted ? 'cancelled' : 'failed', error: message(stopped), finishedAt: now(),...(termination?{termination}:{}) });
@@ -158,7 +210,7 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
       if(!exploration.explored){for(const id of [job.id,child.job.id]){const stages=getTestingJob(id).workStages??[];updateJob(id,{workStages:[...stages,{stage:'exploring',status:'skipped',finishedAt:now(),summary:'Das vorhandene Fachwissen reicht; kein Browser wurde geöffnet.'}]});}}
     }
     updateJob(job.id,{stage:'planning'});
-    const {result,draft,preview,attempts}=await planBusinessWithCodex({id:job.id,model:input.model,request:input.request,catalog:exploration?.catalog??catalog,scenario:isOverride?existing:undefined,instanceId:input.instanceId,files:exploration?{'erkundungsergebnis.json':JSON.stringify(exploration)}:undefined,signal,onStage:stage=>updateJob(job.id,{stage}),onEvent:event=>addEvent(job.id,event)});
+    const {result,draft,preview,attempts}=await planBusinessWithCodex({id:job.id,model:input.model,request:input.request,catalog:exploration?.catalog??catalog,scenario:isOverride?existing:undefined,instanceId:input.instanceId,files:exploration?{'erkundungsergebnis.json':JSON.stringify(exploration)}:undefined,signal,onStage:stage=>updateJob(job.id,{stage}),onEvent:event=>addEvent(job.id,event),onValidatedPreview:validatedFlowPreview=>updateJob(job.id,{result:{...((getTestingJob(job.id).result??{}) as object),validatedFlowPreview}})});
     if(signal.aborted)throw new Error('Die Entwurfsplanung wurde abgebrochen.');
     assertFresh(baseline,fingerprint);
     if(isOverride){

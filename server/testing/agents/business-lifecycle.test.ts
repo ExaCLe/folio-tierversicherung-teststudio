@@ -62,6 +62,27 @@ test('Fehlgeschlagene und abgebrochene Planung lassen sich mit derselben gespeic
   assert.equal(repository.getTestingScenario(cancelled.scenarioId!).revision,1);assert.equal(lifecycle(cancelled.scenarioId!).status,'cancelled');
   const retry=await request('POST',`/scenarios/${cancelled.scenarioId}/plan`,{revision:1,model:'luna'});assert.equal(retry.data.scenarioId,cancelled.scenarioId);assert.equal((await orchestrator.waitTestingJob(retry.data.id)).status,'completed');
 });
+test('Nachrichten während der Arbeit bündeln sich in einem revisionssicheren Nachfolgeauftrag',async()=>{
+  const active=orchestrator.startBusinessJob({request:'Eine laufende Planung soll durch neue Hinweise präzisiert werden.',model:'luna'});
+  const first=orchestrator.steerTestingJob({jobId:active.id,message:'Berücksichtige zuerst die Sachbearbeitung.'});
+  const second=orchestrator.steerTestingJob({jobId:active.id,message:'Danach prüft die Direktion dieselbe Police.'});
+  const [a,b]=await Promise.all([first,second]);
+  assert.equal(a.state,'replanning');assert.equal(a.successorJobId,b.successorJobId);
+  const interrupted=await orchestrator.waitTestingJob(active.id);assert.equal(interrupted.status,'cancelled');assert.equal(interrupted.termination?.cause,'interrupted');
+  const successor=orchestrator.getTestingJob(a.successorJobId);assert.match(successor.prompt,/Sachbearbeitung/);assert.match(successor.prompt,/Direktion/);
+  assert.equal(successor.scenarioId,active.scenarioId);assert.equal((await orchestrator.waitTestingJob(successor.id)).status,'completed');
+});
+test('Wiederholtes Steering erhält den ursprünglichen Änderungsauftrag und lehnt Überlänge vor dem Abbruch ab',async()=>{
+  const scenario=repository.saveTestingScenario({...structuredClone(seed),id:'steering-kontext-erhalten',title:'Steering-Kontext erhalten'},0);
+  const original=orchestrator.startScenarioEditJob({scenarioId:scenario.id,revision:scenario.revision,text:'Ändere außerdem die bestehende Statusprüfung auf den dokumentierten Zielstatus.',model:'luna'});
+  await assert.rejects(orchestrator.steerTestingJob({jobId:original.id,message:'x'.repeat(15_000)}),/laufende Auftrag bleibt erhalten/);
+  assert(['queued','running'].includes(orchestrator.getTestingJob(original.id).status));
+  const first=await orchestrator.steerTestingJob({jobId:original.id,message:'Behalte dabei den Drucknachweis bei.'});
+  const second=await orchestrator.steerTestingJob({jobId:first.successorJobId,message:'Prüfe zusätzlich den dokumentierten Grund.'});
+  const successor=orchestrator.getTestingJob(second.successorJobId);
+  for(const text of ['Ändere außerdem','Drucknachweis','dokumentierten Grund'])assert.match(successor.prompt,new RegExp(text));
+  orchestrator.cancelTestingJob(successor.id);await orchestrator.waitTestingJob(successor.id);
+});
 test('Das ausgewählte Modell benennt den neutralen Entwurf und eine ausdrückliche Titelvorgabe bleibt erhalten',async()=>{
   const job=orchestrator.startBusinessJob({request:'Titel: Gewünschter Fachtest. Prüfe die fachlichen Rollen.',model:'luna'});
   assert.equal(repository.getTestingScenario(job.scenarioId!).title,'Neuer Testfall');

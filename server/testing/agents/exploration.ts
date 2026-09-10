@@ -246,6 +246,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
   const evidence: ExplorationEvidence[] = [];
   let sandbox: PortalSandbox | undefined, browser: Browser | undefined, page: Page | undefined;
   const event = (message: string) => input.onEvent?.({ id: randomUUID(), at: new Date().toISOString(), kind: 'status', message });
+  const publicSummary=(summary:string,knowledgeIds:string[],questions:TestingExplorationQuestion[])=>input.onEvent?.({id:randomUUID(),at:new Date().toISOString(),kind:'message',message:summary,content:{type:'validated-summary',title:'Validierter Zwischenstand der Wissensprüfung',summary,facts:questions.slice(0,12).map(question=>({label:question.status==='open'?'Offene Frage':'Beantwortete Frage',value:question.status==='open'?question.text:question.answer}))},sources:[...knowledgeIds.flatMap(ref=>{const document=knowledge.find(item=>item.id===ref);return document?[{label:document.title,kind:'knowledge' as const,ref}]:[]}),...questions.flatMap(question=>question.evidenceIds).filter((id,index,all)=>all.indexOf(id)===index).flatMap(ref=>{const item=evidence.find(candidate=>candidate.id===ref);return item?[{label:`Browserbeobachtung ${ref}: ${item.path}`,kind:'portal-evidence' as const,ref:item.screenshot}]:[]})]});
   const closeBrowser = () => { void browser?.close().catch(() => {}); }; controller.signal.addEventListener('abort', closeBrowser);
   const knowledge = input.catalog.knowledge.filter(item => item.kind !== 'technical');
   let gaps: string[] = [], explanation = '', knowledgeIds: string[] = [], round = 0, questions: TestingExplorationQuestion[] = [];
@@ -306,7 +307,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
         throw cause;
       }
       explanation = reply.explanation; knowledgeIds = reply.knowledgeIds; questions = reply.questions;
-      event(reply.explanation.slice(0, 500));
+      publicSummary(reply.explanation.slice(0,5000),reply.knowledgeIds,reply.questions);
       if (reply.knowledgeIds.some(id => !knowledge.some(doc => doc.id === id))) throw new Error('Die Wissensprüfung nennt einen unbekannten Wissensbeleg.');
       gaps = [...new Set([...questions.filter(question => question.status === 'open').map(question => question.text), ...reply.gaps])];
       if (reply.decision === 'finish') {

@@ -1,4 +1,4 @@
-import type { TestingAgentJob, TestingAgentStage, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
+import type { TestingAgentJob, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
 
 export type TestingChatCommand = 'message'|'explore'|'resume'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
 export type TestingChatEntryKind = 'user'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
@@ -6,6 +6,10 @@ export type TestingChatEntryKind = 'user'|'agent_summary'|'question'|'status'|'c
 export interface TestingChatEntry {
   id:string; at:string; kind:TestingChatEntryKind; message:string;
   jobId?:string; scenarioRevision?:number; runId?:string;
+  context?:{jobId:string;phase:TestingAgentJob['phase'];taskLabel:string;modelId:string;modelLabel?:string;provider?:'codex'|'claude';stage?:TestingAgentStage};
+  sources?:{label:string;kind:'knowledge'|'scenario'|'definition'|'portal-evidence';ref:string}[];
+  content?:{type:'validated-summary';title:string;summary:string;facts?:{label:string;value:string}[]};
+  delivery?:{state:'routing'|'replanning'|'applied'|'rejected';targetLabel?:string;successorJobId?:string;detail?:string};
 }
 export interface TestingChatConversation {
   id:string; revision:number; eventSequence:number; createdAt:string; updatedAt:string; model:TestingModel;
@@ -25,6 +29,7 @@ export interface TestingChatSnapshot {
   scenarioState?:{revision:number;fingerprint:string};
   technicalReview?:{jobId:string;issues:unknown[];needsBusinessReview:boolean};
   confirmedFlow:{scenarioRevision:number;blocks:TestingScenario['blocks']}|null;
+  validatedFlowPreview?:{jobId:string;scenarioRevision:number;title:string;expectedOutcome:string;blocks:TestingScenario['blocks'];knowledgeRefs:string[];newDefinitions?:TestingBlockDefinition[];newKnowledge?:TestingKnowledgeDocument[];status:'ready'|'provisional';readonly:true};
   runningStage?:TestingAgentStage;
 }
 export interface TestingChatCommandRequest { command:TestingChatCommand; expectedRevision:number; payload?:Record<string,unknown> }

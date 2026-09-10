@@ -70,13 +70,16 @@ function installHooks() {
 function eventMessage(event: any): Pick<TestingAgentEvent, 'kind' | 'message'> | undefined {
   if (event.type === 'thread.started') return { kind: 'status', message: 'Codex-Sitzung gestartet.' };
   if (event.type === 'turn.started') return { kind: 'status', message: 'Der Agent bearbeitet den Auftrag.' };
-  if (event.type === 'turn.completed') return { kind: 'status', message: 'Codex hat ein Ergebnis geliefert.' };
+  // Completion and agent_message events are unvalidated provider output. The
+  // orchestrator publishes a curated summary only after decoding and domain
+  // validation have succeeded.
+  if (event.type === 'turn.completed') return undefined;
   if (event.type === 'error' || event.type === 'turn.failed') return { kind: 'error', message: redactCLIText(String(event.message ?? event.error?.message ?? 'Codex hat den Auftrag abgebrochen.')).slice(0, 2000) };
   const item = event.item;
   if (!item) return undefined;
   if (item.type === 'agent_message' && event.type === 'item.completed') {
-    const value = String(item.text ?? '');
-    return { kind: 'message', message: value.trim().startsWith('{') ? 'Der Agent hat sein strukturiertes Ergebnis abgegeben. Die Anwendung prüft jetzt Schema und Verweise.' : redactCLIText(value).slice(0, 2000) };
+    const value = redactCLIText(String(item.text ?? '')).trim();
+    return !value || /^[\[{]/.test(value) ? undefined : { kind: 'message', message: value.slice(0, 2000) };
   }
   if (item.type === 'command_execution' && event.type === 'item.started') return { kind: 'tool', message: `Kontext lesen: ${redactCLIText(String(item.command ?? 'Lokaler Lesevorgang')).slice(0, 600)}` };
   return undefined;
@@ -105,8 +108,10 @@ function claudeEventMessage(event: any): Pick<TestingAgentEvent, 'kind' | 'messa
   if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
     const tool = event.message.content.find((item: any) => item.type === 'tool_use');
     if (tool) return { kind: 'tool', message: `Kontext lesen: ${String(tool.name ?? 'Lesevorgang').slice(0, 80)}` };
+    const value = redactCLIText(event.message.content.filter((item:any)=>item.type==='text').map((item:any)=>String(item.text??'')).join('\n')).trim();
+    if (value && !/^[\[{]/.test(value)) return { kind: 'message', message: value.slice(0, 2000) };
   }
-  if (event.type === 'result') return { kind: event.is_error || event.subtype !== 'success' ? 'error' : 'status', message: event.is_error || event.subtype !== 'success' ? 'Claude Code meldet einen fehlgeschlagenen Auftrag.' : 'Claude Code hat sein strukturiertes Ergebnis geliefert. Die Anwendung prüft jetzt Schema und Verweise.' };
+  if (event.type === 'result') return event.is_error || event.subtype !== 'success' ? { kind: 'error', message: 'Claude Code meldet einen fehlgeschlagenen Auftrag.' } : undefined;
   return undefined;
 }
 

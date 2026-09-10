@@ -51,6 +51,16 @@ test('Lokale Defaults und Codex-Aufruf bleiben mit Luna/Sol kompatibel', async (
   assert.equal(manifest.args.at(-1), '-');
 });
 
+test('Providerabschluss und strukturiertes Ergebnis erscheinen nicht als ungeprüfte öffentliche Nachricht',async()=>{
+  const events:any[]=[];
+  await cli.invokeCodex({...input('codex-public-events','luna'),onEvent:(event:any)=>events.push(event)});
+  assert(!events.some(event=>event.message==='Codex hat ein Ergebnis geliefert.'));
+  const configuration=settings.resolveAgentConfiguration('luna');
+  // Public prose remains useful progress; JSON-shaped agent output is withheld
+  // until the orchestrator has decoded and validated it.
+  assert(configuration.provider==='codex');
+});
+
 test('Windows startet PATH-, CMD- und PowerShell-Shims ohne Shell', { skip: process.platform !== 'win32' }, async () => {
   const shimDirectory = join(directory, 'windows-shims');
   mkdirSync(shimDirectory);

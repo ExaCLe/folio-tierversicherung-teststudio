@@ -2,7 +2,7 @@ import { test, expect, type Page, type APIRequestContext } from '@playwright/tes
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import type { TestingRun } from '../shared/testing';
-import type { TestingScenario } from '../shared/testing';
+import type { TestingCatalog, TestingScenario } from '../shared/testing';
 import type { TestingChatSnapshot } from '../shared/testing-chat';
 
 const conversation = (scenario?: TestingScenario, patch: Partial<TestingChatSnapshot> = {}): TestingChatSnapshot => ({
@@ -17,9 +17,10 @@ async function scenario(request: APIRequestContext) {
   expect(response.ok()).toBeTruthy(); return response.json() as Promise<TestingScenario>;
 }
 
-async function staticChat(page: Page, snapshot: TestingChatSnapshot) {
+async function staticChat(page: Page, snapshot: TestingChatSnapshot, entries: TestingChatSnapshot['timeline'] = []) {
   await page.route('**/api/testing/chat/conversations/chat-browser-contract', route => route.fulfill({ json: snapshot }));
-  await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: 2, revision: snapshot.conversation.revision, snapshot })}\n\n` }));
+  const entryEvents = entries.map((entry, index) => `event: entry\ndata: ${JSON.stringify({ type: 'entry', sequence: snapshot.conversation.eventSequence + index + 1, revision: snapshot.conversation.revision, entry })}\n\n`).join('');
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: snapshot.conversation.eventSequence, revision: snapshot.conversation.revision, snapshot })}\n\n${entryEvents}` }));
 }
 
 test('alternative Chat-Navigation erstellt leer, hängt bestehende Tests ohne Agentenauftrag an und hält Deeplinks', async ({ page, request }) => {
@@ -53,6 +54,71 @@ test('alternative Chat-Navigation erstellt leer, hängt bestehende Tests ohne Ag
   await page.getByRole('button', { name: 'Browser', exact: true }).click();
   await expect(page).toHaveURL(/\/browser$/);
   await expect(page.getByRole('link', { name: 'Klassische Ansicht', exact: true })).toHaveAttribute('href', '/testing');
+});
+
+test('zeigt öffentlichen Agentenbericht, Routingstatus und validierte Ablaufvorschau während der Arbeit', async ({ page, request }) => {
+  mkdirSync('.local/verification/chat', { recursive: true });
+  const seed = await scenario(request);
+  const catalogResponse = await request.get('/api/testing/catalog');
+  const catalog = await catalogResponse.json() as TestingCatalog;
+  const sourceRef = seed.knowledgeRefs[0];
+  const sourceTitle = catalog.knowledge.find(item => item.id === sourceRef)?.title ?? sourceRef;
+  const newDefinition = { ...structuredClone(catalog.definitions[0]), id: 'preview.neue-direktionspruefung', name: 'Neue Direktionsfreigabe prüfen', semanticKey: 'preview.neue-direktionspruefung', origin: 'agent' as const };
+  const newBlock = { ...structuredClone(seed.blocks[0]), id: 'preview-neue-direktionspruefung', definition: { id: newDefinition.id, version: newDefinition.version }, inputs: {} };
+  const running = conversation(undefined, {
+    conversation: { id: 'chat-browser-contract', revision: 7, eventSequence: 5, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:02:00.000Z', model: 'luna', activeJobId: 'job-plan', entryIds: ['summary', 'steering'] },
+    timeline: [
+      { id: 'summary', at: '2026-09-10T08:01:00.000Z', kind: 'agent_summary', message: 'Der Ablauf deckt Antrag und Direktionsanfrage ab.', context: { jobId: 'job-research', phase: 'exploration', taskLabel: 'Kuhlebensversicherung fachlich erkunden', modelId: 'luna', modelLabel: 'Luna', provider: 'codex', stage: 'validating' }, content: { type: 'validated-summary', title: 'Fachliche Erkundung abgeschlossen', summary: 'Der Agent hat den Antrag, die Versicherungssumme und die Direktionsanfrage geprüft.', facts: [{ label: 'Versicherungssumme', value: '15.000 Euro' }] }, sources: [{ label: sourceTitle, kind: 'knowledge', ref: sourceRef }] },
+      { id: 'steering', at: '2026-09-10T08:02:00.000Z', kind: 'user', message: 'Ergänze die Ablehnung ohne Direktionsfreigabe.', delivery: { state: 'routing', targetLabel: 'Planungsauftrag', detail: 'Die Nachricht ist gespeichert. Der laufende Auftrag wird beendet, bevor ein Folgeauftrag entsteht.' } },
+    ],
+    activeJob: { id: 'job-plan', phase: 'business', status: 'running', stage: 'planning', startedAt: '2026-09-10T08:01:30.000Z' },
+    allowedCommands: ['message', 'cancel'],
+    validatedFlowPreview: { jobId: 'job-plan', scenarioRevision: 0, title: 'Kuhleben mit Direktionsanfrage', expectedOutcome: 'Antrag und Freigabe werden fachlich geprüft.', blocks: [newBlock], knowledgeRefs: seed.knowledgeRefs, newDefinitions: [newDefinition], newKnowledge: [], status: 'provisional', readonly: true },
+  });
+  let current = running;
+  const routedEntry = { ...running.timeline[1], delivery: { state: 'replanning' as const, targetLabel: 'Planungsauftrag', successorJobId: 'job-plan-next', detail: 'Ein Folgeauftrag wurde angelegt.' } };
+  let streamConnections = 0;
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract', route => route.fulfill({ json: current }));
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => {
+    streamConnections += 1;
+    const body = streamConnections === 1
+      ? `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: 5, revision: 7, snapshot: running })}\n\n`
+      : `event: entry\ndata: ${JSON.stringify({ type: 'entry', sequence: 6, revision: 7, entry: routedEntry })}\n\n`;
+    return route.fulfill({ contentType: 'text/event-stream', body });
+  });
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => {
+    const input = route.request().postDataJSON() as { command: string; payload?: { message?: string } };
+    expect(input.command).toBe('message');
+    expect(input.payload?.message).toBe('Prüfe zusätzlich den Ablehnungsgrund.');
+    const message = input.payload?.message ?? '';
+    current = { ...running, conversation: { ...running.conversation, revision: 8 }, timeline: [...running.timeline, { id: 'steering-new', at: '2026-09-10T08:03:00.000Z', kind: 'user', message, delivery: { state: 'routing', targetLabel: 'Planungsauftrag' } }] };
+    await route.fulfill({ json: current });
+  });
+  await page.goto('/testing/chat/chat-browser-contract/chat');
+  await expect(page.getByText('Kuhlebensversicherung fachlich erkunden')).toBeVisible();
+  await expect(page.getByText('Neuplanung gestartet')).toBeVisible();
+  await page.getByRole('button', { name: 'Details', exact: true }).first().click();
+  await expect(page.getByRole('dialog')).toContainText('Fachliche Erkundung abgeschlossen');
+  await expect(page.getByRole('dialog')).toContainText(sourceTitle);
+  await page.screenshot({ path: '.local/verification/chat/agent-summary-details.png', fullPage: true });
+  const sourcePagePromise = page.waitForEvent('popup');
+  await page.getByRole('link', { name: sourceTitle, exact: true }).click();
+  const sourcePage = await sourcePagePromise;
+  await expect(sourcePage).toHaveURL(new RegExp(`/testing/knowledge/${encodeURIComponent(sourceRef)}$`));
+  await expect(sourcePage.getByRole('heading', { name: sourceTitle, exact: true })).toBeVisible();
+  await sourcePage.close();
+  await page.getByRole('button', { name: 'Details schließen' }).click();
+  const composer = page.getByPlaceholder('Beschreibe deinen Testfall …');
+  await expect(composer).toBeEnabled();
+  await composer.fill('Prüfe zusätzlich den Ablehnungsgrund.');
+  await page.getByRole('button', { name: 'Senden', exact: true }).click();
+  await expect(page.getByText('Prüfe zusätzlich den Ablehnungsgrund.')).toBeVisible();
+  await page.getByRole('button', { name: 'Ablauf', exact: true }).click();
+  await expect(page.getByText('VORLÄUFIGE VORSCHAU')).toBeVisible();
+  await expect(page.getByText('Antrag und Freigabe werden fachlich geprüft.')).toBeVisible();
+  await expect(page.getByLabel('Baustein hinzufügen')).toBeDisabled();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Neue Direktionsfreigabe prüfen' })).toBeVisible();
+  await page.screenshot({ path: '.local/verification/chat/agent-summary-and-preview.png', fullPage: true });
 });
 
 test('Ablauf sperrt Agentenarbeit, dupliziert wirklich und behält einen abgewiesenen lokalen Entwurf', async ({ page, request }) => {

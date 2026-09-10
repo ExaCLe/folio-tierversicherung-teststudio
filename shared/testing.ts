@@ -178,7 +178,13 @@ export interface TestingScenarioLifecycle {
   currentJobId?:string; childJobIds:string[]; runId?:string; runStatus?:'queued'|'running'|'passed'|'failed'; analysisRunning?:boolean; analysisAttention?:boolean; stage?:TestingAgentStage;
   nextAction:'plan'|'wait'|'approve'|'review'|'technical'|'run'|'retry-business'|'retry-technical'|'inspect-run'; message:string;
 }
-export interface TestingAgentEvent { id: string; at: string; kind: 'status' | 'message' | 'tool' | 'error'; message: string }
+export interface TestingAgentEvent {
+  id:string;at:string;kind:'status'|'message'|'tool'|'error';message:string;
+  /** Ausschließlich für die Oberfläche freigegebener Kontext, keine Prompts oder internen Gedankengänge. */
+  context?:{jobId:string;phase:TestingAgentPhase;taskLabel:string;modelId:string;modelLabel?:string;provider?:TestingProvider;stage?:TestingAgentStage};
+  sources?:{label:string;kind:'knowledge'|'scenario'|'definition'|'portal-evidence';ref:string}[];
+  content?:{type:'validated-summary';title:string;summary:string;facts?:{label:string;value:string}[]};
+}
 export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   prompt: string; scenarioId?: string; scenarioRevision?: number; fingerprint?: string;

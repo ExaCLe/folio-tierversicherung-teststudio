@@ -6,10 +6,13 @@ import { invokeCodex } from './cli';
 import { agentContext, businessPrompt } from './prompts';
 import { BUSINESS_SCHEMA, decodeBusinessDraft, validateTestingCaseDesign } from './schemas';
 
+class CaseDesignCorrectionError extends Error {}
+
 /** A failed schema or compiler check is fed back to the real model once. No local
  * template changes the model's business proposal. Both attempts stay on disk. */
 export async function planBusinessWithCodex(input: { id: string; model: TestingModel; request: string; catalog: TestingCatalog; scenario?: TestingScenario;
-  instanceId?: string; files?: Record<string,string>; signal?: AbortSignal; onStage?:(stage:'planning'|'validating')=>void; onEvent?: (event: TestingAgentEvent) => void }) {
+  instanceId?: string; files?: Record<string,string>; signal?: AbortSignal; onStage?:(stage:'planning'|'validating')=>void; onEvent?: (event: TestingAgentEvent) => void;
+  onValidatedPreview?:(preview:{scenario:TestingScenario;catalog:TestingCatalog;newDefinitions:TestingCatalog['definitions'];newKnowledge:TestingCatalog['knowledge'];validation:'structural'|'business';provisional:boolean})=>void }) {
   const prompt = businessPrompt(input.request, input.scenario ? { scenarioId: input.scenario.id, instanceId: input.instanceId! } : undefined);
   const files = {...agentContext(input.catalog, undefined, input.scenario),...input.files};
   let previous: unknown, diagnostic = '';
@@ -27,13 +30,15 @@ export async function planBusinessWithCodex(input: { id: string; model: TestingM
       const errors = preview.compiled.issues.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`);
       const caseErrors=validateTestingCaseDesign(draft,draft.matrix,preview.scenario,preview.catalog);errors.push(...caseErrors);
       const valid=preview.compiled.valid&&!errors.length;
+      if(preview.compiled.valid&&!input.signal?.aborted)input.onValidatedPreview?.({scenario:preview.scenario,catalog:preview.catalog,newDefinitions:draft.newDefinitions,newKnowledge:draft.newKnowledge,validation:caseErrors.length?'structural':'business',provisional:caseErrors.length>0});
       attempts.push({ id, contextHash: result.contextHash, valid, errors });
       await writeFile(resolve(result.directory, 'validated-draft.json'), JSON.stringify({ draft, preview, attempts }, null, 2));
       if (valid) return { result, draft, preview, attempts };
-      if(attempt===1&&caseErrors.length)throw new Error(`Auch die KI-Korrektur ist in ihrer Fallplanung nicht konsistent: ${caseErrors.join('\n')}`);
+      if(attempt===1&&caseErrors.length){const readable=caseErrors.map(error=>error.replace(/^[A-Z_]+:\s*/,''));throw new CaseDesignCorrectionError(`Die automatische Korrektur konnte die Fallplanung nicht eindeutig reparieren. Der Entwurf wurde nicht übernommen. Bitte präzisiere die unabhängigen Varianten und ihre Sollwerte und starte die Planung erneut.\n${readable.map(error=>`- ${error}`).join('\n')}\nFehlercodes: ${caseErrors.map(error=>error.split(':',1)[0]).join(', ')}`);}
       if(attempt===1)return {result,draft,preview,attempts};
       diagnostic = errors.join('\n');
     } catch (error) {
+      if(error instanceof CaseDesignCorrectionError)throw error;
       diagnostic = error instanceof Error ? error.message : String(error);
       attempts.push({ id, contextHash: result.contextHash, valid: false, errors: [diagnostic] });
       if (attempt === 1) throw new Error(`Auch die KI-Korrektur entspricht noch nicht dem Datenvertrag: ${diagnostic}`);

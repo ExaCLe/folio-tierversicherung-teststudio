@@ -12,13 +12,15 @@ Die linke Liste enthält die vorhandenen Testfälle. Ein Klick öffnet den Testf
 
 ### Unterhaltung
 
-Hier stehen deine Anforderungen, öffentliche Statusmeldungen, Rückfragen, Antworten und Änderungsvorschläge. Eine Antwort auf eine Rückfrage setzt den unterbrochenen Auftrag mit diesem Bezug fort. Bei einem bestehenden Ablauf erzeugt eine neue Anweisung zuerst einen Vorschlag. "Vorschlag übernehmen" ändert den gespeicherten Testfall. "Vorschlag verwerfen" lässt den bestätigten Ablauf unverändert.
+Hier stehen deine Anforderungen, öffentliche Statusmeldungen, Rückfragen, Antworten und Änderungsvorschläge. Agentenbeiträge nennen die konkrete Aufgabe und den ausführenden Agenten. Über "Details" siehst du die validierte Zusammenfassung, ihre Fakten und die verwendeten fachlichen Quellen.
 
-Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Sie zeigt keine privaten Überlegungen des Modells. Der Agent streamt derzeit auch keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
+Du kannst auch während eines laufenden Auftrags schreiben. "Nachricht gespeichert" bestätigt zuerst nur die Annahme durch den Server. "Neuplanung gestartet" erscheint, sobald ein Folgeauftrag angelegt wurde. Die Nachricht verändert keinen bereits laufenden Modellaufruf. Der Server beendet diesen Auftrag kontrolliert und startet danach den Folgeauftrag mit dem bisherigen Stand und deiner Ergänzung. Eine Antwort auf eine Rückfrage setzt den unterbrochenen Auftrag mit diesem Bezug fort. Bei einem bestehenden Ablauf erzeugt eine neue Anweisung zuerst einen Vorschlag. "Vorschlag übernehmen" ändert den gespeicherten Testfall. "Vorschlag verwerfen" lässt den bestätigten Ablauf unverändert.
+
+Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Sie zeigt keine privaten Überlegungen, Tool-Aufrufe, Sitzungskennungen oder Rohantworten des Modells. Der Agent streamt derzeit auch keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
 
 ### Ablauf
 
-Die Scratch-Arbeitsfläche zeigt den bestätigten Ablauf. Während Folio den Entwurf bearbeitet, ist sie schreibgeschützt. Ein Änderungsvorschlag erscheint ebenfalls schreibgeschützt, bis du ihn in der Unterhaltung übernimmst oder verwirfst.
+Die Scratch-Arbeitsfläche zeigt den bestätigten Ablauf. Liegt bereits ein strukturell gültiger vorläufiger Stand vor, zeigt sie diesen als schreibgeschützte Vorschau mit Ziel und fachlichen Quellen. Dieser Stand ist noch nicht fachlich freigegeben. Während der Agent den Entwurf bearbeitet, ist sie schreibgeschützt. Ein Änderungsvorschlag erscheint ebenfalls schreibgeschützt, bis du ihn in der Unterhaltung übernimmst oder verwirfst.
 
 Ohne laufenden Auftrag kannst du Blöcke verschieben, hinzufügen, duplizieren oder löschen. Ein Klick auf einen Block öffnet den Inspector für Werte und Verknüpfungen. Unter der Arbeitsfläche liegt die typisierte Testmatrix. "Revision speichern" schreibt Scratch-Ablauf und Matrix gemeinsam als neue Revision.
 

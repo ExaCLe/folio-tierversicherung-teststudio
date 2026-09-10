@@ -149,7 +149,7 @@ test('Chat zeigt nur Hinweise des neuesten exakt passenden Technikauftrags und k
 test('Ein klassisch gestarteter Auftrag sperrt denselben Chat-Fachstand', () => {
   const scenario=scenarioFixture('chat-classic-active'),fingerprint=testingFingerprint(scenario,getTestingCatalog());
   db.upsert<TestingAgentJob>('testingAgentJobs',{id:'classic-active-job',phase:'business',model:'luna',status:'running',prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,startedAt:'2026-09-10T12:00:00.000Z',events:[]});
-  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-active'});assert.equal(opened.activeJob?.id,'classic-active-job');assert.deepEqual(opened.allowedCommands,['cancel']);
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-active'});assert.equal(opened.activeJob?.id,'classic-active-job');assert.deepEqual(opened.allowedCommands,['cancel','message']);
 });
 
 test('Zwei verschachtelte Wiederverwendungsvorschläge werden einzeln angenommen und erhalten Fachstand sowie Laufhistorie', async () => {

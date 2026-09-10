@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TestingBlockDefinition, TestingCatalog, TestingCompiledScenario } from '../../../shared/testing';
-import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA } from './schemas';
+import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA, validateTestingCaseDesign } from './schemas';
 import { validateDuplicateReview } from './reviews';
 import { duplicateReviewContext } from './duplicate-context';
 import { duplicatePrompt } from './prompts';
@@ -108,4 +108,14 @@ test('Das Agentenschema erlaubt ausdrücklich Definitionseingaben ohne Standardw
       outputs: [], knowledgeRefs: [], preconditions: [], postconditions: [], operation: null, bindingId: null, body: [], exports: [] }], newKnowledge: [],
   });
   assert.equal(draft.newDefinitions[0].inputs[0].default, undefined);
+});
+
+test('Fallplanung unterscheidet lineare Rollenwechsel von Varianten und erhält widersprüchliche Sollwerte zur Klärung',()=>{
+  assert.match(duplicatePrompt(),/pruefgegenstaende\.json/);
+  const draft:any={caseDesign:{mode:'matrix',dimensions:['Rolle'],expectedCaseCount:2,expectedResults:['Freigabe','Ablehnung'],rationale:'Zwei Rollen.'},matrix:{
+    columns:[{id:'rolle',label:'Rolle',target:{blockPath:'kontext',inputPath:'role'},role:'input',type:'choice'},{id:'ergebnis',label:'Ergebnis',target:{blockPath:'pruefung',inputPath:'expected'},role:'expectation',type:'text'}],
+    rows:[{id:'eins',label:'Sachbearbeitung',enabled:true,values:{rolle:'Sachbearbeitung',ergebnis:'Freigabe'}},{id:'zwei',label:'Direktion',enabled:true,values:{rolle:'Sachbearbeitung',ergebnis:'Ablehnung'}}],
+  }};
+  const errors=validateTestingCaseDesign(draft);
+  assert.equal(errors.length,1);assert.match(errors[0],/CASE_DESIGN_CONFLICTING_EXPECTATIONS/);assert.match(errors[0],/Sachbearbeitung.*Direktion/);assert.match(errors[0],/entferne keine Erwartung stillschweigend/);
 });

@@ -101,12 +101,12 @@ export function TestingApp() {
   const [activeJob, setActiveJob] = useState<TestingAgentJob>();
   const [activeRun, setActiveRun] = useState<TestingRun>();
   const [busy, setBusy] = useState('');
-  const [knowledgeId, setKnowledgeId] = useState<string>();
+  const [knowledgeId, setKnowledgeId] = useState<string | undefined>(() => initialView() === 'knowledge' ? routeScenarioId() || undefined : undefined);
   const [knowledgeModal, setKnowledgeModal] = useState<string>();
   const [definitionModal, setDefinitionModal] = useState<{ definition?: TestingBlockDefinition; insertion?: InsertionTarget }>();
   const [definitionChange, setDefinitionChange] = useState<PendingDefinitionChange>();
   const [bindingId, setBindingId] = useState<string>();
-  const [libraryId, setLibraryId] = useState<string>();
+  const [libraryId, setLibraryId] = useState<string | undefined>(() => initialView() === 'library' ? routeScenarioId() || undefined : undefined);
   const [outline, setOutline] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [validationOpen, setValidationOpen] = useState(false);
