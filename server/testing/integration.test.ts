@@ -17,6 +17,8 @@ const { createTestingRouter } = await import('./router');
 const { getTestingCatalog, loadTestingSeedScenarios } = await import('./catalog');
 const { compileTestingScenario, testingFingerprint } = await import('./compiler');
 const repository = await import('./repository');
+const chat = await import('./chat');
+const orchestrator = await import('./agents/orchestrator');
 const { decodeReuse, REUSE_SCHEMA } = await import('./agents/schemas');
 const router = createTestingRouter();
 after(() => rmSync(temporary, { recursive: true, force: true }));
@@ -66,6 +68,88 @@ test('Schema und Decoder erhalten parentPath und erlauben ausdrücklich die ober
   ] });
   assert.equal(parsed.suggestions[0].parentPath, 'standard/vorbereiten');
   assert.equal(parsed.suggestions[1].parentPath, undefined);
+});
+
+test('Chat speichert manuelle Ablaufänderungen mit Command-CAS und idempotentem requestId', () => {
+  const scenario=scenarioFixture('chat-cas-save');
+  db.upsert('testingChatConversations',{id:'chat-cas-save',revision:1,eventSequence:0,createdAt:'2026-09-10T10:00:00.000Z',updatedAt:'2026-09-10T10:00:00.000Z',model:'luna',scenarioId:scenario.id,entryIds:[],handledRequests:[]});
+  const state=chat.getTestingChatSnapshot('chat-cas-save').scenarioState!;
+  const first=chat.commandTestingChat('chat-cas-save',{command:'save',expectedRevision:1,requestId:'save-1',payload:{expectedScenarioRevision:state.revision,fingerprint:state.fingerprint,scenario:{...scenario,title:'Manuell gespeicherter Chat-Ablauf'}}});
+  assert.equal(first.scenario?.title,'Manuell gespeicherter Chat-Ablauf');assert.equal(first.conversation.revision,2);
+  const retry=chat.commandTestingChat('chat-cas-save',{command:'save',expectedRevision:1,requestId:'save-1',payload:{expectedScenarioRevision:state.revision,fingerprint:state.fingerprint,scenario}});
+  assert.equal(retry.conversation.revision,2);assert.equal(retry.scenario?.title,'Manuell gespeicherter Chat-Ablauf');
+  assert.throws(()=>chat.commandTestingChat('chat-cas-save',{command:'save',expectedRevision:1,requestId:'save-2',payload:{expectedScenarioRevision:state.revision,fingerprint:state.fingerprint,scenario}}),(error:any)=>error.code==='CHAT_REVISION_CONFLICT');
+});
+
+test('Chat-Stream trennt stabilen Command-Stand vom Event-Cursor und räumt Listener auf', () => {
+  const scenario=scenarioFixture('chat-stream-cursor');
+  db.upsert('testingChatConversations',{id:'chat-stream-cursor',revision:7,eventSequence:3,createdAt:'2026-09-10T10:00:00.000Z',updatedAt:'2026-09-10T10:00:00.000Z',model:'luna',scenarioId:scenario.id,entryIds:[],handledRequests:[]});
+  const events:any[]=[];const unsubscribe=chat.subscribeTestingChat('chat-stream-cursor',event=>events.push(event));
+  repository.saveTestingRun({id:'chat-stream-run',scenarioId:scenario.id,scenarioTitle:scenario.title,scenarioRevision:scenario.revision,status:'failed',startedAt:'2026-09-10T10:00:00.000Z',finishedAt:'2026-09-10T10:00:01.000Z',compiled:compileTestingScenario(scenario,getTestingCatalog()),steps:[],error:'Synthetischer Vertragstest, kein Browserlauf.'});
+  unsubscribe();
+  assert(events.some(event=>event.type==='entry'&&event.entry.runId==='chat-stream-run'));assert.equal(chat.getTestingChatSnapshot('chat-stream-cursor').conversation.revision,7);assert(chat.getTestingChatSnapshot('chat-stream-cursor').conversation.eventSequence>3);
+});
+
+test('Bestehenden Testfall im Chat zu öffnen startet keinen Agenten und erzeugt keine doppelte Unterhaltung', () => {
+  const scenario=scenarioFixture('chat-read-only-open'),beforeJobs=db.read<TestingAgentJob>('testingAgentJobs').length;
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-1'});
+  const reopened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-2'});
+  assert.equal(opened.conversation.id,reopened.conversation.id);assert.equal(opened.conversation.activeJobId,undefined);assert.equal(db.read<TestingAgentJob>('testingAgentJobs').length,beforeJobs);
+});
+
+test('Retry der initialen Chat-Anforderung startet keinen zweiten Agentenauftrag', async () => {
+  const request={message:'Erzeuge einen fachlichen Testfall für den idempotenten Start.',model:'luna' as const,requestId:'initial-create-retry'};
+  const first=chat.createTestingChatConversation(request),jobsAfterFirst=db.read<TestingAgentJob>('testingAgentJobs').length;
+  const retried=chat.createTestingChatConversation(request);
+  assert.equal(retried.conversation.id,first.conversation.id);assert.equal(db.read<TestingAgentJob>('testingAgentJobs').length,jobsAfterFirst);
+  if(first.activeJob){chat.commandTestingChat(first.conversation.id,{command:'cancel',expectedRevision:first.conversation.revision,requestId:'cancel-initial-fixture'});await orchestrator.waitTestingJob(first.activeJob.id);}
+});
+
+test('Wiederaufnahme übernimmt frühere Rückfragen und Antworten nur in den Agentenkontext', async () => {
+  const scenario=repository.createTestingRequestDraft('Prüfe den ursprünglichen fachlichen Vertragswunsch.', 'luna'),conversationId='chat-resume-history';
+  const rows=[
+    {id:'resume-q1',at:'2026-09-10T10:00:00.000Z',kind:'question',message:'Welches Bundesland gilt?'},
+    {id:'resume-a1',at:'2026-09-10T10:01:00.000Z',kind:'user',message:'Für den ersten Fall gilt Bayern.'},
+    {id:'resume-q2',at:'2026-09-10T10:02:00.000Z',kind:'question',message:'Welche Versicherungssumme gilt?'},
+    {id:'resume-a2',at:'2026-09-10T10:03:00.000Z',kind:'user',message:'Die Versicherungssumme beträgt 12.000 Euro.'},
+  ];
+  for(const row of rows)db.upsert('testingChatEntries',row);
+  db.upsert('testingChatConversations',{id:conversationId,revision:1,eventSequence:4,createdAt:rows[0].at,updatedAt:rows.at(-1)!.at,model:'luna',scenarioId:scenario.id,entryIds:rows.map(row=>row.id),handledRequests:[]});
+  const context=chat.buildTestingChatResumeRequest(conversationId,scenario);
+  for(const expected of ['ursprünglichen fachlichen Vertragswunsch','Welches Bundesland','Bayern','Welche Versicherungssumme','12.000 Euro'])assert(context.includes(expected),context);
+  const state=chat.getTestingChatSnapshot(conversationId).scenarioState!;
+  const started=chat.commandTestingChat(conversationId,{command:'resume',expectedRevision:1,requestId:'resume-with-history',payload:{text:'Bitte setze die Planung jetzt mit diesen Antworten fort.',expectedScenarioRevision:state.revision,fingerprint:state.fingerprint}});
+  assert.equal(repository.getTestingScenario(scenario.id).intent,scenario.intent);
+  if(started.activeJob){chat.commandTestingChat(conversationId,{command:'cancel',expectedRevision:started.conversation.revision,requestId:'cancel-resume-history'});await orchestrator.waitTestingJob(started.activeJob.id);}
+});
+
+test('Klassische Ablaufänderung macht einen zuvor gelesenen Chat-State-Token ungültig', () => {
+  const scenario=scenarioFixture('chat-external-stale');
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-stale'}),state=opened.scenarioState!;
+  repository.saveTestingScenario({...scenario,title:'Außerhalb des Chats geändert'},scenario.revision);
+  assert.throws(()=>chat.commandTestingChat(opened.conversation.id,{command:'save',expectedRevision:opened.conversation.revision,requestId:'stale-save',payload:{expectedScenarioRevision:state.revision,fingerprint:state.fingerprint,scenario}}),(error:any)=>error.code==='SCENARIO_STATE_CONFLICT');
+});
+
+test('Chat kennzeichnet einen erfolgreichen Lauf nach fachlicher Änderung als historisch', () => {
+  const scenario=scenarioFixture('chat-historical-run');successfulRunFixture(scenario,'chat-historical-run');
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-historical'});
+  assert.equal(opened.latestRun?.isCurrent,true);assert.equal(opened.latestRun?.scenarioRevision,scenario.revision);assert.equal(opened.latestRun?.fingerprint,opened.scenarioState?.fingerprint);
+  repository.saveTestingScenario({...scenario,title:'Neuerer Fachstand'},scenario.revision);
+  const stale=chat.getTestingChatSnapshot(opened.conversation.id);assert.equal(stale.latestRun?.isCurrent,false);assert.notEqual(stale.latestRun?.fingerprint,stale.scenarioState?.fingerprint);
+});
+
+test('Chat zeigt nur Hinweise des neuesten exakt passenden Technikauftrags und keine Tool-Rohereignisse', () => {
+  const scenario=scenarioFixture('chat-technical-attention'),fingerprint=testingFingerprint(scenario,getTestingCatalog()),base={phase:'technical' as const,model:'luna' as const,status:'completed' as const,prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,events:[]};
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...base,id:'technical-old-attention',startedAt:'2026-09-10T10:00:00.000Z',finishedAt:'2026-09-10T10:00:01.000Z',result:{repairContext:{issues:['Alter Hinweis']}}});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...base,id:'technical-new-prepared',startedAt:'2026-09-10T11:00:00.000Z',finishedAt:'2026-09-10T11:00:01.000Z',result:{prepared:true,preparedBindingRefs:[{id:'fixture',revision:1}]}});
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-technical'});assert.equal(opened.technicalReview,undefined);
+  assert.equal(chat.testingChatPublicJobEntry({...base,id:'tool-job',startedAt:'2026-09-10T12:00:00.000Z'} as TestingAgentJob,{id:'tool-event',at:'2026-09-10T12:00:00.000Z',kind:'tool',message:'raw call'}),undefined);
+});
+
+test('Ein klassisch gestarteter Auftrag sperrt denselben Chat-Fachstand', () => {
+  const scenario=scenarioFixture('chat-classic-active'),fingerprint=testingFingerprint(scenario,getTestingCatalog());
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:'classic-active-job',phase:'business',model:'luna',status:'running',prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,startedAt:'2026-09-10T12:00:00.000Z',events:[]});
+  const opened=chat.createTestingChatConversation({scenarioId:scenario.id,model:'luna',requestId:'open-active'});assert.equal(opened.activeJob?.id,'classic-active-job');assert.deepEqual(opened.allowedCommands,['cancel']);
 });
 
 test('Zwei verschachtelte Wiederverwendungsvorschläge werden einzeln angenommen und erhalten Fachstand sowie Laufhistorie', async () => {

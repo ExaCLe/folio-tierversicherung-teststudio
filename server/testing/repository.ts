@@ -165,7 +165,9 @@ export function saveTestingBinding(binding:TestingTechnicalBinding):TestingTechn
 }
 export function getTestingLayout(scenarioId:string):TestingScenarioLayout {return db.find<TestingScenarioLayout>('testingLayouts',scenarioId)??{id:scenarioId,scenarioId,collapsed:[]};}
 export function saveTestingLayout(layout:TestingScenarioLayout):TestingScenarioLayout {return db.upsert('testingLayouts',{...clone(layout),id:layout.scenarioId});}
-export function saveTestingRun(run:TestingRun):TestingRun {return db.upsert('testingRuns',clone(run));}
+const testingRunListeners=new Set<(run:TestingRun)=>void>();
+export function subscribeTestingRuns(listener:(run:TestingRun)=>void){testingRunListeners.add(listener);return()=>testingRunListeners.delete(listener);}
+export function saveTestingRun(run:TestingRun):TestingRun {const saved=db.upsert('testingRuns',clone(run));for(const listener of testingRunListeners)listener(clone(saved));return saved;}
 export function listTestingRuns():TestingRun[] {return db.read<TestingRun>('testingRuns').sort((a,b)=>b.startedAt.localeCompare(a.startedAt));}
 export function getTestingRun(id:string):TestingRun {const run=db.find<TestingRun>('testingRuns',id);if(!run)throw new TestingModelError('Dieser Testlauf wurde nicht gefunden.',404,'RUN_NOT_FOUND');return run;}
 

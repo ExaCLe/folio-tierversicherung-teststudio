@@ -155,7 +155,8 @@ test('Navigation ist ausgerichtet, Spinner bewegt sich und reduzierte Bewegung b
   await page.goto('/testing/new');
   await expect(page.getByLabel('Modell für den Entwurf')).toBeVisible();
   const controls = page.locator('.t-workspace-topbar nav > a, .t-resource-menu > summary');
-  await expect(controls).toHaveCount(4);
+  await expect(controls).toHaveCount(5);
+  await expect(page.getByRole('link', { name: 'Unterhaltung', exact: true })).toHaveAttribute('href', '/testing/chat');
   const boxes = await controls.evaluateAll(elements => elements.map(element => { const rect = element.getBoundingClientRect(); return { height: rect.height, middle: rect.y + rect.height / 2 }; }));
   expect(Math.max(...boxes.map(box => box.middle)) - Math.min(...boxes.map(box => box.middle))).toBeLessThan(1);
   expect(new Set(boxes.map(box => box.height)).size).toBe(1);
@@ -179,6 +180,7 @@ test('Navigation ist ausgerichtet, Spinner bewegt sich und reduzierte Bewegung b
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Navigation öffnen' }).click();
   await expect(page.getByRole('link', { name: 'Einstellungen', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Unterhaltung', exact: true })).toBeVisible();
   await page.screenshot({ path: shot('schmale-navigation.png') });
 });
 

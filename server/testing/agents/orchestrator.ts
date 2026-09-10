@@ -26,6 +26,7 @@ const jobs = 'testingAgentJobs';
 const controls = new Map<string, AbortController>();
 const completions = new Map<string, Promise<TestingAgentJob>>();
 const runningRuns = new Set<string>();
+const jobListeners = new Set<(job:TestingAgentJob)=>void>();
 let initialized = false;
 const now = () => new Date().toISOString();
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
@@ -34,7 +35,8 @@ export function initializeTestingPipeline() {
   for (const job of listTestingJobs()) if (job.status === 'queued' || job.status === 'running') { recoverCodexJobProcesses(job.id);const stopped=new AgentTerminationError('server_restart','Der lokale Server wurde während dieses Agentenlaufs neu gestartet. Bitte den Auftrag erneut starten.');updateJob(job.id,{status:'cancelled',finishedAt:now(),error:stopped.message,termination:stopped.termination}); }
   for (const run of listTestingRuns()) if (run.status === 'queued' || run.status === 'running') saveTestingRun({ ...run, status: 'failed', finishedAt: now(), error: 'Der lokale Server wurde während des Browserlaufs neu gestartet.' });
 }
-const saveJob = (job: TestingAgentJob) => db.upsert(jobs, structuredClone(job));
+const saveJob = (job: TestingAgentJob) => { const saved=db.upsert(jobs, structuredClone(job)); for(const listener of jobListeners)listener(structuredClone(saved)); return saved; };
+export function subscribeTestingJobs(listener:(job:TestingAgentJob)=>void){jobListeners.add(listener);return()=>jobListeners.delete(listener);}
 export function listTestingJobs(): TestingAgentJob[] { return db.read<TestingAgentJob>(jobs).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export function getTestingJob(id: string): TestingAgentJob { const job = db.find<TestingAgentJob>(jobs, id); if (!job) throw new TestingModelError('Der Agentenlauf wurde nicht gefunden.', 404); return job; }
 export function cancelTestingJob(id: string,cause:'user_cancelled'|'parent_cancelled'='user_cancelled'): TestingAgentJob {
@@ -103,7 +105,7 @@ function findBlock(blocks: TestingBlockInstance[], id: string): TestingBlockInst
 function replaceBlock(blocks: TestingBlockInstance[], id: string, replacement: TestingBlockInstance): TestingBlockInstance[] {
   return blocks.map(block => block.id === id ? replacement : block.children ? { ...block, children: replaceBlock(block.children, id, replacement) } : block);
 }
-export function startBusinessJob(input: { request: string; model: TestingModel; scenarioId?: string; revision?: number; instanceId?: string }) {
+export function startBusinessJob(input: { request: string; model: TestingModel; scenarioId?: string; revision?: number; instanceId?: string; preserveIntent?:boolean }) {
   if (typeof input.request !== 'string' || input.request.trim().length < 5 || input.request.length > 15_000) throw new TestingModelError('Bitte die fachliche Anforderung mit 5 bis 15.000 Zeichen beschreiben.');
   resolveAgentConfiguration(input.model);
   const catalog=getTestingCatalog(),existing=input.scenarioId?getTestingScenario(input.scenarioId):undefined;
@@ -112,7 +114,7 @@ export function startBusinessJob(input: { request: string; model: TestingModel; 
   const isOverride=!!input.instanceId;
   if(isOverride&&(!existing||!findBlock(existing.blocks,input.instanceId!)))throw new TestingModelError('Die lokale Änderung braucht einen vorhandenen Zielblock.',409);
   if(existing&&!isOverride&&existing.blocks.length)throw new TestingModelError('Dieser Testfall enthält bereits einen Ablauf. Verwende die Ablaufüberarbeitung, um ihn gezielt zu ändern.',409);
-  let baseline=existing?(!isOverride&&input.request!==existing.intent?saveTestingScenario({...existing,intent:input.request},existing.revision):existing):createTestingRequestDraft(input.request,input.model),fingerprint=testingFingerprint(baseline,catalog);
+  let baseline=existing?(!isOverride&&!input.preserveIntent&&input.request!==existing.intent?saveTestingScenario({...existing,intent:input.request},existing.revision):existing):createTestingRequestDraft(input.request,input.model),fingerprint=testingFingerprint(baseline,catalog);
   const needsName=!isOverride&&(!existing||!existing.naming&&(existing.title==='Neuer Testfall'||existing.source==='agent'&&existing.title===existing.intent.trim().split('\n')[0].slice(0,100))||!!existing&&input.request!==existing.intent);
   return launch('business',input.model,input.request,async(job,signal)=>{
     let exploration:Awaited<ReturnType<typeof exploreBusinessKnowledge>>|undefined;
@@ -262,7 +264,7 @@ async function runCompiled(compiled: TestingCompiledScenario, model: TestingMode
     } catch (error) { return { run, reuseError: message(error) }; }
   } finally { runningRuns.delete(id); }
 }
-export function startTechnicalJob(input: { scenarioId: string; revision: number; model: TestingModel; repairBindingId?: string }) {
+export function startTechnicalJob(input: { scenarioId: string; revision: number; model: TestingModel; repairBindingId?: string; prepareOnly?:boolean }) {
   if (listTestingJobs().some(job => job.scenarioId === input.scenarioId && !job.parentJobId && ['queued', 'running'].includes(job.status))) throw new TestingModelError('Für diesen Testfall läuft bereits ein Auftrag.', 409);
   const { scenario, catalog, compiled } = requireApproved(input.scenarioId, input.revision);
   const failedRun = listTestingRuns().find(run => run.scenarioId === scenario.id && run.compiled.fingerprint === compiled.fingerprint && run.status === 'failed');
@@ -320,10 +322,25 @@ export function startTechnicalJob(input: { scenarioId: string; revision: number;
     for (const binding of newBindings) if (getTestingCatalog().bindings.some(item => item.id === binding.id && item.revision >= binding.revision)) throw new Error(`Die Bindung ${binding.id} wurde während der Prüfung bereits geändert. Bitte erneut prüfen.`);
     if (newBindings.length) db.replace('testingBindings', [...persisted, ...newBindings]);
     updateJob(job.id, { result: { plan, duplicateJobId: duplicate.job.id } });
+    if(input.prepareOnly){status(job.id,'Die technische Vorbereitung ist geprüft und gespeichert. Der Browserlauf kann separat gestartet werden.');return {plan,duplicateJobId:duplicate.job.id,prepared:true,preparedBindingRefs:wired.bindings.map(binding=>({id:binding.id,revision:binding.revision}))};}
     status(job.id, 'Die freigegebene Fassung ist verdrahtet. Die echte Portalprüfung startet jetzt in Chromium.');
     const execution = await runCompiled(wired, input.model, signal, job.id);
     return { plan, duplicateJobId: duplicate.job.id, ...execution };
   }, scenario, compiled.fingerprint, undefined, {stage:'wiring'}).job;
+}
+export function startPreparedRun(input:{jobId:string;scenarioId:string;revision:number;model:TestingModel}){
+  const prepared=getTestingJob(input.jobId),result=prepared.result as {prepared?:boolean;preparedBindingRefs?:{id:string;revision:number}[]}|undefined;
+  if(prepared.phase!=='technical'||prepared.status!=='completed'||!result?.prepared||!result.preparedBindingRefs?.length||prepared.scenarioId!==input.scenarioId||prepared.scenarioRevision!==input.revision)throw new TestingModelError('Für diese Fachfassung liegt keine abgeschlossene technische Vorbereitung vor.',409,'TECHNICAL_PREPARATION_MISSING');
+  const {scenario,catalog}=requireApproved(input.scenarioId,input.revision);
+  if(testingFingerprint(scenario,catalog)!==prepared.fingerprint)throw new TestingModelError('Die Fachfassung oder ihr Wissensstand hat sich seit der technischen Vorbereitung geändert.',409,'AGENT_REVISION_STALE');
+  const selected=result.preparedBindingRefs.map(ref=>catalog.bindings.find(binding=>binding.id===ref.id&&binding.revision===ref.revision));
+  if(selected.some(binding=>!binding))throw new TestingModelError('Eine geprüfte technische Bindungsrevision ist nicht mehr verfügbar.',409,'TECHNICAL_PREPARATION_STALE');
+  const compiled=compileTestingScenario(scenario,{...catalog,bindings:selected as TestingCatalog['bindings']},getTestingApproval(scenario.id));
+  if(!compiled.executable)throw new TestingModelError('Die gespeicherte technische Vorbereitung ist nicht mehr ausführbar.',409,'TECHNICAL_PREPARATION_STALE');
+  if(runningRuns.size>=2)throw new TestingModelError('Es laufen bereits zwei Browserprüfungen.',429);
+  const configuration=resolveAgentConfiguration(input.model);
+  const id=`testlauf-${randomUUID()}`,run:TestingRun={id,scenarioId:scenario.id,scenarioRevision:scenario.revision,scenarioTitle:scenario.title,compiled,status:'queued',startedAt:now(),steps:[],...(scenario.matrix?{mode:'matrix' as const,matrixRows:scenario.matrix.rows.filter(row=>row.enabled).map((row,index)=>({rowId:row.id,rowLabel:row.label,index,status:'queued' as const,values:structuredClone(row.values)})),summary:{total:scenario.matrix.rows.filter(row=>row.enabled).length,passed:0,failed:0,skipped:0}}:{})};
+  saveTestingRun(run);runningRuns.add(id);setImmediate(()=>void Promise.resolve().then(()=>withAgentConfiguration(configuration,()=>runCompiled(compiled,input.model,undefined,undefined,id))).catch(error=>{runningRuns.delete(id);saveTestingRun({...getTestingRun(id),status:'failed',finishedAt:now(),error:message(error)});}));return run;
 }
 export function startDirectRun(input: { scenarioId: string; revision: number; model?: TestingModel }) {
   const { scenario, compiled } = requireApproved(input.scenarioId, input.revision);

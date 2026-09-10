@@ -1,0 +1,142 @@
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, MessageSquare, Play, Plus, RefreshCw, Save, Send, Sparkles, Workflow } from 'lucide-react';
+import { currentTestingChildren, type TestingAgentSettings, type TestingBlockInstance, type TestingCatalog, type TestingScenario, type TestingScenarioLayout, type TestingValue } from '../../shared/testing';
+import type { TestingChatCommand, TestingChatEntry, TestingChatSnapshot } from '../../shared/testing-chat';
+import { AgentSettingsContext, ModelSelect } from '../testing/AgentModels';
+import { Inspector } from '../testing/Inspector';
+import { TestMatrix } from '../testing/TestMatrix';
+import { flattenBlocks, newInstance, updateBlockAtPath } from '../testing/model';
+import type { ScratchWorkspaceHandle } from '../testing/ScratchWorkspace';
+import { chatApi, messageOf, subscribeConversation, subscribeObservations, type RunnerObservation } from './api';
+import '../testing/testing.css';
+import '../testing/canvas-workspace.css';
+import './testing-chat.css';
+
+const ScratchWorkspace = lazy(() => import('../testing/ScratchWorkspace').then(module => ({ default: module.ScratchWorkspace })));
+type Tab = 'chat' | 'flow' | 'browser';
+const tabLabels: Record<Tab, string> = { chat: 'Unterhaltung', flow: 'Ablauf', browser: 'Browser' };
+const commandLabels: Partial<Record<TestingChatCommand, string>> = { explore: 'Erkunden & entwerfen', resume: 'Mit Antwort fortfahren', apply: 'Vorschlag übernehmen', reject: 'Vorschlag verwerfen', approve: 'Freigeben', prepare: 'Technisch vorbereiten', run: 'Test starten', cancel: 'Auftrag abbrechen' };
+const route = () => {
+  const parts = location.pathname.split('/').filter(Boolean);
+  return { id: parts[2] ? decodeURIComponent(parts[2]) : '', tab: (parts[3] && parts[3] in tabLabels ? parts[3] : 'chat') as Tab };
+};
+const draftKey = (id: string) => `folio-testing-chat-draft:${id}`;
+const layoutKey = (id: string) => `folio-testing-chat-layout:${id}`;
+
+function readLocal<T>(key: string): T | undefined { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : undefined; } catch { return; } }
+function navigate(id = '', tab: Tab = 'chat', replace = false) {
+  const path = id ? `/testing/chat/${encodeURIComponent(id)}/${tab}` : '/testing/chat';
+  history[replace ? 'replaceState' : 'pushState']({}, '', path);
+  dispatchEvent(new PopStateEvent('popstate'));
+}
+function formatTime(value: string) { return new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(new Date(value)); }
+
+function TimelineEntry({ entry }: { entry: TestingChatEntry }) {
+  const own = entry.kind === 'user';
+  return <article className={`tc-entry ${own ? 'is-user' : ''} is-${entry.kind}`} data-entry-id={entry.id}>
+    <div className="tc-entry-icon">{own ? <MessageSquare size={15}/> : entry.kind === 'question' ? <Sparkles size={15}/> : <Bot size={15}/>}</div>
+    <div><header><strong>{own ? 'Du' : entry.kind === 'question' ? 'Rückfrage' : 'Folio'}</strong><time>{formatTime(entry.at)}</time></header><p>{entry.message}</p></div>
+  </article>;
+}
+
+function Conversation({ snapshot, model, busy, connected, text, onText, onModel, onSend, onCommand }: {
+  snapshot: TestingChatSnapshot; model: string; busy: boolean; connected: boolean; text: string;
+  onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void; onCommand: (command: TestingChatCommand) => void;
+}) {
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [snapshot.timeline.length]);
+  const allowed = new Set(snapshot.allowedCommands);
+  const question = [...snapshot.timeline].reverse().find(item => item.kind === 'question');
+  const sendCommand: TestingChatCommand = question && allowed.has('resume') ? 'resume' : snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
+  const nextActions = (['approve', 'prepare'] as TestingChatCommand[]).filter(command => allowed.has(command));
+  const placeholder = question ? 'Deine Antwort …' : snapshot.scenario ? 'Welche Änderung soll Folio vorschlagen?' : 'Beschreibe deinen Testfall …';
+  return <section className="tc-chat-pane" aria-label="Unterhaltung">
+    <div className="tc-stream-status"><span className={connected ? 'online' : ''}/>{connected ? 'Live verbunden' : 'Verbindung wird wiederhergestellt'}</div>
+    <div className="tc-timeline">{snapshot.timeline.map(entry => <TimelineEntry key={entry.id} entry={entry}/>)}
+      {snapshot.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status) && <div className="tc-working" role="status"><span/><span/><span/><p>{snapshot.lifecycle?.message ?? 'Folio arbeitet am Testfall …'}</p></div>}
+      {snapshot.proposed && <ProposalCard snapshot={snapshot} busy={busy} onCommand={onCommand}/>}<div ref={end}/>
+    </div>
+    <footer className="tc-composer">
+      {!!nextActions.length && <div className="tc-command-actions">{nextActions.map(command => <button key={command} className="tc-primary" disabled={busy} onClick={() => onCommand(command)}>{command === 'run' ? <Play size={15}/> : command === 'approve' ? <Check size={15}/> : <Sparkles size={15}/>} {commandLabels[command]}</button>)}</div>}
+      <textarea value={text} onChange={event => onText(event.target.value)} placeholder={placeholder} rows={3} disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
+      <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onClick={onSend}><Send size={16}/>{question ? 'Antworten' : snapshot.scenario ? 'Änderung vorschlagen' : 'Senden'}</button></div>
+    </footer>
+  </section>;
+}
+
+function ProposalCard({ snapshot, busy, onCommand }: { snapshot: TestingChatSnapshot; busy: boolean; onCommand: (command: TestingChatCommand) => void }) {
+  const proposal = snapshot.proposed!;
+  return <article className="tc-proposal"><header><Sparkles size={17}/><div><strong>Änderungsvorschlag</strong><span>{proposal.changes.length} Änderungen für Revision {proposal.expectedRevision}</span></div></header>
+    <ul>{proposal.changes.slice(0, 5).map((change, index) => <li key={`${change.path}-${index}`}><span>{change.kind}</span>{change.label}</li>)}</ul>
+    <div><button disabled={busy || !snapshot.allowedCommands.includes('reject')} onClick={() => onCommand('reject')}>Verwerfen</button><button className="tc-primary" disabled={busy || !snapshot.allowedCommands.includes('apply')} onClick={() => onCommand('apply')}><Check size={15}/>Übernehmen</button></div>
+  </article>;
+}
+
+function FlowEditor({ snapshot, catalog, model, busy, onSave, onCommand }: { snapshot: TestingChatSnapshot; catalog: TestingCatalog; model: string; busy: boolean; onSave: (scenario: TestingScenario) => void; onCommand: (command: TestingChatCommand) => void }) {
+  const source = snapshot.proposed?.scenario ?? snapshot.scenario;
+  const [draft, setDraft] = useState<TestingScenario | undefined>(() => source ? readLocal<TestingScenario>(draftKey(source.id)) ?? structuredClone(source) : undefined);
+  const [layout, setLayout] = useState<TestingScenarioLayout | undefined>(() => source ? readLocal(layoutKey(source.id)) : undefined);
+  const [selected, setSelected] = useState<string>();
+  const [definitionId, setDefinitionId] = useState('');
+  const [conflict, setConflict] = useState('');
+  const scratch = useRef<ScratchWorkspaceHandle>(null);
+  useEffect(() => { if (!source) return; if (snapshot.proposed) { setDraft(structuredClone(source)); setConflict(''); setSelected(undefined); return; } const local = readLocal<TestingScenario>(draftKey(source.id)); if (local && JSON.stringify(local.blocks) !== JSON.stringify(source.blocks) && local.revision < source.revision) { setDraft(local); setConflict(`Der gespeicherte Testfall ist inzwischen Revision ${source.revision}. Dein lokaler Entwurf basiert auf Revision ${local.revision} und wurde nicht überschrieben.`); } else { setDraft(local?.revision === source.revision ? local : structuredClone(source)); setConflict(''); } setSelected(undefined); }, [source?.id, source?.revision, snapshot.proposed?.jobId]);
+  useEffect(() => { if (draft && !snapshot.proposed) localStorage.setItem(draftKey(draft.id), JSON.stringify(draft)); }, [draft, snapshot.proposed]);
+  const entries = useMemo(() => draft ? flattenBlocks(draft.blocks, catalog) : [], [draft, catalog]);
+  const entry = entries.find(item => item.path === selected);
+  const agentOwns = !!snapshot.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status) || !!snapshot.proposed;
+  const dirty = !!draft && !!snapshot.scenario && (JSON.stringify(draft.blocks) !== JSON.stringify(snapshot.scenario.blocks) || JSON.stringify(draft.matrix) !== JSON.stringify(snapshot.scenario.matrix));
+  const patchBlock = (change: (block: typeof entries[number]['block']) => typeof entries[number]['block'] | null) => { if (!draft || !selected) return; setDraft({ ...draft, blocks: updateBlockAtPath(draft.blocks, selected, catalog, change) }); };
+  const move = (direction: number) => { if (!draft || !selected || selected.includes('/')) return; const index = draft.blocks.findIndex(block => block.id === selected); const target = index + direction; if (index < 0 || target < 0 || target >= draft.blocks.length) return; const blocks = [...draft.blocks]; [blocks[index], blocks[target]] = [blocks[target], blocks[index]]; setDraft({ ...draft, blocks }); };
+  const duplicate = () => { if (!draft || !selected) return; const segments = selected.split('/'); const visit = (blocks: TestingBlockInstance[], depth = 0): TestingBlockInstance[] => blocks.flatMap(block => { if (block.id !== segments[depth]) return [block]; if (depth === segments.length - 1) return [block, { ...structuredClone(block), id: `${block.id}-${crypto.randomUUID().slice(0, 6)}` }]; return [{ ...block, children: visit(currentTestingChildren(block, catalog), depth + 1) }]; }); setDraft({ ...draft, blocks: visit(draft.blocks) }); };
+  if (!draft) return <div className="tc-empty"><Workflow size={28}/><h2>Noch kein Ablauf</h2><p>Beschreibe den Testfall in der Unterhaltung. Der bestätigte Entwurf erscheint hier.</p></div>;
+  return <section className="tc-flow-pane testing-app">
+    <header className="tc-pane-head"><div><small>{snapshot.proposed ? 'VORSCHAU' : 'BESTÄTIGTER ABLAUF'}</small><h2>{draft.title}</h2><p>{conflict || (agentOwns ? snapshot.proposed ? 'Prüfe den Vorschlag in der Unterhaltung.' : 'Folio bearbeitet diesen Entwurf. Die Arbeitsfläche ist vorübergehend schreibgeschützt.' : dirty ? 'Ungespeicherte manuelle Änderungen' : `Revision ${draft.revision}`)}</p></div><div>{dirty && !agentOwns && <button className="tc-primary" disabled={busy || !!conflict} onClick={() => onSave(draft)}><Save size={15}/>Revision speichern</button>}{snapshot.allowedCommands.includes('approve') && !dirty && <button className="tc-primary" disabled={busy} onClick={() => onCommand('approve')}><Check size={15}/>Freigeben</button>}</div></header>
+    <div className="tc-flow-grid"><div className="tc-scratch-card"><div className="tc-canvas-tools"><select aria-label="Baustein hinzufügen" value={definitionId} disabled={agentOwns} onChange={event => setDefinitionId(event.target.value)}><option value="">Baustein auswählen …</option>{catalog.definitions.filter((definition, index, all) => !all.slice(index + 1).some(item => item.id === definition.id)).map(definition => <option key={`${definition.id}@${definition.version}`} value={definition.id}>{definition.name}</option>)}</select><button disabled={agentOwns || !definitionId} onClick={() => { const definition = catalog.definitions.filter(item => item.id === definitionId).at(-1); if (!definition) return; setDraft({ ...draft, blocks: [...draft.blocks, newInstance(definition, draft.blocks, catalog)] }); setDefinitionId(''); }}><Plus size={14}/>Hinzufügen</button><a href={`/testing/editor/${encodeURIComponent(draft.id)}`}>Erweiterte Bearbeitung <ExternalLink size={13}/></a></div><Suspense fallback={<p className="tc-loading">Arbeitsfläche wird geladen …</p>}><ScratchWorkspace ref={scratch} blocks={draft.blocks} catalog={catalog} parameters={draft.parameters} layout={layout} selected={selected} readOnly={agentOwns} onChange={blocks => setDraft(current => current ? { ...current, blocks } : current)} onSelect={setSelected} onLayout={value => setLayout(current => { const next = { id: draft.id, scenarioId: draft.id, collapsed: [], ...current, ...value }; localStorage.setItem(layoutKey(draft.id), JSON.stringify(next)); return next; })}/></Suspense></div>
+      {entry && <Inspector entry={entry} entries={entries} catalog={catalog} onClose={() => setSelected(undefined)} onChange={patchBlock} onValue={(key, value) => patchBlock(block => ({ ...block, inputs: { ...block.inputs, [key]: value } }))} onDefinition={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onKnowledge={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onOverride={text => { navigate(snapshot.conversation.id, 'chat'); sessionStorage.setItem(`folio-testing-chat-prefill:${snapshot.conversation.id}`, text); }} busy={agentOwns} onMove={move} onDuplicate={duplicate} scenarioParameters={draft.parameters}/>}</div>
+    <section className="tc-matrix"><header><div><small>VARIANTEN</small><h3>Testmatrix</h3></div><span>{draft.matrix?.rows.length ?? 0} Fälle</span></header><TestMatrix scenario={draft} catalog={catalog} disabled={agentOwns} onChange={matrix => setDraft({ ...draft, matrix })}/></section>
+  </section>;
+}
+
+function BrowserRun({ snapshot, busy, onCommand }: { snapshot: TestingChatSnapshot; busy: boolean; onCommand: (command: TestingChatCommand) => void }) {
+  const run = snapshot.latestRun;
+  const [observation, setObservation] = useState<RunnerObservation>();
+  const [ended, setEnded] = useState(false);
+  useEffect(() => { setObservation(undefined); setEnded(false); if (!run || run.isCurrent !== true || !['queued', 'running'].includes(run.status)) return; return subscribeObservations(run.id, { onObservation: setObservation, onEnd: () => setEnded(true) }); }, [run?.id, run?.status, run?.isCurrent]);
+  if (!run) return <div className="tc-browser-empty"><div className="tc-browser-window"><span/><span/><span/><div><ExternalLink size={26}/><p>Der Browser öffnet sich erst, wenn du den Test ausdrücklich startest.</p></div></div><button className="tc-primary tc-start" disabled={busy || !snapshot.allowedCommands.includes('run')} onClick={() => onCommand('run')}><Play size={17}/>Test starten</button></div>;
+  const proofs = run.matrixRows?.flatMap(row => row.steps ?? []) ?? run.steps;
+  return <section className="tc-browser-pane"><header className="tc-pane-head"><div><small>{run.isCurrent !== true ? 'HISTORISCHER NACHWEIS' : ['queued', 'running'].includes(run.status) ? 'LIVE' : 'NACHWEISE'}</small><h2>{run.status === 'running' && run.isCurrent === true ? 'Browser führt den Test aus' : run.status === 'passed' ? 'Test bestanden' : run.status === 'failed' ? 'Test fehlgeschlagen' : 'Test wartet'}</h2><p>{run.isCurrent !== true ? `Dieser Lauf gehört zu Revision ${run.scenarioRevision}.` : observation?.stepLabel ?? run.error ?? `${proofs.filter(step => step.status === 'passed').length} von ${proofs.length} Schritten bestanden`}</p></div>{snapshot.allowedCommands.includes('run') && !['queued', 'running'].includes(run.status) && <button className="tc-primary" disabled={busy} onClick={() => onCommand('run')}><RefreshCw size={15}/>Erneut starten</button>}</header>
+    {observation && !ended ? <figure className="tc-live-frame"><img src={observation.frameUrl} width={observation.width} height={observation.height} alt={`Live-Browser: ${observation.stepLabel ?? 'Testschritt'}`}/><figcaption><span className="tc-live-dot"/>Live · {observation.stepLabel ?? `Bild ${observation.sequence}`}</figcaption></figure> : <div className="tc-proof-grid">{proofs.filter(step => step.screenshot).map(step => <figure key={step.id}><img src={step.screenshot} alt={`Nachweis: ${step.label}`}/><figcaption><strong>{step.label}</strong><span>{step.status === 'passed' ? 'Bestanden' : step.status}</span></figcaption></figure>)}{!proofs.some(step => step.screenshot) && <p>Noch keine Browserbilder vorhanden.</p>}</div>}
+  </section>;
+}
+
+export function TestingChatApp() {
+  const [currentRoute, setCurrentRoute] = useState(route);
+  const [bootstrap, setBootstrap] = useState<{ catalog: TestingCatalog; scenarios: TestingScenario[] }>();
+  const [settings, setSettings] = useState<TestingAgentSettings>();
+  const [snapshot, setSnapshot] = useState<TestingChatSnapshot>();
+  const [model, setModel] = useState('luna');
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState('');
+  const revision = useRef(0);
+  const streamSequence = useRef(0);
+  const loadToken = useRef(0);
+  useEffect(() => { const pop = () => setCurrentRoute(route()); addEventListener('popstate', pop); return () => removeEventListener('popstate', pop); }, []);
+  useEffect(() => { const controller = new AbortController(); Promise.all([chatApi.bootstrap(controller.signal), chatApi.settings(controller.signal)]).then(([base, config]) => { setBootstrap(base); setSettings(config); setModel(config.defaultModel); }).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); return () => controller.abort(); }, []);
+  const load = useCallback(async (id: string, signal?: AbortSignal) => { const token = ++loadToken.current; const next = await chatApi.conversation(id, signal); if (token !== loadToken.current || id !== route().id) return; revision.current = next.conversation.revision; streamSequence.current = Math.max(streamSequence.current, next.conversation.eventSequence); setSnapshot(next); setModel(next.conversation.model); }, []);
+  useEffect(() => { if (!currentRoute.id) { setSnapshot(undefined); return; } const controller = new AbortController(); void load(currentRoute.id, controller.signal).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }); return () => controller.abort(); }, [currentRoute.id, load]);
+  useEffect(() => { streamSequence.current = 0; if (!currentRoute.id) return; return subscribeConversation(currentRoute.id, { onConnection: setConnected, onEvent: event => { if (event.sequence <= streamSequence.current) return; streamSequence.current = event.sequence; revision.current = Math.max(revision.current, event.revision); if (event.type === 'snapshot') setSnapshot(event.snapshot); else if (event.type === 'entry') setSnapshot(current => current ? { ...current, conversation: { ...current.conversation, revision: event.revision, eventSequence: event.sequence }, timeline: current.timeline.some(item => item.id === event.entry.id) ? current.timeline : [...current.timeline, event.entry] } : current); else void load(currentRoute.id).catch(() => {}); } }); }, [currentRoute.id, load]);
+  useEffect(() => { if (!currentRoute.id || !snapshot?.latestRun || !['queued', 'running'].includes(snapshot.latestRun.status)) return; const timer = window.setInterval(() => void load(currentRoute.id).catch(() => {}), 1200); return () => clearInterval(timer); }, [currentRoute.id, snapshot?.latestRun?.id, snapshot?.latestRun?.status, load]);
+  useEffect(() => { if (!snapshot?.scenario) return; setBootstrap(current => current ? { ...current, scenarios: [snapshot.scenario!, ...current.scenarios.filter(item => item.id !== snapshot.scenario!.id)] } : current); }, [snapshot?.scenario?.id, snapshot?.scenario?.revision]);
+  async function mutate(command: TestingChatCommand, payload?: Record<string, unknown>) { if (!snapshot || busy) return false; setBusy(true); setError(''); try { const guarded = snapshot.scenarioState ? { ...payload, expectedScenarioRevision: snapshot.scenarioState.revision, fingerprint: snapshot.scenarioState.fingerprint } : payload; const next = await chatApi.command(snapshot.conversation.id, command, snapshot.conversation.revision, guarded); revision.current = next.conversation.revision; setSnapshot(next); return true; } catch (cause) { setError(messageOf(cause)); if ((cause as { status?: number }).status === 409) await load(snapshot.conversation.id); return false; } finally { setBusy(false); } }
+  async function send() { const message = text.trim(); if (!message || !snapshot) return; const question = [...snapshot.timeline].reverse().find(item => item.kind === 'question'); const allowed = new Set(snapshot.allowedCommands); const command: TestingChatCommand = question && allowed.has('resume') ? 'resume' : snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore'; setText(''); await mutate(command, { message, text: message, questionId: question?.id, model }); }
+  async function create(scenarioId: string) { setBusy(true); setError(''); try { const next = await chatApi.create({ scenarioId, model, requestId: crypto.randomUUID() }); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
+  async function createFromMessage() { const message = text.trim(); if (!message || busy) return; setBusy(true); setError(''); try { const next = await chatApi.create({ message, model, requestId: crypto.randomUUID() }); setText(''); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
+  async function save(scenario: TestingScenario) { if (!snapshot) return; if (await mutate('save', { scenario, expectedRevision: scenario.revision })) localStorage.removeItem(draftKey(scenario.id)); }
+  const scenarioId = snapshot?.scenario?.id;
+  return <AgentSettingsContext.Provider value={settings}><main className="testing-chat-app"><aside className="tc-sidebar"><a className="tc-brand" href="/testing/chat" onClick={event => { event.preventDefault(); navigate(); }}><span>F</span><strong>Folio Studio</strong></a><button className="tc-new" disabled={busy} onClick={() => navigate()}><Plus size={16}/>Neuer Testfall</button><nav aria-label="Testfälle">{bootstrap?.scenarios.map(scenario => <button key={scenario.id} className={scenario.id === scenarioId ? 'active' : ''} onClick={() => void create(scenario.id)}><span>{scenario.title}</span><small>Revision {scenario.revision}</small><ChevronRight size={14}/></button>)}</nav><a className="tc-classic" href="/testing"><ArrowLeft size={14}/>Klassische Ansicht</a></aside>
+    <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
+      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} connected={connected} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onCommand={command => void mutate(command, { model })}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
+}

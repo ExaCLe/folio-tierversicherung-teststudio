@@ -17,7 +17,8 @@ npm run dev:stable
 Das Terminal geöffnet lassen und eine der Anwendungen im Browser aufrufen:
 
 - [Versicherungsportal](http://127.0.0.1:5173/portal) für Kunden, Betriebe, Tiere, Vorschläge und Policen
-- [Teststudio](http://127.0.0.1:5173/testing) für Scratch-Testfälle und Browserläufe
+- [Teststudio](http://127.0.0.1:5173/testing) für die klassische Scratch-Arbeitsweise
+- [Teststudio als Unterhaltung](http://127.0.0.1:5173/testing/chat) für dieselben Testfälle mit den Ansichten Unterhaltung, Ablauf und Browser
 
 Vite läuft auf Port 5173, die API auf Port 3001. Beide Ports müssen frei sein. Der Aufruf `/` führt zum Teststudio. Mit `Ctrl+C` endet der gemeinsame Start.
 
@@ -136,6 +137,8 @@ Bei einem korrigierten Eingabefeld prüft das Studio dessen aktuelle Definition 
 Scheitert ein Arbeitsschritt, bleibt der Testfall erhalten. Der Arbeitsbereich zeigt die nächste mögliche Aktion; interne Protokolle stehen unter den Details. Meldet die technische Vorbereitung eine nicht unterstützte Fähigkeit, zeigt Schritt 4 „Technische Fragen klären“ den Abschnitt „Mit KI überarbeiten“ mit lokaler Modellauswahl. Der Mensch prüft und übernimmt den Vorschlag erneut; „Manuell im Ablauf bearbeiten“ bleibt verfügbar. Mit „Freigeben und technisch prüfen“ startet die technische Prüfung für den neuen Stand. Ein beendeter KI-Aufruf ist noch kein bestandener Test. Erfolg zeigt die Oberfläche erst für einen passenden bestandenen Browserlauf. Andere Versionen desselben Blocks werden bei der Versionspflege behandelt und nicht als eigenständige Dubletten angeboten.
 
 Der [Arbeitsbereich](docs/test-workspace.md) erklärt die Reihenfolge und Zustände. Die [Blockmethode](docs/block-method.md) erläutert die fachlichen Schritte. Das [Speichermodell](docs/storage-model.md) beschreibt Versionen, Beziehungen und den daraus abgeleiteten Graphen.
+
+Der [Chat-Arbeitsplatz](docs/chat-arbeitsplatz.md) beschreibt die alternative Oberfläche unter `/testing/chat`. Sie verwendet dieselben gespeicherten Testfälle wie die klassische Ansicht unter `/testing`.
 
 ## Einen bestehenden Ablauf mit KI ändern
 

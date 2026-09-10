@@ -274,6 +274,17 @@ test('Änderung während technischem und Dublettenauftrag verhindert jede Übern
   assert.equal(JSON.stringify(getTestingCatalog().bindings), bindingsBefore);
   assert.equal(repository.listTestingRuns().length, 0);
 });
+test('Technische Vorbereitung speichert den geprüften Bindungsstand ohne Browserlauf', async () => {
+  for (const binding of createStarterBindings(getTestingCatalog())) repository.saveTestingBinding(binding);
+  const source=repository.getTestingScenario('kuh-police-drucken');
+  const scenario=repository.saveTestingScenario({...source,id:'chat-vorbereitung-ohne-lauf',title:'Chat Vorbereitung ohne Lauf'},0);
+  repository.approveTestingScenario(scenario.id,scenario.revision);
+  const runIds=new Set(repository.listTestingRuns().map(run=>run.id));
+  const started=orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna',prepareOnly:true});
+  const completed=await orchestrator.waitTestingJob(started.id),result=completed.result as {prepared?:boolean;preparedBindingRefs?:unknown[];run?:unknown};
+  assert.equal(completed.status,'completed',completed.error);assert.equal(result.prepared,true);assert(result.preparedBindingRefs?.length);assert.equal(result.run,undefined);
+  assert.deepEqual(repository.listTestingRuns().filter(run=>!runIds.has(run.id)),[]);
+});
 test('Zwei Selbstvergleiche werden gemeinsam korrigiert; die echte Pipeline hält für fachliche Prüfung statt abzubrechen', async () => {
   const catalog=getTestingCatalog(),base=catalog.definitions.find(item=>item.id==='pruefung.vorschlagsstatus')!;
   const subjects=['fixture.freigabe','fixture.berechtigung'].map(id=>({...structuredClone(base),id,origin:'human' as const,name:`Synthetischer Prüfgegenstand ${id}`}));

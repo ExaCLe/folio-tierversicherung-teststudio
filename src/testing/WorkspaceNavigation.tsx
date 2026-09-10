@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { BookOpen, ChevronDown, Layers3, Menu, Plus, Settings2, X } from 'lucide-react';
+import { BookOpen, ChevronDown, Layers3, Menu, MessageSquare, Plus, Settings2, X } from 'lucide-react';
 export type WorkspaceView = 'scenarios' | 'start' | 'editor' | 'library' | 'knowledge' | 'graph' | 'runs' | 'method' | 'settings';
 export function workspacePath(view: WorkspaceView) { return `/testing/${view === 'start' ? 'new' : view}`; }
 export function WorkspaceNavigation({ view, open, onToggle, onNavigate, onResume, scenarioId }: { view: WorkspaceView; open: boolean; onToggle: () => void; onNavigate: (view: WorkspaceView) => void; onResume: () => void; scenarioId?: string }) {
@@ -14,6 +14,7 @@ export function WorkspaceNavigation({ view, open, onToggle, onNavigate, onResume
       {link('scenarios', 'Alle Testfälle', Layers3)}
       <details ref={menu} className="t-resource-menu"><summary aria-current={secondary ? 'page' : undefined}><BookOpen size={16}/>Bibliothek & Wissen<ChevronDown size={13}/></summary><div>{link('library', 'Blockbibliothek', Layers3)}{link('knowledge', 'Wissensbasis', BookOpen)}{link('graph', 'Abhängigkeiten', Layers3)}{link('runs', 'Alle Ausführungen', Layers3)}{link('method', 'So funktioniert es', BookOpen)}</div></details>
       {link('settings', 'Einstellungen', Settings2)}
+      <a href="/testing/chat"><MessageSquare size={16}/>Unterhaltung</a>
     </nav>
     <span className="t-local-indicator"><i/>Lokale Anwendung</span>
     <button className="t-icon t-mobile-menu" aria-label={open ? 'Navigation schließen' : 'Navigation öffnen'} aria-expanded={open} onClick={onToggle}>{open ? <X size={20}/> : <Menu size={20}/>}</button>

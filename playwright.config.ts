@@ -27,7 +27,7 @@ export default defineConfig({
     {
       command: 'node --import tsx server/index.ts', url: `${apiURL}/api/health`, reuseExistingServer: false,
       timeout: 30_000,
-      env: { PORT: '3002', FOLIO_APP_URL: appURL, FOLIO_DATA_FILE: resolve(`.local/e2e/folio-${randomUUID()}.json`), FOLIO_AUTO_REUSE: '0', NODE_ENV: 'test' },
+      env: { PORT: '3002', FOLIO_APP_URL: appURL, FOLIO_DATA_FILE: resolve(`.local/e2e/folio-${randomUUID()}.json`), FOLIO_AUTO_REUSE: '0', FOLIO_CODEX_EXECUTABLE: resolve('e2e/helpers/fake-chat-cli.mjs'), NODE_ENV: 'test' },
     },
     {
       command: 'npm run dev:client -- --port 5174 --strictPort', url: appURL,

@@ -17,6 +17,9 @@ import { deriveTestingLifecycle } from './lifecycle';
 import { TESTING_RUN_ROOT } from './runner';
 import { getTestingAgentSettings, resolveAgentConfiguration, saveTestingAgentSettings } from './agents/settings';
 import { generateTestingMatrix, validateTestingMatrix } from './matrix';
+import { commandTestingChat, createTestingChatConversation, getTestingChatSnapshot, initializeTestingChat, subscribeTestingChat } from './chat';
+import type { TestingChatCommand, TestingChatStreamEvent } from '../../shared/testing-chat';
+import { registerTestingObservationRoutes } from './observation';
 
 type Handler = (req: Request, res: Response, next: NextFunction) => unknown;
 const guard = (handler: Handler): Handler => (req, res, next) => { try { const result = handler(req, res, next); if (result && typeof (result as Promise<unknown>).catch === 'function') (result as Promise<unknown>).catch(next); } catch (error) { next(error); } };
@@ -40,8 +43,20 @@ function reuseContext(jobId: string) {
 }
 export function createTestingRouter(): Router {
   initializeTestingPipeline();
+  initializeTestingChat();
   for (const binding of createStarterBindings(getTestingCatalog())) saveTestingBinding(binding);
   const router = Router();
+  registerTestingObservationRoutes(router);
+  router.post('/chat/conversations',guard((req,res)=>{const input=body(req);res.status(input.message?202:200).json(createTestingChatConversation({message:z.string().trim().min(5).max(15_000).optional().parse(input.message),model:model(input.model),scenarioId:z.string().optional().parse(input.scenarioId),requestId:z.string().min(1).max(200).parse(input.requestId)}));}));
+  router.get('/chat/conversations/:id',guard((req,res)=>res.json(getTestingChatSnapshot(req.params.id))));
+  router.post('/chat/conversations/:id/commands',guard((req,res)=>{const input=body(req);res.status(202).json(commandTestingChat(req.params.id,{command:z.enum(['message','explore','resume','revise','save','apply','reject','approve','prepare','run','cancel']).parse(input.command) as TestingChatCommand,expectedRevision:z.number().int().positive().parse(input.expectedRevision),requestId:z.string().min(1).max(200).parse(input.requestId),payload:z.record(z.unknown()).optional().parse(input.payload)}));}));
+  router.get('/chat/conversations/:id/events',guard((req,res)=>{
+    const snapshot=getTestingChatSnapshot(req.params.id);res.status(200);res.setHeader('Content-Type','text/event-stream');res.setHeader('Cache-Control','no-cache, no-transform');res.setHeader('Connection','keep-alive');res.flushHeaders();
+    const send=(event:TestingChatStreamEvent)=>{res.write(`id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);};
+    send({type:'snapshot',sequence:snapshot.conversation.eventSequence,revision:snapshot.conversation.revision,snapshot});
+    const unsubscribe=subscribeTestingChat(req.params.id,send),heartbeat=setInterval(()=>res.write(': keep-alive\n\n'),25_000);
+    req.on('close',()=>{clearInterval(heartbeat);unsubscribe();});
+  }));
   router.get('/bootstrap', guard((_req, res) => {
     const catalog=getTestingCatalog(),scenarios=listTestingScenarios(),jobs=listTestingJobs(),runs=listTestingRuns(),approvals=db.read<TestingApproval>('testingApprovals');
     const latestApprovals=new Map([...approvals].sort((a,b)=>a.approvedAt.localeCompare(b.approvedAt)).map(approval=>[approval.scenarioId,approval]));

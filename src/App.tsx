@@ -2,6 +2,7 @@ import { Component, Suspense, lazy, useEffect, useState, type ReactNode } from '
 
 const PortalApp = lazy(() => import('./portal/PortalApp').then(module => ({ default: module.PortalApp })));
 const TestingApp = lazy(() => import('./testing/TestingApp').then(module => ({ default: module.TestingApp })));
+const TestingChatApp = lazy(() => import('./testing-chat/TestingChatApp').then(module => ({ default: module.TestingChatApp })));
 
 class AppBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
   state = { error: false };
@@ -24,5 +25,6 @@ export function App() {
     return () => window.removeEventListener('popstate', changed);
   }, []);
   const portal = path === '/portal' || path.startsWith('/portal/');
-  return <AppBoundary key={portal ? 'portal' : 'testing'}><Suspense fallback={<main className="app-fallback" role="status"><p>Anwendung wird geöffnet …</p></main>}>{portal ? <PortalApp /> : <TestingApp />}</Suspense></AppBoundary>;
+  const testingChat = path === '/testing/chat' || path.startsWith('/testing/chat/');
+  return <AppBoundary key={portal ? 'portal' : testingChat ? 'testing-chat' : 'testing'}><Suspense fallback={<main className="app-fallback" role="status"><p>Anwendung wird geöffnet …</p></main>}>{portal ? <PortalApp /> : testingChat ? <TestingChatApp /> : <TestingApp />}</Suspense></AppBoundary>;
 }
