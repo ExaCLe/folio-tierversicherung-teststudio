@@ -56,6 +56,59 @@ test('alternative Chat-Navigation erstellt leer, hängt bestehende Tests ohne Ag
   await expect(page.getByRole('link', { name: 'Klassische Ansicht', exact: true })).toHaveAttribute('href', '/testing');
 });
 
+test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträge als kompakte Queue', async ({ page }) => {
+  mkdirSync('.local/verification/chat', { recursive: true });
+  const timeline: TestingChatSnapshot['timeline'] = Array.from({ length: 7 }, (_, index) => ({
+    id: `history-${index}`,
+    at: `2026-09-10T08:0${index}:00.000Z`,
+    kind: index % 2 ? 'user' : 'agent_summary',
+    message: `Verlaufseintrag ${index + 1} mit genügend Text, damit die Unterhaltung in einem kurzen Fenster sicher scrollt.`,
+  }));
+  const snapshot = conversation(undefined, {
+    conversation: { id: 'chat-browser-contract', revision: 8, eventSequence: 8, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:09:00.000Z', model: 'luna', activeJobId: 'job-parent', entryIds: timeline.map(entry => entry.id) },
+    timeline,
+    tasks: [
+      { id: 'job-parent', waitingForJobId: 'job-child', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Sol', modelId: 'sol', color: '#635bff' }, status: 'queued', activityState: 'waiting', stage: 'planning', startedAt: '2026-09-10T08:07:00.000Z', publicDetails: [] },
+      { id: 'job-next', purpose: 'Technische Vorbereitung', agent: { name: 'Luna', modelId: 'luna', color: '#e56b25' }, status: 'not_started', activityState: 'not_started', stage: 'wiring', startedAt: '2026-09-10T08:08:00.000Z', publicDetails: [] },
+      { id: 'job-child', parentJobId: 'job-parent', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'running', activityState: 'working', stage: 'knowledge', startedAt: '2026-09-10T08:09:00.000Z', publicDetails: [] },
+    ],
+    allowedCommands: ['message', 'cancel'],
+  });
+  await staticChat(page, snapshot);
+  await page.setViewportSize({ width: 1180, height: 520 });
+  await page.goto('/testing/chat/chat-browser-contract/chat');
+
+  const queued = page.locator('.tc-queued-row');
+  const running = page.getByRole('button', { name: /Fachwissen prüfen, In Arbeit/ });
+  await expect(queued).toHaveCount(2);
+  const waitingParent = queued.filter({ hasText: 'Fachlichen Ablauf planen' });
+  await expect(waitingParent).toContainText('Wartet auf:');
+  await expect(waitingParent.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ })).toBeVisible();
+  await expect(queued.locator('.lucide-loader-circle')).toHaveCount(0);
+  await expect(running).toBeVisible();
+  await expect(running).toHaveCSS('border-bottom-width', '1px');
+  expect(await queued.first().evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(await running.evaluate(element => element.getBoundingClientRect().height));
+  await queued.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
+  await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
+
+  const assertBottomReachable = async () => {
+    await running.scrollIntoViewIfNeeded();
+    const bounds = await page.locator('.tc-timeline').evaluate(element => { const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
+    const card = await running.evaluate(element => { const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
+    const composer = await page.locator('.tc-composer').evaluate(element => { const rect = element.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
+    expect(card.top).toBeGreaterThanOrEqual(bounds.top);
+    expect(card.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
+    expect(bounds.bottom).toBeLessThanOrEqual(composer.top + 1);
+    expect(composer.bottom).toBeLessThanOrEqual(await page.evaluate(() => innerHeight));
+  };
+  await assertBottomReachable();
+  await page.screenshot({ path: '.local/verification/chat/queue-short-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 520 });
+  await assertBottomReachable();
+  await page.screenshot({ path: '.local/verification/chat/queue-short-mobile.png' });
+});
+
 test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne internen Statuslärm', async ({ page, request }) => {
   mkdirSync('.local/verification/chat', { recursive: true });
   const seed = await scenario(request);

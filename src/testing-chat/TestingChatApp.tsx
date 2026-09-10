@@ -59,7 +59,7 @@ function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails
   </article>;
 }
 
-const taskStatusLabels: Record<PublicTask['status'], string> = { queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', cancelled: 'Abgebrochen' };
+const taskStatusLabels: Record<PublicTask['status'], string> = { not_started: 'Eingereiht', queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', blocked: 'Blockiert', cancelled: 'Abgebrochen' };
 function taskStateLabel(task: PublicTask, awaitsAnswer = false) { return task.activityState === 'waiting' ? awaitsAnswer ? 'Wartet auf Antwort' : 'Wartet auf Unterauftrag' : task.activityState === 'attention' ? 'Eingabe nötig' : taskStatusLabels[task.status]; }
 function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void }) {
   return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog tc-task-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-task-dialog-title"><header><div><small>AUFGABENDETAILS</small><h2 id="tc-task-dialog-title">{task.purpose}</h2></div><button aria-label="Aufgabendetails schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
@@ -68,9 +68,18 @@ function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void 
   </div></section></div>;
 }
 
-function TaskCard({ task, awaitsAnswer, onDetails }: { task: PublicTask; awaitsAnswer: boolean; onDetails: (task: PublicTask) => void }) {
+function TaskCard({ task, awaitsAnswer, dependency, onDetails }: { task: PublicTask; awaitsAnswer: boolean; dependency?: PublicTask; onDetails: (task: PublicTask) => void }) {
   const style = { '--agent-color': task.agent.color } as CSSProperties;
   const stateLabel = taskStateLabel(task, awaitsAnswer);
+  const compact = !awaitsAnswer && ['waiting', 'not_started', 'blocked'].includes(task.activityState);
+  if (compact) {
+    const relation = task.activityState === 'blocked' ? 'Blockiert durch' : task.activityState === 'waiting' ? 'Wartet auf' : 'Eingereiht';
+    return <article className="tc-queued-row" style={style} data-status={task.status} data-activity={task.activityState} aria-label={`${task.purpose}, ${stateLabel}`}>
+      <span className="tc-queued-mark" aria-hidden="true"/>
+      <button className="tc-queued-task" onClick={() => onDetails(task)}>{task.purpose}</button>
+      <span className="tc-queued-relation">{dependency ? <><span>{relation}:</span><button onClick={() => onDetails(dependency)} aria-label={`${dependency.purpose}, vorausgesetzte Aufgabe öffnen`}>{dependency.purpose}</button></> : relation}</span>
+    </article>;
+  }
   return <button className="tc-task-card" style={style} data-status={task.status} data-activity={task.activityState} onClick={() => onDetails(task)} aria-label={`${task.purpose}, ${stateLabel}, Details öffnen`}>
     <span className="tc-task-state" aria-hidden="true">{task.status === 'completed' ? <Check size={14}/> : task.activityState === 'working' ? <LoaderCircle size={15}/> : task.status === 'failed' ? <X size={14}/> : <span/>}</span>
     <span className="tc-task-copy"><strong>{task.purpose}</strong><small><i/>{task.agent.name} · {stateLabel}</small></span><ChevronRight size={15}/>
@@ -126,7 +135,7 @@ function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, on
   const questionJobIds = new Set(questions.filter(question => question.status === 'open').map(question => question.jobId));
   const feed = [...visibleTimeline.map(entry => ({ type: 'entry' as const, id: entry.id, at: entry.at, entry })), ...tasks.map(task => ({ type: 'task' as const, id: task.id, at: task.startedAt, task }))].sort((a, b) => a.at.localeCompare(b.at));
   return <section className="tc-chat-pane" aria-label="Unterhaltung">
-    <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={setDetails}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} onDetails={setTaskDetails}/>)}</div>
+    <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={setDetails}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} dependency={tasks.find(task => task.id === item.task.waitingForJobId || task.id === item.task.blockedByJobId)} onDetails={setTaskDetails}/>)}</div>
       <QuestionPanel conversationId={snapshot.conversation.id} questions={questions} tasks={tasks} busy={busy} onSubmit={onAnswers}/>
       {snapshot.proposed && <ProposalCard snapshot={snapshot} busy={busy} onCommand={onCommand}/>}<div ref={end}/>
     </div></div>

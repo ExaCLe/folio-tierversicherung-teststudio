@@ -36,6 +36,39 @@ test('kuratierte Unterauftrag-Ausgabe bleibt über SSE und erneutes Laden mit He
   chat.commandTestingChat('public-child-chat',{command:'cancel',expectedRevision:1,requestId:'cancel-root'});assert.equal(orchestrator.getTestingJob('parent').status,'cancelled');assert.equal(orchestrator.getTestingJob('child').status,'completed');assert.equal(orchestrator.getTestingJob('child-running').status,'cancelled');
 });
 
+test('persistierte Unterauftragsfehler bleiben nach Reload dem verursachenden Auftrag zugeordnet',()=>{
+  const scenarioId='persisted-failure-scenario',chatId='persisted-failure-chat',childError='Wissenserkundung: Auch die KI-Korrektur verletzt den Vertrag: questions.0.requestQuote';
+  db.upsert('testingScenarios',scenario(scenarioId,[]));
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:'failed-parent',phase:'business',model:'luna',status:'failed',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,childJobIds:['failed-exploration'],events:[{id:'parent-raw-error',at,kind:'error',message:`Die Wissensprüfung konnte nicht abgeschlossen werden: ${childError}`}],error:`Die Wissensprüfung konnte nicht abgeschlossen werden: ${childError}`});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:'failed-exploration',parentJobId:'failed-parent',phase:'exploration',stage:'knowledge',model:'luna',status:'failed',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[{id:'child-raw-error',at,kind:'error',message:childError}],error:childError});
+  db.upsert('testingChatEntries',{id:'failed-exploration:failed',at,kind:'error',message:childError,jobId:'failed-exploration'});
+  db.upsert('testingChatEntries',{id:'failed-parent:failed',at,kind:'error',message:`Die Wissensprüfung konnte nicht abgeschlossen werden: ${childError}`,jobId:'failed-parent'});
+  db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:2,createdAt:at,updatedAt:at,model:'luna',scenarioId,entryIds:['failed-exploration:failed','failed-parent:failed'],handledRequests:[],jobIds:['failed-parent']});
+
+  const snapshot=chat.getTestingChatSnapshot(chatId),parent=snapshot.tasks.find(item=>item.id==='failed-parent')!,child=snapshot.tasks.find(item=>item.id==='failed-exploration')!;
+  assert.equal(parent.status,'blocked');assert.equal(parent.activityState,'blocked');assert.equal(parent.blockedByJobId,child.id);assert.equal(parent.publicDetails.some(detail=>detail.kind==='error'),false);
+  assert.equal(child.status,'failed');assert.equal(child.activityState,'failed');assert.deepEqual(child.publicDetails.filter(detail=>detail.kind==='error').map(detail=>detail.message),['Die Wissensprüfung konnte kein verlässliches Ergebnis erstellen. Starte sie erneut.']);
+  assert.deepEqual(snapshot.timeline.filter(entry=>entry.kind==='error').map(entry=>[entry.jobId,entry.message]),[['failed-exploration','Die Wissensprüfung konnte kein verlässliches Ergebnis erstellen. Starte sie erneut.']]);
+});
+
+test('Wartezustand, noch nicht gestarteter Auftrag und unabhängiger Elternfehler bleiben unterscheidbar',()=>{
+  const scenarioId='truthful-state-scenario',chatId='truthful-state-chat';db.upsert('testingScenarios',scenario(scenarioId,[]));
+  const parent:TestingAgentJob={id:'waiting-parent',phase:'business',model:'luna',status:'running',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,childJobIds:['queued-child'],events:[]};
+  const queued:TestingAgentJob={id:'queued-child',parentJobId:parent.id,phase:'exploration',model:'luna',status:'queued',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,events:[]};
+  db.upsert('testingAgentJobs',parent);db.upsert('testingAgentJobs',queued);db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:at,updatedAt:at,model:'luna',scenarioId,activeJobId:parent.id,entryIds:[],handledRequests:[],jobIds:[parent.id]});
+  let snapshot=chat.getTestingChatSnapshot(chatId),parentTask=snapshot.tasks.find(item=>item.id===parent.id)!,queuedTask=snapshot.tasks.find(item=>item.id===queued.id)!;
+  assert.equal(parentTask.status,'queued');assert.equal(parentTask.activityState,'waiting');assert.equal(parentTask.waitingForJobId,queued.id);assert.equal(queuedTask.status,'not_started');assert.equal(queuedTask.activityState,'not_started');
+
+  const ownError='Die Entwurfsplanung ist nach erfolgreicher Wissensprüfung fehlgeschlagen.';
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...parent,status:'failed',finishedAt:at,error:ownError,events:[{id:'own-error',at,kind:'error',message:ownError}]});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...queued,status:'failed',finishedAt:at,error:'Ein älterer, anderer Unterauftragsfehler.',events:[]});
+  db.upsert('testingChatQuestions',{id:`${chatId}:stale-open`,questionId:'stale-open',conversationId:chatId,jobId:parent.id,kind:'clarification',text:'Eine ältere offene Frage?',why:'Regression für die Zustandspriorität.',status:'open'});
+  snapshot=chat.getTestingChatSnapshot(chatId);parentTask=snapshot.tasks.find(item=>item.id===parent.id)!;
+  assert.equal(parentTask.status,'failed');assert.equal(parentTask.activityState,'failed');assert(parentTask.publicDetails.some(detail=>detail.kind==='error'&&detail.message===ownError));
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...parent,status:'completed',finishedAt:at,result:{openQuestions:['Eine ältere offene Frage?']},events:[]});
+  parentTask=chat.getTestingChatSnapshot(chatId).tasks.find(item=>item.id===parent.id)!;assert.equal(parentTask.status,'completed');assert.equal(parentTask.activityState,'attention');
+});
+
 test('historische Statusmeldungen erscheinen weder als Chatantwort noch als fremde Aufgabenkarte',()=>{
   const scenarioId='history-scenario';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation('history-chat',scenarioId);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations','history-chat'),activeJobId:'history-parent'});
   db.upsert<TestingAgentJob>('testingAgentJobs',{id:'history-parent',phase:'business',model:'luna',status:'running',prompt:'Aktuell',scenarioId,scenarioRevision:1,startedAt:at,events:[{id:'progress',at,kind:'status',message:'Drei Wissensquellen geprüft.'}]});
@@ -95,6 +128,9 @@ test('CLI-Rauschen und rohe Daten bleiben draußen; öffentliche Prosa behält A
   assert.equal(chat.testingChatPublicJobEntry(job,{id:'raw',at,kind:'message',message:'{"private":"data"}'}),undefined);
   const publicEntry=chat.testingChatPublicJobEntry(job,{id:'public',at,kind:'message',message:'Die Rollenregel deckt den beantragten Ablauf ab.'})!;
   assert.equal(publicEntry.message,'Die Rollenregel deckt den beantragten Ablauf ab.');assert.equal(publicEntry.context?.jobId,'privacy-job');assert.equal(publicEntry.context?.modelLabel,'Luna lokal');assert.equal(publicEntry.context?.taskLabel,'Fachlichen Ablauf planen');
+  const exploration={...job,id:'privacy-exploration',phase:'exploration' as const};
+  assert.equal(chat.testingChatPublicJobEntry(exploration,{id:'domain-error',at,kind:'error',message:'Der Versicherungsvertrag wurde im Portal nicht gefunden.'})?.message,'Der Versicherungsvertrag wurde im Portal nicht gefunden.');
+  assert.equal(chat.testingChatPublicJobEntry(exploration,{id:'provider-error',at,kind:'error',message:'Der Provider meldet einen fachlichen Vertragsfehler.'})?.message,'Der Provider meldet einen fachlichen Vertragsfehler.');
 });
 
 test('Nachricht während eines Laufs wird zuerst gespeichert und revisionstreu neu geplant',async()=>{

@@ -43,12 +43,13 @@ let prompt='';process.stdin.on('data',v=>prompt+=v);process.stdin.on('end',()=>{
  if(prompt.includes('KORREKTUR_TEST')&&!process.cwd().endsWith('-korrektur')) result.knowledgeIds=['unbekannt'];
  const questions=inline.questions.length?inline.questions:[{id:'prueffrage-1',text:'Die angeforderte synthetische Prüfung vollständig belegen.',kind:'research',why:'',requestQuote:'',requiresBrowser:!prompt.includes('NUR_VORHANDEN')}];
  result.questions=questions.map(question=>({...question,status:result.decision==='finish'&&!result.gaps.length?'answered':'open',answer:result.decision==='finish'&&!result.gaps.length?result.explanation:'',knowledgeIds:result.decision==='finish'?result.knowledgeIds:[],evidenceIds:result.decision==='finish'?result.findings.flatMap(finding=>finding.evidenceIds):[]}));
+ if(prompt.includes('ROLLEN_METADATEN')) Object.assign(result.questions[0],{id:'rollen-soll',text:'Direktion darf freigeben; Sachbearbeiter und Vermittler dürfen nicht.',kind:'requirement',why:'Die Rollen müssen eindeutig sein.',requestQuote:'Nur die Direktion darf eine offene Anfrage freigeben.',requiresBrowser:false,status:'answered',answer:'Direktion darf freigeben; Sachbearbeiter und Vermittler dürfen nicht.'});
  if(prompt.includes('TEXT_KORREKTUR')&&state.round===1&&!process.cwd().endsWith('-korrektur'))result.questions[0].text='Versehentlich veränderte Frage';
  writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(result));process.stdout.write(JSON.stringify({type:'turn.completed'})+'\\n');
 });
 `, { mode: 0o700 });
 process.env.FOLIO_CODEX_EXECUTABLE = executable;
-const { exploreBusinessKnowledge, explorationRequestAllowed, performExplorationAction, explorationPromptContext, explorationCompletion, explorationSchema, explorationTargets, validateExplorationQuestions } = await import('./exploration');
+const { exploreBusinessKnowledge, explorationRequestAllowed, performExplorationAction, explorationPromptContext, explorationCompletion, explorationSchema, explorationTargets, normalizeExplorationQuestions, validateExplorationQuestions } = await import('./exploration');
 const { startPortalSandbox } = await import('./portal-sandbox');
 const { chromium } = await import('@playwright/test');
 const { stopCodexProcesses } = await import('./cli');
@@ -165,6 +166,33 @@ test('Explizite Rollenregeln sind gesetztes Soll; nur echte fehlende Fachentsche
   const context=explorationPromptContext(request,catalog,0,[],[]);
   assert.match(context.clarificationPolicy.expectedTruth,/nicht beim Menschen bestätigen lassen/);
   assert.match(context.clarificationPolicy.userQuestionGate,/wichtige fachliche Entscheidung/);
+});
+
+test('Fragile Metadaten expliziter Rollenregeln werden begrenzt repariert, ohne Soll oder Belege umzuschreiben',()=>{
+  const request='Direktion darf offene Direktionsanfragen freigeben; Sachbearbeiter und Vermittler dürfen nicht.';
+  const requirement:TestingExplorationQuestion={id:'direktion',text:'Direktion darf freigeben; Sachbearbeiter und Vermittler dürfen nicht.',kind:'requirement',
+    why:'Diese Regel ist für den Rollenvergleich wichtig.',requestQuote:'Nur die Direktion darf freigeben.',requiresBrowser:true,status:'answered',
+    answer:'Direktion: erlaubt. Sachbearbeiter: gesperrt. Vermittler: gesperrt.',knowledgeIds:[],evidenceIds:['beleg-001']};
+  const normalized=normalizeExplorationQuestions([requirement],request)[0];
+  assert.equal(normalized.why,'');
+  assert.equal(normalized.requestQuote,'');
+  assert.equal(normalized.text,requirement.text);
+  assert.equal(normalized.answer,requirement.answer);
+  assert.deepEqual(normalized.evidenceIds,requirement.evidenceIds);
+  assert.equal(requirement.why,'Diese Regel ist für den Rollenvergleich wichtig.','Die Providerantwort wird nicht mutiert.');
+  const evidence=[{id:'beleg-001',action:'readSnapshot',path:'/portal/direktion',snapshot:'Direktion erlaubt; andere Rollen gesperrt',screenshot:'',observedAt:'',targets:[],paths:[]}];
+  assert.doesNotThrow(()=>validateExplorationQuestions([normalized],[],catalog.knowledge,evidence,'finish',[],request));
+});
+
+test('Wiederholt ungenaue Rollen-Metadaten machen die Wissensprüfung nicht nach der Korrektur fatal',async()=>{
+  const request='NUR_VORHANDEN ROLLEN_METADATEN: Direktion darf offene Direktionsanfragen freigeben; Sachbearbeiter und Vermittler dürfen nicht.';
+  const result=await exploreBusinessKnowledge({id:'role-metadata-recovery',request,model:'luna',catalog});
+  assert.equal(result.questions[0].kind,'requirement');
+  assert.equal(result.questions[0].why,'');
+  assert.equal(result.questions[0].requestQuote,'');
+  assert.equal(result.questions[0].answer,'Direktion darf freigeben; Sachbearbeiter und Vermittler dürfen nicht.');
+  assert.deepEqual(result.knowledgeIds,['wissen.fixture']);
+  assert(!existsSync(join(directory,'agents/role-metadata-recovery-observation-0-korrektur')),'Sichere Metadatenreparatur verbraucht keinen zweiten Modellaufruf.');
 });
 
 test('Wiederholte Rollenwechsel führen zur belegten Abschlussantwort statt weiteren Browseraktionen', {timeout:90_000}, async()=>{

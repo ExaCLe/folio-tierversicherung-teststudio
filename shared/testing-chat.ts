@@ -23,10 +23,10 @@ export interface TestingChatQuestion {
   answer?:string; answeredAt?:string;
 }
 export interface TestingChatTask {
-  id:string; parentJobId?:string; purpose:string;
+  id:string; parentJobId?:string; waitingForJobId?:string; blockedByJobId?:string; purpose:string;
   agent:{name:string;modelId:string;provider?:'codex'|'claude';color:string};
-  status:'queued'|'running'|'completed'|'failed'|'cancelled'; stage?:TestingAgentStage;
-  activityState:'working'|'waiting'|'attention'|'done'|'failed'|'cancelled';
+  status:'not_started'|'queued'|'running'|'completed'|'failed'|'blocked'|'cancelled'; stage?:TestingAgentStage;
+  activityState:'not_started'|'working'|'waiting'|'attention'|'done'|'failed'|'blocked'|'cancelled';
   startedAt:string; finishedAt?:string;
   publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string}[];
 }
