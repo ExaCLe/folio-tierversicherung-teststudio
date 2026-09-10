@@ -12,7 +12,7 @@ process.env.FOLIO_DATA_FILE = database;
 process.env.FOLIO_AGENT_ARTIFACTS_ROOT = join(directory, 'agents');
 const executable = join(directory, 'synthetic-cli.mjs');
 writeFileSync(executable, `#!/usr/bin/env node
-import {writeFileSync} from 'node:fs';
+import {writeFileSync,readFileSync} from 'node:fs';
 let prompt='';process.stdin.on('data',v=>prompt+=v);process.stdin.on('end',()=>{
  const args=process.argv.slice(2),inline=JSON.parse(prompt.split('BEGIN_EXPLORATION_CONTEXT_JSON\\n')[1].split('\\nEND_EXPLORATION_CONTEXT_JSON')[0]),state={round:inline.round,evidence:inline.currentObservation?[inline.currentObservation]:[]};\n if(!inline.coverage||!Array.isArray(inline.knowledge)||!Array.isArray(inline.definitions))throw new Error('Inlinekontext fehlt');
  let result={decision:'finish',explanation:'Synthetische Wissensprüfung.',knowledgeIds:['wissen.fixture'],gaps:[],action:null,findings:[]};
@@ -35,6 +35,11 @@ let prompt='';process.stdin.on('data',v=>prompt+=v);process.stdin.on('end',()=>{
    else result={decision:'act',explanation:'Synthetischer wiederholter Rollenwechsel.',knowledgeIds:[],gaps:['Beobachtete Rollenwahl auswerten.'],findings:[],action:{op:'select',targetId:current.targets.find(t=>t.name==='Benutzerrolle').id,path:null,value:state.round%2?'Direktion':'Vermittler',checked:null}};
  }
  if(prompt.includes('LEERE_AKTIONSFRAGE')&&state.round===1&&!process.cwd().endsWith('-korrektur'))result.gaps=[];
+ if(prompt.includes('BLOCK_ID_TEST')) {
+   const schema=JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1],'utf8'));
+   if(schema.properties.knowledgeIds.items.enum.includes('pruefung.vorschlagsstatus'))throw new Error('Baustein als Wissens-ID erlaubt');
+   if(!process.cwd().endsWith('-korrektur')||prompt.includes('IMMER_FALSCH'))result.knowledgeIds=['pruefung.vorschlagsstatus'];
+ }
  if(prompt.includes('KORREKTUR_TEST')&&!process.cwd().endsWith('-korrektur')) result.knowledgeIds=['unbekannt'];
  const questions=inline.questions.length?inline.questions:[{id:'prueffrage-1',text:'Die angeforderte synthetische Prüfung vollständig belegen.',requiresBrowser:!prompt.includes('NUR_VORHANDEN')}];
  result.questions=questions.map(question=>({...question,status:result.decision==='finish'&&!result.gaps.length?'answered':'open',answer:result.decision==='finish'&&!result.gaps.length?result.explanation:'',knowledgeIds:result.decision==='finish'?result.knowledgeIds:[],evidenceIds:result.decision==='finish'?result.findings.flatMap(finding=>finding.evidenceIds):[]}));
@@ -43,7 +48,7 @@ let prompt='';process.stdin.on('data',v=>prompt+=v);process.stdin.on('end',()=>{
 });
 `, { mode: 0o700 });
 process.env.FOLIO_CODEX_EXECUTABLE = executable;
-const { exploreBusinessKnowledge, explorationRequestAllowed, performExplorationAction, explorationPromptContext, explorationCompletion, explorationTargets, validateExplorationQuestions } = await import('./exploration');
+const { exploreBusinessKnowledge, explorationRequestAllowed, performExplorationAction, explorationPromptContext, explorationCompletion, explorationSchema, explorationTargets, validateExplorationQuestions } = await import('./exploration');
 const { startPortalSandbox } = await import('./portal-sandbox');
 const { chromium } = await import('@playwright/test');
 const { stopCodexProcesses } = await import('./cli');
@@ -260,4 +265,33 @@ test('Timeout/Abbruch beendet isolierten Server und entfernt seine synthetische 
   const controller=new AbortController(),sandbox=await startPortalSandbox(controller.signal);
   controller.abort(); await sandbox.close();assert(!existsSync(sandbox.directory));await assert.rejects(fetch(sandbox.origin+'/portal'));
   await assert.rejects(startPortalSandbox(AbortSignal.timeout(1)),/abgebrochen|beendet/);
+});
+
+test('Erkundungsschema trennt Wissens-IDs von Bausteinen und erlaubt findings erst mit echten Belegen',()=>{
+  const schema=explorationSchema(catalog.knowledge,[]) as any;
+  const ids=[...new Set(catalog.knowledge.map(item=>item.id))];
+  assert.deepEqual(schema.properties.knowledgeIds.items.enum,ids);
+  assert.deepEqual(schema.properties.questions.items.properties.knowledgeIds.items.enum,ids);
+  assert.equal(schema.properties.knowledgeIds.items.enum.includes('pruefung.vorschlagsstatus'),false);
+  assert.equal(schema.properties.findings.maxItems,0);
+  assert.equal(schema.properties.questions.items.properties.evidenceIds.maxItems,0);
+  const empty=explorationSchema([],[]) as any;
+  assert.equal(empty.properties.knowledgeIds.maxItems,0);
+  assert.equal(empty.properties.questions.items.properties.knowledgeIds.maxItems,0);
+  const observed=explorationSchema(catalog.knowledge,[{id:'beleg-001',action:'readSnapshot',path:'/portal',snapshot:'',screenshot:'',observedAt:'',targets:[],paths:[]}]) as any;
+  assert.deepEqual(observed.properties.findings.items.properties.evidenceIds.items.enum,['beleg-001']);
+  assert.equal(observed.properties.findings.items.properties.evidenceIds.minItems,1);
+  assert.equal(observed.properties.findings.maxItems,12);
+});
+
+test('Baustein-ID aus dem Fehlerbericht wird konkret korrigiert und niemals als Wissensbeleg übernommen',async()=>{
+  const result=await exploreBusinessKnowledge({id:'block-reference',request:'NUR_VORHANDEN BLOCK_ID_TEST',model:'luna',catalog});
+  assert.deepEqual(result.knowledgeIds,['wissen.fixture']);
+  const report=readFileSync(join(directory,'agents/block-reference-observation-0-korrektur/validierungsfehler.txt'),'utf8');
+  assert.match(report,/pruefung\.vorschlagsstatus/);
+  assert.match(report,/Erlaubte Wissens-IDs: wissen\.fixture/);
+  assert.match(report,/Baustein-IDs/);
+  const question={id:'question',text:'Offene Frage',requiresBrowser:true,status:'open' as const,answer:'',knowledgeIds:['pruefung.vorschlagsstatus'],evidenceIds:[]};
+  assert.throws(()=>validateExplorationQuestions([question],[],catalog.knowledge,[],'explore',['Offene Frage']),/question\.knowledgeIds.*pruefung\.vorschlagsstatus.*wissen\.fixture/);
+  await assert.rejects(exploreBusinessKnowledge({id:'block-reference-invalid',request:'NUR_VORHANDEN BLOCK_ID_TEST IMMER_FALSCH',model:'luna',catalog}),/Auch die KI-Korrektur.*pruefung\.vorschlagsstatus/s);
 });
