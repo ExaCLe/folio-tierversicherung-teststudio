@@ -1,6 +1,6 @@
 import type { TestingAgentEvent, TestingCatalog, TestingCompiledScenario, TestingModel, TestingScenario } from '../../../shared/testing';
 import { currentTestingChildren, currentTestingDefinition } from '../../../shared/testing';
-import { invokeCodex } from './cli';
+import { invokeCodex, redactCLIText } from './cli';
 import { decodeDuplicates, decodeReuse } from './schemas';
 import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplicate-context';
 
@@ -13,11 +13,13 @@ export async function reviewWithCodex<T>(input: { id: string; model: TestingMode
       prompt: `${input.prompt}${attempt ? `\n\nDeine vorherige Antwort wurde nicht übernommen. Lies vorherige-antwort.json und validierungsfehler.txt. Korrigiere ausschließlich die dort belegten Vertrags- oder Referenzfehler und liefere eine vollständige Antwort. Fehlerbericht: ${JSON.stringify(diagnostic)}` : ''}`,
       files: { ...input.files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
     previous = result.value;
+    const candidate=JSON.parse(redactCLIText(JSON.stringify(result.value)));
+    input.onEvent?.({id:`${input.id}-entwurf-${attempt+1}`,at:new Date().toISOString(),kind:'message',message:attempt?'Korrigierte Agentenantwort, noch nicht geprüft.':'Agentenantwort, noch nicht geprüft.',publicDetail:{type:'message',label:attempt?'Korrigierte Agentenantwort · noch nicht geprüft':'Agentenantwort · noch nicht geprüft',data:candidate}});
     try { return { result, parsed: input.validate(result.value), attempts: attempt + 1 }; }
     catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);
       if (attempt) throw new Error(`${input.label}: Auch die KI-Korrektur verletzt den Vertrag: ${diagnostic}`);
-      input.onEvent?.({ id: `${input.id}-korrektur`, at: new Date().toISOString(), kind: 'status', message: `${input.label}: Das gleiche Modell erhält den genauen Validierungsbericht und korrigiert seine Antwort einmal.` });
+      input.onEvent?.({ id: `${input.id}-korrektur`, at: new Date().toISOString(), kind: 'status', message: `${input.label}: Die automatische Prüfung hat diese Punkte im Entwurf beanstandet. Der Agent überarbeitet sie.`, publicDetail:{type:'validation',label:'Automatische Prüfung',data:{valid:false,errors:[diagnostic],correction:'Der bisherige Agent erhält den Fehlerbericht; es findet keine unabhängige Begutachtung statt.'}} });
     }
   }
   throw new Error(`${input.label} hat kein gültiges Ergebnis geliefert.`);

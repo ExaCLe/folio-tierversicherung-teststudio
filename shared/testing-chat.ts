@@ -1,7 +1,7 @@
-import type { TestingAgentJob, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
+import type { TestingAgentJob, TestingAgentPublicDetail, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
 
 export type TestingChatCommand = 'message'|'explore'|'resume'|'answer'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
-export type TestingChatEntryKind = 'user'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
+export type TestingChatEntryKind = 'user'|'user_action'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
 
 export interface TestingChatEntry {
   id:string; at:string; kind:TestingChatEntryKind; message:string;
@@ -9,6 +9,7 @@ export interface TestingChatEntry {
   context?:{jobId:string;phase:TestingAgentJob['phase'];taskLabel:string;modelId:string;modelLabel?:string;provider?:'codex'|'claude';stage?:TestingAgentStage};
   sources?:{label:string;kind:'knowledge'|'scenario'|'definition'|'portal-evidence';ref:string}[];
   content?:{type:'validated-summary';title:string;summary:string;facts?:{label:string;value:string}[]};
+  detail?:TestingAgentPublicDetail;
   delivery?:{state:'routing'|'replanning'|'applied'|'rejected';targetLabel?:string;successorJobId?:string;detail?:string};
 }
 export interface TestingChatConversation {
@@ -27,8 +28,9 @@ export interface TestingChatTask {
   agent:{name:string;modelId:string;provider?:'codex'|'claude';color:string};
   status:'not_started'|'queued'|'running'|'completed'|'failed'|'blocked'|'cancelled'; stage?:TestingAgentStage;
   activityState:'not_started'|'working'|'waiting'|'attention'|'done'|'failed'|'blocked'|'cancelled';
-  startedAt:string; finishedAt?:string;
-  publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string}[];
+  startedAt:string; executionAt?:string; finishedAt?:string;
+  /** detail is absent only on snapshots persisted by older versions. */
+  publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string;detail?:TestingAgentPublicDetail;sources?:TestingChatEntry['sources'];context?:TestingChatEntry['context']}[];
 }
 export interface TestingChatProposal {
   jobId:string; fingerprint:string; expectedRevision:number; scenario:TestingScenario;

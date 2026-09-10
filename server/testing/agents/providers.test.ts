@@ -17,6 +17,13 @@ process.stdin.on('end', () => {
   writeFileSync('fixture-observed.json', JSON.stringify({ args, prompt, cwd: process.cwd() }));
   if (args[0] === 'exec') {
     writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify({ provider: 'codex', model: args[args.indexOf('-m') + 1] }));
+    if (prompt.includes('PUBLIC_STREAM')) {
+      const first = JSON.stringify({ type: 'item.updated', item: { id: 'reason_1', type: 'reasoning', text: 'Regel wird geprüft.', encrypted_content: 'never-public' } });
+      process.stdout.write(first.slice(0, 31)); process.stdout.write(first.slice(31) + '\\n');
+      process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'reason_1', type: 'reasoning', text: 'Regel und Beispiel sind geprüft.' } }) + '\\n');
+      process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'message_1', type: 'agent_message', text: 'Ich habe die beiden Belege verglichen.' } }) + '\\n');
+      process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'hidden_1', type: 'reasoning', encrypted_content: 'ciphertext', summary: [{ text: 'Nicht als öffentliches Textfeld dokumentiert.' }] } }) + '\\n');
+    }
     process.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\\n');
   } else {
     process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init' }) + '\\n');
@@ -59,6 +66,35 @@ test('Providerabschluss und strukturiertes Ergebnis erscheinen nicht als ungepr�
   // Public prose remains useful progress; JSON-shaped agent output is withheld
   // until the orchestrator has decoded and validated it.
   assert(configuration.provider==='codex');
+});
+
+test('Codex übernimmt öffentliche Reasoning-Zusammenfassungen und Agententext mit stabilen IDs', async () => {
+  const events:any[]=[];
+  const result=await cli.invokeCodex({...input('codex-public-stream','luna','PUBLIC_STREAM'),onEvent:(event:any)=>events.push(event)});
+  const publicEvents=events.filter(event=>event.publicDetail);
+  assert.deepEqual(publicEvents.map(event=>[event.id,event.stream?.status,event.publicDetail.type,event.message]),[
+    ['codex-public-stream:codex:reason_1','streaming','reasoning','Regel wird geprüft.'],
+    ['codex-public-stream:codex:reason_1','completed','reasoning','Regel und Beispiel sind geprüft.'],
+    ['codex-public-stream:codex:message_1','completed','message','Ich habe die beiden Belege verglichen.'],
+  ]);
+  assert(!JSON.stringify(publicEvents).includes('never-public'));
+  assert(!JSON.stringify(publicEvents).includes('ciphertext'));
+  const recorded=readFileSync(join(result.directory,'events.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line)).filter(event=>event.publicDetail);
+  assert.deepEqual(recorded,publicEvents);
+});
+
+test('Providerparser ignorieren Rohdenken und ungeprüfte strukturierte Endausgaben', () => {
+  assert.deepEqual(cli.codexPublicEvents({type:'item.completed',item:{id:'raw',type:'reasoning',encrypted_content:'secret'}}),[]);
+  assert.deepEqual(cli.codexPublicEvents({type:'item.completed',item:{id:'json',type:'agent_message',text:'{"answer":true}'}}),[]);
+  const claude=cli.claudePublicEvents({type:'assistant',message:{id:'msg_1',content:[{type:'thinking',thinking:'Öffentliche Begründung.',signature:'signed-private-reasoning'},{type:'text',text:'Öffentliche Antwort.'}]}});
+  assert.equal(claude.length,2); assert.deepEqual(claude.map(event=>[event.id,event.publicDetail?.type,event.message]),[
+    ['claude:msg_1:0','reasoning','Öffentliche Begründung.'],['claude:msg_1:1','message','Öffentliche Antwort.'],
+  ]);
+  assert(!JSON.stringify(claude).includes('signed-private-reasoning'));
+  const item={type:'item.completed',item:{id:'item_0',type:'reasoning',text:'Zusammenfassung'}};
+  assert.notEqual(cli.codexPublicEvents(item,'run-a:codex')[0].id,cli.codexPublicEvents(item,'run-b:codex')[0].id);
+  const withoutMessageId=cli.claudePublicEvents({type:'assistant',message:{content:[{type:'text',text:'Begleittext ohne Provider-ID.'}]}});
+  assert.equal(withoutMessageId.length,1); assert.equal(withoutMessageId[0].id,undefined); assert.equal(withoutMessageId[0].stream,undefined);
 });
 
 test('Windows startet PATH-, CMD- und PowerShell-Shims ohne Shell', { skip: process.platform !== 'win32' }, async () => {

@@ -11,4 +11,8 @@ if (schema.properties?.reuseBindings) {
 if (schema.properties?.decisions) output = { explanation: 'Deterministische Dublettenprüfung ohne Modellaufruf.', decisions: [], unresolved: [] };
 if (schema.properties?.suggestions) output = { explanation: 'Keine Wiederverwendung im Browservertrag.', suggestions: [] };
 process.stdout.write(`${JSON.stringify({ type: 'thread.started' })}\n`);
+process.stdout.write(`${JSON.stringify({ type: 'item.updated', item: { id: 'reason_1', type: 'reasoning', text: 'Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.' } })}\n`);
+if (schema.properties?.reuseBindings) await new Promise(resolve => setTimeout(resolve, 3000));
+process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { id: 'reason_1', type: 'reasoning', text: 'Der Ablauf verbindet die fachliche Anforderung mit den vorhandenen Bausteinen; offene Annahmen bleiben im Ergebnis sichtbar.' } })}\n`);
+process.stdout.write(`${JSON.stringify({ type: 'item.completed', item: { id: 'message_1', type: 'agent_message', text: 'Die strukturierte Fassung ist erstellt und kann im Ablauf geprüft werden.' } })}\n`);
 writeFileSync(args[args.indexOf('-o') + 1], JSON.stringify(output));

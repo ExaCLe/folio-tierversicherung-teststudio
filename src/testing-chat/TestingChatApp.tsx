@@ -40,19 +40,27 @@ type RichChatSnapshot = ChatSnapshot & { tasks?: PublicTask[]; questions?: Publi
 const deliveryLabels = { routing: 'Nachricht gespeichert', replanning: 'Neuplanung gestartet', applied: 'In Ergebnis übernommen', rejected: 'Nicht übernommen' } as const;
 const stageLabels: Record<string, string> = { naming: 'Benennung', knowledge: 'Fachwissen', exploring: 'Erkundung', planning: 'Ablaufplanung', validating: 'Prüfung', revising: 'Überarbeitung', duplicates: 'Dublettensuche', wiring: 'Technische Vorbereitung', running: 'Testlauf', reuse: 'Wiederverwendung' };
 const sourceKindLabels = { knowledge: 'Fachwissen', scenario: 'Testfall', definition: 'Baustein', 'portal-evidence': 'Browsernachweis' } as const;
+type PublicDetail = { type: 'reasoning'|'message'|'validation'|'result'; label: string; data?: unknown };
+const detailTypeLabels: Record<PublicDetail['type'], string> = { reasoning: 'Reasoning-Zusammenfassung', message: 'Agentenausgabe', validation: 'Automatisierte Prüfung', result: 'Ergebnis' };
 function sourceHref(source: NonNullable<TestingChatEntry['sources']>[number]) {
   if (source.kind === 'knowledge') return `/testing/knowledge/${encodeURIComponent(source.ref)}`;
   if (source.kind === 'definition') return `/testing/library/${encodeURIComponent(source.ref)}`;
   if (source.kind === 'scenario') return `/testing/editor/${encodeURIComponent(source.ref)}`;
   if (source.kind === 'portal-evidence' && (/^\/api\/testing\/(?:jobs|runs)\/[^/]+\/(?:artifacts|rows)\//.test(source.ref) || /^\/api\/testing\/runs\/[^/]+\/artifacts\//.test(source.ref))) return source.ref;
 }
+function belongsInConversation(entry: PublicChatEntry) {
+  if (entry.kind === 'status' || entry.kind === 'question') return false;
+  if (!entry.detail || !entry.jobId || entry.id === `${entry.jobId}:completed`) return true;
+  return entry.kind === 'error' || entry.kind === 'user_action';
+}
 
 function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails: (entry: PublicChatEntry) => void }) {
-  const own = entry.kind === 'user';
-  const hasDetails = !!(entry.content || entry.context || entry.sources?.length || entry.delivery?.detail);
+  const own = entry.kind === 'user' || entry.kind === 'user_action';
+  const action = entry.kind === 'user_action';
+  const hasDetails = !!(entry.content || entry.context || entry.sources?.length || entry.delivery?.detail || (entry as PublicChatEntry & { detail?: PublicDetail }).detail);
   const author = own ? 'Du' : entry.context?.taskLabel ?? 'Folio';
-  return <article className={`tc-entry ${own ? 'is-user' : ''} is-${entry.kind}`} data-entry-id={entry.id}>
-    <div className="tc-entry-icon">{own ? <MessageSquare size={15}/> : entry.kind === 'question' ? <Sparkles size={15}/> : <Bot size={15}/>}</div>
+  return <article className={`tc-entry ${own ? 'is-user' : ''} ${action ? 'is-user-action' : ''} is-${entry.kind}`} data-entry-id={entry.id}>
+    <div className="tc-entry-icon">{action ? <Check size={15}/> : own ? <MessageSquare size={15}/> : entry.kind === 'question' ? <Sparkles size={15}/> : <Bot size={15}/>}</div>
     <div><header><strong>{author}</strong><time>{formatTime(entry.at)}</time></header>{entry.context?.taskLabel && <small className="tc-entry-task">{entry.context.taskLabel}</small>}<p>{entry.content?.summary ?? entry.message}</p>
       <footer className="tc-entry-meta">{hasDetails && <button onClick={() => onDetails(entry)}><Info size={13}/>Details</button>}</footer>
     </div>
@@ -61,10 +69,32 @@ function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails
 
 const taskStatusLabels: Record<PublicTask['status'], string> = { not_started: 'Eingereiht', queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', blocked: 'Blockiert', cancelled: 'Abgebrochen' };
 function taskStateLabel(task: PublicTask, awaitsAnswer = false) { return task.activityState === 'waiting' ? awaitsAnswer ? 'Wartet auf Antwort' : 'Wartet auf Unterauftrag' : task.activityState === 'attention' ? 'Eingabe nötig' : taskStatusLabels[task.status]; }
+const detailKeyLabels: Record<string, string> = { summary: 'Zusammenfassung', valid: 'Gültig', errors: 'Fehler', correction: 'Korrektur', attempt: 'Versuch', facts: 'Fakten', title: 'Titel', explanation: 'Begründung', status: 'Status', changes: 'Änderungen', result: 'Resultat' };
+function DetailValue({ value }: { value: unknown }) {
+  if (value == null) return null;
+  if (Array.isArray(value)) return <ol className="tc-detail-data">{value.map((item, index) => <li key={index}><DetailValue value={item}/></li>)}</ol>;
+  if (typeof value === 'object') return <dl className="tc-detail-data">{Object.entries(value as Record<string, unknown>).map(([key, item]) => <div key={key}><dt>{detailKeyLabels[key] ?? key}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>;
+  if (typeof value === 'boolean') return <span>{value ? 'Ja' : 'Nein'}</span>;
+  return <span>{String(value)}</span>;
+}
+function DetailData({ value }: { value: unknown }) {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return <DetailValue value={value}/>;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const readable = entries.filter(([key]) => key in detailKeyLabels);
+  const technical = entries.filter(([key]) => !(key in detailKeyLabels));
+  return <>{!!readable.length && <dl className="tc-detail-data">{readable.map(([key, item]) => <div key={key}><dt>{detailKeyLabels[key]}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>}{!!technical.length && <details className="tc-technical-data"><summary>Technische Originaldaten</summary><pre>{JSON.stringify(Object.fromEntries(technical), null, 2)}</pre></details>}</>;
+}
+function DetailReport({ detail, message }: { detail?: PublicDetail; message?: string }) {
+  if (!detail) return null;
+  const category = detailTypeLabels[detail.type];
+  const synonymousReasoningLabel = detail.type === 'reasoning' && /^(?:begründungs|reasoning)[ -]?zusammenfassung$/i.test(detail.label);
+  return <section className={`tc-detail-report is-${detail.type}`}><small>{category}</small>{detail.label !== category && !synonymousReasoningLabel && <h4>{detail.label}</h4>}{message && <p>{message}</p>}<DetailData value={detail.data}/></section>;
+}
 function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void }) {
   return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog tc-task-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-task-dialog-title"><header><div><small>AUFGABENDETAILS</small><h2 id="tc-task-dialog-title">{task.purpose}</h2></div><button aria-label="Aufgabendetails schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
     <dl><div><dt>Agent</dt><dd>{task.agent.name}</dd></div><div><dt>Status</dt><dd>{taskStatusLabels[task.status]}</dd></div>{task.stage && <div><dt>Arbeitsschritt</dt><dd>{stageLabels[task.stage] ?? task.stage}</dd></div>}</dl>
-    <h3>Öffentliche Meldungen</h3>{task.publicDetails.length ? <ol className="tc-task-events">{task.publicDetails.map(detail => <li key={detail.id} className={`is-${detail.kind}`}><time>{formatTime(detail.at)}</time><p>{detail.message}</p></li>)}</ol> : <p className="tc-muted-copy">Noch keine öffentliche Meldung.</p>}
+    {!task.publicDetails.some(item => item.detail?.type === 'reasoning') && <p className="tc-reasoning-empty">{task.status === 'running' ? 'Bisher liegt für diesen Auftrag keine Reasoning-Zusammenfassung vor.' : 'Für diesen Auftrag liegt keine Reasoning-Zusammenfassung vor.'}</p>}
+    <h3>Öffentliche Meldungen</h3>{task.publicDetails.length ? <ol className="tc-task-events">{task.publicDetails.map(item => { const detail = item.detail as PublicDetail | undefined; return <li key={item.id} className={`is-${item.kind}`}><time>{formatTime(item.at)}</time><div>{detail ? <DetailReport detail={detail} message={item.message}/> : <p>{item.message}</p>}{!!item.sources?.length && <ul className="tc-event-sources">{item.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer">{source.label}</a> : source.label}<small>{sourceKindLabels[source.kind]}</small></li>; })}</ul>}</div></li>; })}</ol> : <p className="tc-muted-copy">Noch keine öffentliche Meldung.</p>}
   </div></section></div>;
 }
 
@@ -74,13 +104,13 @@ function TaskCard({ task, awaitsAnswer, dependency, onDetails }: { task: PublicT
   const compact = !awaitsAnswer && ['waiting', 'not_started', 'blocked'].includes(task.activityState);
   if (compact) {
     const relation = task.activityState === 'blocked' ? 'Blockiert durch' : task.activityState === 'waiting' ? 'Wartet auf' : 'Eingereiht';
-    return <article className="tc-queued-row" style={style} data-status={task.status} data-activity={task.activityState} aria-label={`${task.purpose}, ${stateLabel}`}>
+    return <article className="tc-queued-row" style={style} data-task-id={task.id} data-status={task.status} data-activity={task.activityState} aria-label={`${task.purpose}, ${stateLabel}`}>
       <span className="tc-queued-mark" aria-hidden="true"/>
       <button className="tc-queued-task" onClick={() => onDetails(task)}>{task.purpose}</button>
       <span className="tc-queued-relation">{dependency ? <><span>{relation}:</span><button onClick={() => onDetails(dependency)} aria-label={`${dependency.purpose}, vorausgesetzte Aufgabe öffnen`}>{dependency.purpose}</button></> : relation}</span>
     </article>;
   }
-  return <button className="tc-task-card" style={style} data-status={task.status} data-activity={task.activityState} onClick={() => onDetails(task)} aria-label={`${task.purpose}, ${stateLabel}, Details öffnen`}>
+  return <button className="tc-task-card" style={style} data-task-id={task.id} data-status={task.status} data-activity={task.activityState} onClick={() => onDetails(task)} aria-label={`${task.purpose}, ${stateLabel}, Details öffnen`}>
     <span className="tc-task-state" aria-hidden="true">{task.status === 'completed' ? <Check size={14}/> : task.activityState === 'working' ? <LoaderCircle size={15}/> : task.status === 'failed' ? <X size={14}/> : <span/>}</span>
     <span className="tc-task-copy"><strong>{task.purpose}</strong><small><i/>{task.agent.name} · {stateLabel}</small></span><ChevronRight size={15}/>
   </button>;
@@ -106,49 +136,55 @@ function QuestionPanel({ conversationId, questions, tasks, busy, onSubmit }: { c
 }
 
 function EntryDetails({ entry, onClose }: { entry: PublicChatEntry; onClose: () => void }) {
+  const detail = (entry as PublicChatEntry & { detail?: PublicDetail }).detail;
   return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-entry-dialog-title"><header><div><small>ÖFFENTLICHER AGENTENBERICHT</small><h2 id="tc-entry-dialog-title">{entry.content?.title ?? entry.context?.taskLabel ?? 'Eintragsdetails'}</h2></div><button aria-label="Details schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
     {entry.context && <dl><div><dt>Aufgabe</dt><dd>{entry.context.taskLabel}</dd></div><div><dt>Agent</dt><dd>{entry.context.modelLabel ?? entry.context.modelId}{entry.context.provider ? ` · ${entry.context.provider === 'codex' ? 'Codex' : 'Claude'}` : ''}</dd></div>{entry.context.stage && <div><dt>Arbeitsschritt</dt><dd>{stageLabels[entry.context.stage] ?? entry.context.stage}</dd></div>}</dl>}
-    <p>{entry.content?.summary ?? entry.message}</p>
+    {detail ? <DetailReport detail={detail} message={entry.content?.summary ?? entry.message}/> : <p>{entry.content?.summary ?? entry.message}</p>}
     {!!entry.content?.facts?.length && <><h3>Ergebnisse und Annahmen</h3><ul>{entry.content.facts.map(fact => <li key={fact.label}><strong>{fact.label}:</strong> {fact.value}</li>)}</ul></>}
     {!!entry.sources?.length && <><h3>Verwendete Quellen</h3><ul className="tc-source-list">{entry.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer"><strong>{source.label}</strong></a> : <strong>{source.label}</strong>}<span>{sourceKindLabels[source.kind]}</span></li>; })}</ul></>}
     {entry.delivery && <div className={`tc-delivery is-${entry.delivery.state}`}><strong>{deliveryLabels[entry.delivery.state]}</strong>{entry.delivery.detail && <p>{entry.delivery.detail}</p>}</div>}
   </div></section></div>;
 }
 
-function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, onAnswers, onCommand }: {
+function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, onAnswers, onCommand, onReviewFlow }: {
   snapshot: RichChatSnapshot; model: string; busy: boolean; text: string;
-  onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void; onAnswers: (answers: { questionId: string; answer: string }[]) => Promise<boolean>; onCommand: (command: TestingChatCommand) => void;
+  onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void; onAnswers: (answers: { questionId: string; answer: string }[]) => Promise<boolean>; onCommand: (command: TestingChatCommand) => void; onReviewFlow: () => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
-  const [details, setDetails] = useState<PublicChatEntry>();
-  const [taskDetails, setTaskDetails] = useState<PublicTask>();
+  const [detailId, setDetailId] = useState<string>();
+  const [taskDetailId, setTaskDetailId] = useState<string>();
   const [showAlternativeComposer, setShowAlternativeComposer] = useState(false);
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [snapshot.timeline.length]);
   const allowed = new Set(snapshot.allowedCommands);
   const tasks = snapshot.tasks ?? [];
+  const details = snapshot.timeline.find(entry => entry.id === detailId);
+  const taskDetails = tasks.find(task => task.id === taskDetailId);
   const questions = snapshot.questions ?? [];
   const hasOpenQuestions = questions.some(question => question.status === 'open' && question.kind === 'clarification');
   const sendCommand: TestingChatCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
-  const nextActions = (['approve', 'prepare'] as TestingChatCommand[]).filter(command => allowed.has(command));
+  const nextActions = (['prepare'] as TestingChatCommand[]).filter(command => allowed.has(command));
   const placeholder = snapshot.scenario ? 'Weitere Änderung beschreiben …' : 'Nachricht an Folio …';
-  const visibleTimeline = snapshot.timeline.filter(entry => entry.kind !== 'status' && entry.kind !== 'question');
+  const visibleTimeline = snapshot.timeline.filter(belongsInConversation);
   const questionJobIds = new Set(questions.filter(question => question.status === 'open').map(question => question.jobId));
-  const feed = [...visibleTimeline.map(entry => ({ type: 'entry' as const, id: entry.id, at: entry.at, entry })), ...tasks.map(task => ({ type: 'task' as const, id: task.id, at: task.startedAt, task }))].sort((a, b) => a.at.localeCompare(b.at));
+  const queuedTasks = tasks.filter(task => !questionJobIds.has(task.id) && ['waiting', 'not_started', 'blocked'].includes(task.activityState));
+  const timelineTasks = tasks.filter(task => !queuedTasks.includes(task));
+  const feed = [...visibleTimeline.map(entry => ({ type: 'entry' as const, id: entry.id, at: entry.at, entry })), ...timelineTasks.map(task => ({ type: 'task' as const, id: task.id, at: task.executionAt ?? task.finishedAt ?? task.startedAt, task }))].sort((a, b) => a.at.localeCompare(b.at));
   return <section className="tc-chat-pane" aria-label="Unterhaltung">
-    <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={setDetails}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} dependency={tasks.find(task => task.id === item.task.waitingForJobId || task.id === item.task.blockedByJobId)} onDetails={setTaskDetails}/>)}</div>
+    <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={entry => setDetailId(entry.id)}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} dependency={tasks.find(task => task.id === item.task.waitingForJobId || task.id === item.task.blockedByJobId)} onDetails={task => setTaskDetailId(task.id)}/>)}</div>
+      {!!queuedTasks.length && <section className="tc-queue" aria-labelledby="tc-queue-title"><header><strong id="tc-queue-title">Als Nächstes</strong><span>{queuedTasks.length}</span></header>{queuedTasks.map(task => <TaskCard key={`queue:${task.id}`} task={task} awaitsAnswer={false} dependency={tasks.find(item => item.id === task.waitingForJobId || item.id === task.blockedByJobId)} onDetails={item => setTaskDetailId(item.id)}/>)}</section>}
       <QuestionPanel conversationId={snapshot.conversation.id} questions={questions} tasks={tasks} busy={busy} onSubmit={onAnswers}/>
       {snapshot.proposed && <ProposalCard snapshot={snapshot} busy={busy} onCommand={onCommand}/>}<div ref={end}/>
     </div></div>
     {hasOpenQuestions && !showAlternativeComposer ? <footer className="tc-alternative-toggle"><button onClick={() => setShowAlternativeComposer(true)}><Plus size={14}/>Andere Änderung schreiben</button></footer> : <footer className="tc-composer">
       <div className="tc-composer-inner">
-      {!!nextActions.length && <div className="tc-command-actions">{nextActions.map(command => <button key={command} className="tc-primary" disabled={busy} onClick={() => onCommand(command)}>{command === 'run' ? <Play size={15}/> : command === 'approve' ? <Check size={15}/> : <Sparkles size={15}/>} {commandLabels[command]}</button>)}</div>}
+      {(allowed.has('approve') || !!nextActions.length) && <div className="tc-command-actions">{allowed.has('approve') && <button className="tc-review-flow" disabled={busy} onClick={onReviewFlow}><Workflow size={15}/>Ablauf prüfen</button>}{nextActions.map(command => <button key={command} className="tc-primary" disabled={busy} onClick={() => onCommand(command)}><Sparkles size={15}/> {commandLabels[command]}</button>)}</div>}
       {hasOpenQuestions && <div className="tc-composer-mode"><p>Separate Änderung</p><button onClick={() => setShowAlternativeComposer(false)}>Schließen</button></div>}
       <textarea aria-label="Separate Nachricht" value={text} onChange={event => onText(event.target.value)} placeholder={placeholder} rows={2} disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
       <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" aria-label="Separate Nachricht senden" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onClick={onSend}><Send size={16}/>{snapshot.scenario ? 'Änderung senden' : 'Senden'}</button></div>
       </div>
     </footer>}
-    {details ? <EntryDetails entry={details} onClose={() => setDetails(undefined)}/> : null}
-    {taskDetails ? <TaskDetails task={taskDetails} onClose={() => setTaskDetails(undefined)}/> : null}
+    {details ? <EntryDetails entry={details} onClose={() => setDetailId(undefined)}/> : null}
+    {taskDetails ? <TaskDetails task={taskDetails} onClose={() => setTaskDetailId(undefined)}/> : null}
   </section>;
 }
 
@@ -231,5 +267,5 @@ export function TestingChatApp() {
   const scenarioId = snapshot?.scenario?.id;
   return <AgentSettingsContext.Provider value={settings}><main className="testing-chat-app"><aside className="tc-sidebar"><a className="tc-brand" href="/testing/chat" onClick={event => { event.preventDefault(); navigate(); }}><span>F</span><strong>Folio Studio</strong></a><button className="tc-new" disabled={busy} onClick={() => navigate()}><Plus size={16}/>Neuer Testfall</button><nav aria-label="Testfälle">{bootstrap?.scenarios.map(scenario => <button key={scenario.id} className={scenario.id === scenarioId ? 'active' : ''} onClick={() => void create(scenario.id)}><span>{scenario.title}</span><small>Revision {scenario.revision}</small><ChevronRight size={14}/></button>)}</nav><a className="tc-classic" href="/testing"><ArrowLeft size={14}/>Klassische Ansicht</a></aside>
     <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
-      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
+      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })} onReviewFlow={() => navigate(snapshot.conversation.id, 'flow')}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
 }

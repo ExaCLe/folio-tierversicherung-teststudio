@@ -31,7 +31,7 @@ test('kuratierte Unterauftrag-Ausgabe bleibt über SSE und erneutes Laden mit He
   assert.equal(entry.content?.summary,'Die Rollenregel ist vollständig geprüft.');assert.equal(entry.context?.modelLabel,'Luna lokal');assert.equal(entry.context?.taskLabel,'Fachwissen prüfen');assert.equal(entry.sources?.[0].ref,'wissen-vertrag');
   assert(streamed.some((event:any)=>event.type==='entry'&&event.entry.id===entry.id));assert(chat.getTestingChatSnapshot('public-child-chat').timeline.some(item=>item.content?.summary==='Die Rollenregel ist vollständig geprüft.'));
   assert.equal(chat.getTestingChatSnapshot('public-child-chat').activeJob?.id,'parent');
-  const tasks=chat.getTestingChatSnapshot('public-child-chat').tasks;assert.deepEqual(tasks.map(item=>[item.id,item.parentJobId,item.activityState]),[['parent',undefined,'waiting'],['child','parent','done'],['child-running','parent','working']]);
+  const tasks=chat.getTestingChatSnapshot('public-child-chat').tasks;assert.deepEqual(tasks.map(item=>[item.id,item.parentJobId,item.activityState]),[['child','parent','done'],['child-running','parent','working'],['parent',undefined,'waiting']]);
   assert.equal(tasks.find(item=>item.id==='child')?.agent.name,'Luna lokal');assert(tasks.find(item=>item.id==='child')?.publicDetails.some(detail=>detail.message==='Die Rollenregel ist vollständig geprüft.'));
   chat.commandTestingChat('public-child-chat',{command:'cancel',expectedRevision:1,requestId:'cancel-root'});assert.equal(orchestrator.getTestingJob('parent').status,'cancelled');assert.equal(orchestrator.getTestingJob('child').status,'completed');assert.equal(orchestrator.getTestingJob('child-running').status,'cancelled');
 });
@@ -69,11 +69,11 @@ test('Wartezustand, noch nicht gestarteter Auftrag und unabhängiger Elternfehle
   parentTask=chat.getTestingChatSnapshot(chatId).tasks.find(item=>item.id===parent.id)!;assert.equal(parentTask.status,'completed');assert.equal(parentTask.activityState,'attention');
 });
 
-test('historische Statusmeldungen erscheinen weder als Chatantwort noch als fremde Aufgabenkarte',()=>{
+test('historische und generische Statusmeldungen erscheinen weder als Chatantwort noch als Aufgabendetail',()=>{
   const scenarioId='history-scenario';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation('history-chat',scenarioId);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations','history-chat'),activeJobId:'history-parent'});
   db.upsert<TestingAgentJob>('testingAgentJobs',{id:'history-parent',phase:'business',model:'luna',status:'running',prompt:'Aktuell',scenarioId,scenarioRevision:1,startedAt:at,events:[{id:'progress',at,kind:'status',message:'Drei Wissensquellen geprüft.'}]});
   db.upsert<TestingAgentJob>('testingAgentJobs',{id:'old-job',phase:'business',model:'luna',status:'completed',prompt:'Alt',scenarioId,scenarioRevision:1,startedAt:'2026-01-01',finishedAt:'2026-01-01',events:[{id:'old-status',at:'2026-01-01',kind:'status',message:'Alte Browserbeobachtung 17 erfasst.'}]});
-  const snapshot=chat.getTestingChatSnapshot('history-chat');assert.deepEqual(snapshot.tasks.map(item=>item.id),['history-parent']);assert.equal(snapshot.timeline.some(item=>item.message.includes('Browserbeobachtung')),false);assert.equal(snapshot.tasks[0].publicDetails[0].message,'Drei Wissensquellen geprüft.');
+  const snapshot=chat.getTestingChatSnapshot('history-chat');assert.deepEqual(snapshot.tasks.map(item=>item.id),['history-parent']);assert.equal(snapshot.timeline.some(item=>item.message.includes('Browserbeobachtung')),false);assert.deepEqual(snapshot.tasks[0].publicDetails,[]);
 });
 
 test('Legacy-Migration erhält alle nach der letzten Antwort noch offenen Rückfragen',()=>{
@@ -131,6 +131,23 @@ test('CLI-Rauschen und rohe Daten bleiben draußen; öffentliche Prosa behält A
   const exploration={...job,id:'privacy-exploration',phase:'exploration' as const};
   assert.equal(chat.testingChatPublicJobEntry(exploration,{id:'domain-error',at,kind:'error',message:'Der Versicherungsvertrag wurde im Portal nicht gefunden.'})?.message,'Der Versicherungsvertrag wurde im Portal nicht gefunden.');
   assert.equal(chat.testingChatPublicJobEntry(exploration,{id:'provider-error',at,kind:'error',message:'Der Provider meldet einen fachlichen Vertragsfehler.'})?.message,'Der Provider meldet einen fachlichen Vertragsfehler.');
+});
+
+test('öffentliche Providerausgabe behält die verfügbare Länge und einen vorhandenen Kürzungshinweis',()=>{
+  const job={id:'long-public-job',phase:'business',model:'luna',status:'running',prompt:'Fixture',startedAt:at,events:[]} as TestingAgentJob;
+  const message=`${'a'.repeat(20_000)}\n[Ausgabe nach 20000 Zeichen gekürzt.]`,entry=chat.testingChatPublicJobEntry(job,{id:'long-public',at,kind:'message',message,publicDetail:{type:'message',label:'Agentenausgabe'}})!;
+  assert.equal(entry.message,message);assert.match(entry.message,/Ausgabe nach 20000 Zeichen gekürzt/);
+});
+
+test('öffentliche Provider-Aktualisierungen ersetzen dieselbe stabile Aktivität live und nach Reload',()=>{
+  const scenarioId='stream-update-scenario',chatId='stream-update-chat';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation(chatId,scenarioId);
+  const job:TestingAgentJob={id:'stream-job',phase:'business',model:'luna',status:'running',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,events:[]};
+  db.upsert('testingAgentJobs',job);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),activeJobId:job.id,jobIds:[job.id]});
+  const streamed:any[]=[];const unsubscribe=chat.subscribeTestingChat(chatId,event=>streamed.push(event));
+  orchestrator.addTestingAgentEvent(job.id,{id:'provider-summary',at,kind:'message',message:'Prüfe Rollenregel …',publicDetail:{type:'reasoning',label:'Überlegung'},stream:{providerEventId:'provider-17',status:'streaming'}});
+  orchestrator.addTestingAgentEvent(job.id,{id:'provider-summary',at:'2026-09-10T12:00:01.000Z',kind:'message',message:'Die Rollenregel gilt für Vermittler und Innendienst.',publicDetail:{type:'reasoning',label:'Überlegung'},stream:{providerEventId:'provider-17',status:'completed'}});
+  unsubscribe();const stored=orchestrator.getTestingJob(job.id).events.filter(event=>event.stream?.providerEventId==='provider-17'),snapshot=chat.getTestingChatSnapshot(chatId),details=snapshot.tasks.find(item=>item.id===job.id)!.publicDetails.filter(item=>item.id==='provider-summary');
+  assert.equal(stored.length,1);assert.equal(stored[0].at,at);assert.equal(stored[0].message,'Die Rollenregel gilt für Vermittler und Innendienst.');assert.equal(details.length,1);assert.equal(details[0].detail?.type,'reasoning');assert.equal(details[0].context?.jobId,job.id);assert.equal(snapshot.timeline.filter(entry=>entry.id===`${job.id}:provider-summary`).length,0);assert.equal(streamed.filter(event=>event.type==='entry'&&(event as any).entry.id===`${job.id}:provider-summary`).length,0);assert(streamed.filter(event=>event.type==='state').length>=2);
 });
 
 test('Nachricht während eines Laufs wird zuerst gespeichert und revisionstreu neu geplant',async()=>{

@@ -90,6 +90,7 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   expect(await queued.first().evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(await running.evaluate(element => element.getBoundingClientRect().height));
   await queued.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
+  await expect(page.getByRole('dialog')).toContainText('Bisher liegt für diesen Auftrag keine Reasoning-Zusammenfassung vor.');
   await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
 
   const assertBottomReachable = async () => {
@@ -256,6 +257,78 @@ test('Ablauf sperrt Agentenarbeit, dupliziert wirklich und behält einen abgewie
   await page.screenshot({ path: '.local/verification/chat/flow.png', fullPage: true });
 });
 
+test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zur Freigabe über den Ablauf', async ({ page, request }) => {
+  mkdirSync('.local/verification/chat/details', { recursive: true });
+  const seed = await scenario(request);
+  const sourceRef = seed.knowledgeRefs[0];
+  const source = { label: 'Direktionsregel für TierSchutz', kind: 'knowledge' as const, ref: sourceRef };
+  const baseTask: TestingChatSnapshot['tasks'][number] = {
+    id: 'job-business', purpose: 'Fachlichen Ablauf korrigieren', agent: { name: 'Sol', modelId: 'sol', provider: 'codex', color: '#7656a4' },
+    status: 'running', activityState: 'working', stage: 'planning', startedAt: '2026-09-10T07:58:00.000Z', executionAt: '2026-09-10T08:03:00.000Z',
+    publicDetails: [
+      { id: 'reasoning', at: '2026-09-10T08:03:00.000Z', kind: 'progress', message: 'Die öffentliche Herleitung vergleicht die Versicherungssumme mit der belegten Bayern-Grenze.', detail: { type: 'reasoning', label: 'Fachliche Herleitung', data: { summary: 'In Bayern beginnt die Direktionsprüfung oberhalb von 11.000 Euro.', facts: ['Bundesland Bayern', 'Versicherungssumme 12.000 Euro'] } }, sources: [source] },
+      { id: 'answer', at: '2026-09-10T08:03:20.000Z', kind: 'progress', message: 'Der Agent lieferte einen Ablauf mit Antrag, Grenzprüfung und erwartetem Status.', detail: { type: 'message', label: 'Antwort des Fachagenten', data: { title: 'Kuhleben Bayern', result: 'Direktionsprüfung' } } },
+      { id: 'validation', at: '2026-09-10T08:03:40.000Z', kind: 'error', message: 'Der erste Entwurf enthielt einen nicht aufgelösten Ergebnisverweis.', detail: { type: 'validation', label: 'Schema- und Compilerprüfung', data: { valid: false, attempt: 1, errors: ['expectedStatus verweist auf keinen erzeugten Wert.'] } } },
+    ],
+  };
+  const queuedTask: TestingChatSnapshot['tasks'][number] = { id: 'job-technical', purpose: 'Technische Bindung vorbereiten', agent: { name: 'Luna', modelId: 'luna', provider: 'codex', color: '#e56b25' }, status: 'not_started', activityState: 'not_started', stage: 'wiring', startedAt: '2026-09-10T07:57:00.000Z', publicDetails: [] };
+  const initial = conversation(seed, {
+    conversation: { id: 'chat-browser-contract', revision: 11, eventSequence: 11, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:03:40.000Z', model: 'sol', activeJobId: baseTask.id, entryIds: ['request'] },
+    timeline: [{ id: 'request', at: '2026-09-10T08:00:00.000Z', kind: 'user', message: 'Prüfe den Bayern-Grenzwert und korrigiere den Ablauf.' }],
+    tasks: [queuedTask, baseTask], allowedCommands: ['message', 'cancel'],
+  });
+  const completedTask = { ...baseTask, status: 'completed' as const, activityState: 'done' as const, finishedAt: '2026-09-10T08:04:20.000Z', publicDetails: [...baseTask.publicDetails, { id: 'result', at: '2026-09-10T08:04:20.000Z', kind: 'result' as const, message: 'Der korrigierte Ablauf verwendet den erzeugten Status und ist strukturell gültig.', detail: { type: 'result' as const, label: 'Korrigierter Ablauf', data: { valid: true, correction: 'Die Statusprüfung liest jetzt proposal.status.', result: { expectedStatus: 'Direktionsprüfung', scenarioRevision: 4 } } }, sources: [source] }] };
+  const completed = { ...initial, conversation: { ...initial.conversation, revision: 12, eventSequence: 12, activeJobId: undefined }, tasks: [queuedTask, completedTask], allowedCommands: ['message', 'approve'] as TestingChatSnapshot['allowedCommands'] };
+  const approvedEntry: TestingChatSnapshot['timeline'][number] = { id: 'approval', at: '2026-09-10T08:05:00.000Z', kind: 'user_action', message: 'Du hast Revision 4 fachlich freigegeben.', scenarioRevision: seed.revision };
+  const approved = { ...completed, conversation: { ...completed.conversation, revision: 13, eventSequence: 13, entryIds: ['request', 'approval'] }, timeline: [...completed.timeline, approvedEntry], allowedCommands: ['message', 'prepare'] as TestingChatSnapshot['allowedCommands'] };
+  let current = initial;
+  let reads = 0;
+  let streams = 0;
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract', route => { reads += 1; if (reads > 1 && current === initial) current = completed; return route.fulfill({ json: current }); });
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => {
+    streams += 1;
+    const interim = { id: 'job-business:codex:message_1', at: '2026-09-10T08:03:50.000Z', kind: 'agent_summary' as const, jobId: 'job-business', message: 'Technischer Agentenplan, noch nicht geprüft', detail: { type: 'message' as const, label: 'Agentenausgabe' } };
+    const body = streams === 2 ? `event: entry\ndata: ${JSON.stringify({ type: 'entry', sequence: 12, revision: 12, entry: interim })}\n\nevent: state\ndata: ${JSON.stringify({ type: 'state', sequence: 13, revision: 12 })}\n\n` : '';
+    return route.fulfill({ contentType: 'text/event-stream', body });
+  });
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => {
+    const input = route.request().postDataJSON() as { command: string };
+    expect(input.command).toBe('approve'); current = approved; await route.fulfill({ json: approved });
+  });
+  await page.goto('/testing/chat/chat-browser-contract/chat');
+  const feed = page.locator('.tc-feed');
+  await expect(feed.locator('[data-entry-id="request"]')).toBeVisible();
+  await expect(feed.locator('[data-task-id="job-business"]')).toBeVisible();
+  await expect(page.locator('.tc-queue [data-task-id="job-technical"]')).toBeVisible();
+  await expect(feed).not.toContainText('Technischer Agentenplan, noch nicht geprüft');
+  expect(await feed.locator('[data-entry-id="request"], [data-task-id="job-business"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-entry-id') ?? node.getAttribute('data-task-id')))).toEqual(['request', 'job-business']);
+  await page.locator('[data-task-id="job-business"]').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Reasoning-Zusammenfassung', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Agentenausgabe', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Automatisierte Prüfung', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('KI-Prüfer', { exact: false })).toHaveCount(0);
+  await expect(dialog.getByText('Korrigierter Ablauf', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(dialog.getByText('proposal.status', { exact: false })).toBeVisible();
+  await expect(dialog.getByRole('link', { name: source.label, exact: true }).first()).toBeVisible();
+  expect(await dialog.locator('.tc-detail-report').evaluateAll(cards => cards.every(card => card.querySelectorAll('details').length <= 1))).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.screenshot({ path: '.local/verification/chat/details/detail-live-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: '.local/verification/chat/details/detail-live-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.getByRole('button', { name: 'Ablauf prüfen', exact: true }).click();
+  await expect(page).toHaveURL(/\/flow$/);
+  await expect(page.getByRole('button', { name: 'Freigeben', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Freigeben', exact: true }).click();
+  await page.getByRole('button', { name: 'Unterhaltung', exact: true }).click();
+  await expect(page.getByText('Du hast Revision 4 fachlich freigegeben.', { exact: true })).toBeVisible();
+  await expect(page.locator('.tc-entry.is-user-action')).toContainText('Du hast');
+  await expect(page.getByRole('button', { name: 'Freigeben', exact: true })).toHaveCount(0);
+  await page.screenshot({ path: '.local/verification/chat/details/causal-chat-approved.png', fullPage: true });
+});
+
 test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespeicherten Nachweise', async ({ page, request }) => {
   const seed = await scenario(request);
   const candidate = { ...seed, id: `chat-live-${randomUUID()}`, title: `${seed.title} · Chat-Liveprüfung`, source: 'human' as const };
@@ -267,6 +340,27 @@ test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespei
   await page.getByRole('button', { name: 'Freigeben', exact: true }).click();
   await page.getByRole('button', { name: 'Unterhaltung', exact: true }).click();
   await page.getByRole('button', { name: 'Technisch vorbereiten', exact: true }).click();
+  await expect(page.locator('.tc-feed')).not.toContainText('Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.');
+  await expect(page.locator('.tc-feed')).not.toContainText('Technischer Agentenplan, noch nicht geprüft');
+  await expect(page.locator('.tc-feed')).not.toContainText('Agentenantwort, noch nicht geprüft');
+  const liveConversationId = decodeURIComponent(new URL(page.url()).pathname.split('/')[3]);
+  let liveTaskId = '';
+  await expect.poll(async () => {
+    const response = await request.get(`/api/testing/chat/conversations/${liveConversationId}`);
+    const current = await response.json() as TestingChatSnapshot;
+    liveTaskId = current.tasks.find(task => task.publicDetails.some(item => item.message === 'Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.'))?.id ?? '';
+    return liveTaskId;
+  }, { timeout: 15_000 }).not.toBe('');
+  await expect(page.locator(`[data-task-id="${liveTaskId}"]`)).toHaveAttribute('data-status', 'running');
+  await page.locator(`[data-task-id="${liveTaskId}"]`).click();
+  await expect(page.getByRole('dialog').getByText('Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Reasoning-Zusammenfassung', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Der Ablauf verbindet die fachliche Anforderung mit den vorhandenen Bausteinen; offene Annahmen bleiben im Ergebnis sichtbar.', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('dialog').getByText('Agentenausgabe', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('.tc-feed')).not.toContainText('Der Ablauf verbindet die fachliche Anforderung mit den vorhandenen Bausteinen; offene Annahmen bleiben im Ergebnis sichtbar.');
+  expect(await page.getByRole('dialog').locator('.tc-detail-report').evaluateAll(cards => cards.every(card => card.querySelectorAll('details').length <= 1))).toBe(true);
+  await page.screenshot({ path: '.local/verification/chat/details/provider-real-sse.png', fullPage: true });
+  await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
   await page.getByRole('button', { name: 'Browser', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Test starten', exact: true })).toBeEnabled({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Test starten', exact: true }).click();

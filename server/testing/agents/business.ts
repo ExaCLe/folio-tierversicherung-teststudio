@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { TestingAgentEvent, TestingCatalog, TestingModel, TestingScenario } from '../../../shared/testing';
 import { previewTestingBusinessDraft } from '../repository';
-import { invokeCodex } from './cli';
+import { invokeCodex, redactCLIText } from './cli';
 import { agentContext, businessPrompt } from './prompts';
 import { BUSINESS_SCHEMA, decodeBusinessDraft, validateTestingCaseDesign } from './schemas';
 
@@ -23,6 +23,8 @@ export async function planBusinessWithCodex(input: { id: string; model: TestingM
     const result = await invokeCodex({ id, model: input.model, prompt: attempt === 0 ? prompt : `${prompt}\n\nDie vorherige Antwort steht in vorherige-antwort.json. Der lokale Schema-/Compilerprüfer hat diese konkreten Fehler gefunden: ${JSON.stringify(diagnostic)}. Korrigiere diese Fehler. Halte alle bereits korrekten fachlichen Werte unverändert. knowledgeRefs dürfen ausschließlich IDs aus wissen.json oder newKnowledge verwenden, niemals Dateinamen. Ein Rollen-Kontext enthält seine Schritte als children, ein leerer Kontext hat keine Wirkung. Jede Nutzererwartung braucht eine echte Assertion mit Eingabeschema; eine Note ist kein Test. Gib erneut das vollständige strukturierte Ergebnis zurück.`,
       schema: BUSINESS_SCHEMA, files: { ...files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
     previous = result.value;
+    const candidate=JSON.parse(redactCLIText(JSON.stringify(result.value)));
+    input.onEvent?.({id:`${input.id}-entwurf-${attempt+1}`,at:new Date().toISOString(),kind:'message',message:attempt?'Korrigierter Agentenentwurf, noch nicht geprüft.':'Agentenentwurf, noch nicht geprüft.',publicDetail:{type:'message',label:attempt?'Korrigierter Agentenentwurf · noch nicht geprüft':'Agentenentwurf · noch nicht geprüft',data:candidate}});
     input.onStage?.('validating');
     try {
       const draft = decodeBusinessDraft(result.value);
@@ -43,7 +45,7 @@ export async function planBusinessWithCodex(input: { id: string; model: TestingM
       attempts.push({ id, contextHash: result.contextHash, valid: false, errors: [diagnostic] });
       if (attempt === 1) throw new Error(`Auch die KI-Korrektur entspricht noch nicht dem Datenvertrag: ${diagnostic}`);
     }
-    input.onEvent?.({ id: `${input.id}-korrekturhinweis`, at: new Date().toISOString(), kind: 'status', message: 'Der Prüfer hat Fehler im Agentenentwurf gefunden. Das gleiche Modell erhält den Validierungsbericht und korrigiert seine Antwort einmal.' });
+    input.onEvent?.({ id: `${input.id}-korrekturhinweis`, at: new Date().toISOString(), kind: 'status', message: 'Die automatische Prüfung hat diese Punkte im Entwurf beanstandet. Der Agent überarbeitet sie.', publicDetail:{type:'validation',label:'Automatische Prüfung',data:{valid:false,errors:diagnostic.split('\n').filter(Boolean),correction:'Der bisherige Agent erhält den Fehlerbericht; es findet keine unabhängige Begutachtung statt.'}} });
   }
   throw new Error('Der fachliche Agent lieferte keinen Entwurf.');
 }

@@ -67,28 +67,45 @@ function installHooks() {
   process.once('exit', stopCodexProcesses);
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { stopCodexProcesses(); process.exit(signal === 'SIGINT' ? 130 : 143); });
 }
-function eventMessage(event: any): Pick<TestingAgentEvent, 'kind' | 'message'> | undefined {
-  if (event.type === 'thread.started') return { kind: 'status', message: 'Codex-Sitzung gestartet.' };
-  if (event.type === 'turn.started') return { kind: 'status', message: 'Der Agent bearbeitet den Auftrag.' };
+type PublicProviderEvent = Pick<TestingAgentEvent, 'kind' | 'message'> & Partial<TestingAgentEvent>;
+function publicText(value: unknown, limit = 20_000): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = redactCLIText(value).trim();
+  if (!text) return undefined;
+  return text.length <= limit ? text : `${text.slice(0, limit)}\n[Ausgabe nach ${limit} Zeichen gekürzt.]`;
+}
+function providerEventId(provider: 'codex' | 'claude', value: unknown): string | undefined {
+  return typeof value === 'string' && /^[a-zA-Z0-9_.:-]{1,300}$/.test(value) ? `${provider}:${value}` : undefined;
+}
+/** Convert only prose which Codex deliberately places in its public JSONL stream. */
+export function codexPublicEvents(event: any, scope = 'codex'): PublicProviderEvent[] {
+  if (event.type === 'thread.started') return [{ kind: 'status', message: 'Codex-Sitzung gestartet.' }];
+  if (event.type === 'turn.started') return [{ kind: 'status', message: 'Der Agent bearbeitet den Auftrag.' }];
   // Completion and agent_message events are unvalidated provider output. The
   // orchestrator publishes a curated summary only after decoding and domain
   // validation have succeeded.
-  if (event.type === 'turn.completed') return undefined;
-  if (event.type === 'error' || event.type === 'turn.failed') return { kind: 'error', message: redactCLIText(String(event.message ?? event.error?.message ?? 'Codex hat den Auftrag abgebrochen.')).slice(0, 2000) };
+  if (event.type === 'turn.completed') return [];
+  if (event.type === 'error' || event.type === 'turn.failed') return [{ kind: 'error', message: redactCLIText(String(event.message ?? event.error?.message ?? 'Codex hat den Auftrag abgebrochen.')).slice(0, 2000) }];
   const item = event.item;
-  if (!item) return undefined;
-  if (item.type === 'agent_message' && event.type === 'item.completed') {
-    const value = redactCLIText(String(item.text ?? '')).trim();
-    return !value || /^[\[{]/.test(value) ? undefined : { kind: 'message', message: value.slice(0, 2000) };
+  if (!item) return [];
+  const streamId = providerEventId('codex', item.id)?.replace(/^codex/, scope);
+  const stream = streamId ? { providerEventId: streamId, status: event.type === 'item.completed' ? 'completed' as const : 'streaming' as const } : undefined;
+  if (item.type === 'reasoning' && /^item\.(?:started|updated|completed)$/.test(event.type)) {
+    const value = publicText(item.text);
+    return value ? [{ ...(streamId ? { id: streamId, stream } : {}), kind: 'message', message: value, publicDetail: { type: 'reasoning', label: 'Begründungszusammenfassung' } }] : [];
   }
-  if (item.type === 'command_execution' && event.type === 'item.started') return { kind: 'tool', message: `Kontext lesen: ${redactCLIText(String(item.command ?? 'Lokaler Lesevorgang')).slice(0, 600)}` };
-  return undefined;
+  if (item.type === 'agent_message' && /^item\.(?:started|updated|completed)$/.test(event.type)) {
+    const value = publicText(item.text);
+    return value && !/^[\[{]/.test(value) ? [{ ...(streamId ? { id: streamId, stream } : {}), kind: 'message', message: value, publicDetail: { type: 'message', label: 'Agentenausgabe' } }] : [];
+  }
+  if (item.type === 'command_execution' && event.type === 'item.started') return [{ kind: 'tool', message: `Kontext lesen: ${redactCLIText(String(item.command ?? 'Lokaler Lesevorgang')).slice(0, 600)}` }];
+  return [];
 }
 
 export function buildAgentArguments(configuration: TestingAgentConfiguration, directory: string, schema: Record<string, unknown>, sessionId: string): string[] {
   const extraArgs = validateExtraArgs(configuration.provider, configuration.args);
   if (configuration.provider === 'codex') return ['exec', ...extraArgs, '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '--sandbox', 'read-only',
-    '-c', 'approval_policy="never"', '--skip-git-repo-check', '--output-schema', resolve(directory, 'schema.json'), '-o', resolve(directory, 'result.json'), '-m', configuration.modelSlug, '-C', directory, '-'];
+    '-c', 'approval_policy="never"', '-c', 'hide_agent_reasoning=false', '-c', 'model_reasoning_summary="auto"', '--skip-git-repo-check', '--output-schema', resolve(directory, 'schema.json'), '-o', resolve(directory, 'result.json'), '-m', configuration.modelSlug, '-C', directory, '-'];
   return [...extraArgs, '--print', '--output-format', 'stream-json', '--verbose', '--input-format', 'text', '--json-schema', JSON.stringify(schema), '--model', configuration.modelSlug,
     '--safe-mode', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
     '--setting-sources', '', '--no-session-persistence', '--no-chrome', '--disable-slash-commands', '--session-id', sessionId];
@@ -103,16 +120,25 @@ export function extractClaudeStructuredOutput(event: unknown): unknown {
   if (!Object.hasOwn(result, 'structured_output') || result.structured_output === undefined) throw new Error('Claude Code hat kein structured_output gemäß JSON-Schema geliefert.');
   return result.structured_output;
 }
-function claudeEventMessage(event: any): Pick<TestingAgentEvent, 'kind' | 'message'> | undefined {
-  if (event.type === 'system' && event.subtype === 'init') return { kind: 'status', message: 'Claude-Code-Sitzung mit ausschließlich lesenden Werkzeugen gestartet.' };
+/** Claude documents non-empty `thinking` text as a public reasoning summary. Its
+ * encrypted `signature` is intentionally never copied. */
+export function claudePublicEvents(event: any, scope = 'claude'): PublicProviderEvent[] {
+  if (event.type === 'system' && event.subtype === 'init') return [{ kind: 'status', message: 'Claude-Code-Sitzung mit ausschließlich lesenden Werkzeugen gestartet.' }];
   if (event.type === 'assistant' && Array.isArray(event.message?.content)) {
-    const tool = event.message.content.find((item: any) => item.type === 'tool_use');
-    if (tool) return { kind: 'tool', message: `Kontext lesen: ${String(tool.name ?? 'Lesevorgang').slice(0, 80)}` };
-    const value = redactCLIText(event.message.content.filter((item:any)=>item.type==='text').map((item:any)=>String(item.text??'')).join('\n')).trim();
-    if (value && !/^[\[{]/.test(value)) return { kind: 'message', message: value.slice(0, 2000) };
+    return event.message.content.flatMap((item: any, index: number): PublicProviderEvent[] => {
+      if (item.type === 'tool_use') return [{ kind: 'tool', message: `Kontext lesen: ${String(item.name ?? 'Lesevorgang').slice(0, 80)}` }];
+      const streamId = typeof event.message.id === 'string' ? providerEventId('claude', `${event.message.id}:${index}`)?.replace(/^claude/, scope) : undefined;
+      if (item.type === 'thinking') {
+        const value = publicText(item.thinking);
+        return value ? [{ ...(streamId ? { id: streamId, stream: { providerEventId: streamId, status: 'completed' as const } } : {}), kind: 'message', message: value, publicDetail: { type: 'reasoning', label: 'Begründungszusammenfassung' } }] : [];
+      }
+      if (item.type !== 'text') return [];
+      const value = publicText(item.text);
+      return value && !/^[\[{]/.test(value) ? [{ ...(streamId ? { id: streamId, stream: { providerEventId: streamId, status: 'completed' as const } } : {}), kind: 'message', message: value, publicDetail: { type: 'message', label: 'Agentenausgabe' } }] : [];
+    });
   }
-  if (event.type === 'result') return event.is_error || event.subtype !== 'success' ? { kind: 'error', message: 'Claude Code meldet einen fehlgeschlagenen Auftrag.' } : undefined;
-  return undefined;
+  if (event.type === 'result') return event.is_error || event.subtype !== 'success' ? [{ kind: 'error', message: 'Claude Code meldet einen fehlgeschlagenen Auftrag.' }] : [];
+  return [];
 }
 
 /** The CLI owns authentication. This adapter never reads or copies authentication files. */
@@ -137,6 +163,7 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   const directory = resolve(AGENT_ARTIFACTS_ROOT, input.id);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await rm(resolve(directory, 'result.json'), { force: true });
+  await rm(resolve(directory, 'events.jsonl'), { force: true });
   const names = Object.keys(input.files).sort();
   for (const name of names) {
     if (!/^[a-zA-Z0-9_.-]+$/.test(name)) throw new Error('Ungültiger Kontextdateiname.');
@@ -154,8 +181,8 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
     modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, launchExecutable: launch.executable, args,
     contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs: codexTimeout() }, null, 2), { mode: 0o600 });
   let queuedWrites = Promise.resolve();
-  function publish(value: Pick<TestingAgentEvent, 'kind' | 'message'>) {
-    const event = { id: randomUUID(), at: new Date().toISOString(), ...value };
+  function publish(value: PublicProviderEvent) {
+    const event = { id: value.id ?? randomUUID(), at: new Date().toISOString(), ...value } as TestingAgentEvent;
     queuedWrites = queuedWrites.then(() => appendFile(resolve(directory, 'events.jsonl'), `${JSON.stringify(event)}\n`, { mode: 0o600 }));
     input.onEvent?.(event);
   }
@@ -163,6 +190,8 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   let claudeResult: unknown;
   let resultCount = 0;
   let resultError: Error | undefined;
+  let publicReasoningSeen = false;
+  let publicMessageSeen = false;
   const processLine = (line: string) => {
     let event: any; try { event = JSON.parse(line); } catch { return; }
     if (configuration.provider === 'claude') {
@@ -170,8 +199,8 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
         resultCount += 1;
         try { claudeResult = extractClaudeStructuredOutput(event); } catch (error) { resultError = error as Error; publish({ kind: 'error', message: resultError.message }); }
       }
-      const message = claudeEventMessage(event); if (message && !(event.type === 'result' && resultError)) publish(message);
-    } else { const message = eventMessage(event); if (message) publish(message); }
+      if (!(event.type === 'result' && resultError)) for (const message of claudePublicEvents(event, `${input.id}:claude`)) { publicReasoningSeen ||= message.publicDetail?.type === 'reasoning'; publicMessageSeen ||= message.publicDetail?.type === 'message'; publish(message); }
+    } else for (const message of codexPublicEvents(event, `${input.id}:codex`)) { publicReasoningSeen ||= message.publicDetail?.type === 'reasoning'; publicMessageSeen ||= message.publicDetail?.type === 'message'; publish(message); }
   };
   if (input.signal?.aborted) throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');
   await new Promise<void>((done, reject) => {
@@ -208,6 +237,10 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       else done();
     });
   });
+  if (!publicReasoningSeen) publish({ kind: 'status', message: configuration.provider === 'codex'
+    ? 'Codex hat für diesen Lauf keine öffentliche Begründungszusammenfassung ausgegeben.'
+    : 'Claude Code hat für diesen Lauf keine öffentliche Begründungszusammenfassung ausgegeben.' });
+  if (!publicMessageSeen) publish({ kind: 'status', message: `${providerName} hat neben dem strukturierten Ergebnis keinen öffentlichen Begleittext ausgegeben.` });
   await queuedWrites;
   if (configuration.provider === 'claude') {
     if (resultError) throw resultError;

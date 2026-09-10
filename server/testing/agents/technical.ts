@@ -1,7 +1,7 @@
 import type { TestingAgentEvent, TestingCatalog, TestingCompiledScenario, TestingModel, TestingRun } from '../../../shared/testing';
 import { stableTestingStringify } from '../compiler';
 import { validateTestingBinding } from '../bindings/validation';
-import { invokeCodex } from './cli';
+import { invokeCodex, redactCLIText } from './cli';
 import { technicalPrompt } from './prompts';
 import { decodeTechnicalPlan, TECHNICAL_SCHEMA } from './schemas';
 
@@ -13,6 +13,8 @@ export async function planTechnicalWithCodex(input: { id: string; model: Testing
       prompt: `${technicalPrompt(input.repairBindingId)}\n\nEin HTTP-Status ist nur belegt, wenn capture direkt an dem UI-Klick hängt, der genau diese Antwort auslöst. Ein deaktiviertes Bedienelement löst keine Anfrage aus; expectDisabled darf deshalb keinen erwarteten HTTP-Status als geprüft ausgeben. Kann eine freigegebene Forderung mit dem sicheren Rezeptvertrag nicht beobachtet werden, liefere ein strukturiertes unsupported-Objekt mit exakten Definitionsverweisen, Eingabeschlüsseln und Blockpfaden. Bei kind business-contract muss suggestedBusinessRevision einen konkreten deutschen Auftrag für die neue, menschlich zu prüfende Fachrevision enthalten. Erzeuge für dieselbe Definition keine scheinbar ausführbare Bindung.\n\n${attempt ? `Die vorherige Antwort wurde NICHT übernommen. vorherige-antwort.json und validierungsfehler.txt enthalten Ergebnis und genaue Fehler. Korrigiere deine Antwort gemäß diesem Bericht: ${JSON.stringify(diagnostic)}. Verwende exakt den operation-Wert aus freigegeben.json.steps für jede definitionRef. Fehlt definition.operation, gilt unverändert definition.semanticKey. Bereits funktionierende Bindungen ohne belegten Defekt unverändert wiederverwenden. Der Bericht benennt Bindung und recipe-Index; behebe alle gemeldeten Aktionen. Bei unlessVisible trenne optionales Formularöffnen strikt vom immer auszuführenden Ausfüllen und Speichern mit capture. Entferne keine fachliche Aktion, Antwortprüfung oder Ergebniserfassung, um die Validierung zu umgehen. Gib den vollständigen korrigierten technischen Plan zurück.` : ''}`,
       files: { ...input.files, ...(attempt ? { 'vorherige-antwort.json': JSON.stringify(previous, null, 2), 'validierungsfehler.txt': diagnostic } : {}) }, signal: input.signal, onEvent: input.onEvent });
     previous = result.value;
+    const candidate=JSON.parse(redactCLIText(JSON.stringify(result.value)));
+    input.onEvent?.({id:`${input.id}-entwurf-${attempt+1}`,at:new Date().toISOString(),kind:'message',message:attempt?'Korrigierter technischer Agentenplan, noch nicht geprüft.':'Technischer Agentenplan, noch nicht geprüft.',publicDetail:{type:'message',label:attempt?'Korrigierter technischer Plan · noch nicht geprüft':'Technischer Plan · noch nicht geprüft',data:candidate}});
     try {
       const plan = decodeTechnicalPlan(result.value);
       const issues: string[] = [];
@@ -48,7 +50,7 @@ export async function planTechnicalWithCodex(input: { id: string; model: Testing
     } catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);
       if (attempt) throw new Error(`Die technische KI-Korrektur ist weiterhin ungültig: ${diagnostic}`);
-      input.onEvent?.({ id: `${input.id}-technische-korrektur`, at: new Date().toISOString(), kind: 'status', message: 'Die technische Antwort enthält einen Vertrags- oder Referenzfehler. Das gleiche Modell erhält den genauen Bericht und korrigiert den Plan einmal.' });
+      input.onEvent?.({ id: `${input.id}-technische-korrektur`, at: new Date().toISOString(), kind: 'status', message: 'Die automatische Prüfung hat diese Punkte im technischen Plan beanstandet. Der Agent überarbeitet sie.', publicDetail:{type:'validation',label:'Automatische Prüfung',data:{valid:false,errors:diagnostic.split('\n\n').filter(Boolean),correction:'Der bisherige Agent erhält den Fehlerbericht; es findet keine unabhängige Begutachtung statt.'}} });
     }
   }
   throw new Error('Der technische Agent hat keinen gültigen Plan geliefert.');

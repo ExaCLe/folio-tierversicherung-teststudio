@@ -12,13 +12,17 @@ Die linke Liste enthält die vorhandenen Testfälle. Ein Klick öffnet den Testf
 
 ### Unterhaltung
 
-Hier stehen deine Anforderungen, geprüfte Antworten und Änderungsvorschläge in einer schmalen Lesespalte. Laufende und abgeschlossene Arbeiten erscheinen als Aufgabenkarten an der zeitlich passenden Stelle. Die Karten nennen ihren Zweck und einen dafür gewählten Agentennamen mit eigener Farbe. Ein laufender Auftrag zeigt einen Spinner, ein abgeschlossener ein Häkchen. Wartende und noch nicht gestartete Aufträge erscheinen als kompakte Queue-Zeilen ohne Spinner. Wartet ein übergeordneter Auftrag auf einen Teilauftrag, führt ein Link direkt zu dessen Details. Scheitert der Teilauftrag, zeigt die übergeordnete Zeile den Blocker, ohne denselben Fehler ein zweites Mal als eigenen Fehler auszugeben. Ein Klick öffnet die öffentlichen Fortschritts- und Ergebnismeldungen. Interne Statusmeldungen, Browserbeobachtungen und Modellnamen erscheinen nicht als Chatantworten.
+Hier stehen deine Anforderungen, geprüfte Antworten und Änderungsvorschläge in einer schmalen Lesespalte. Laufende und abgeschlossene Arbeiten erscheinen an dem Zeitpunkt, an dem der Agent sie tatsächlich bearbeitet oder abgeschlossen hat. Die Karten nennen ihren Zweck und den Agentennamen. Ein laufender Auftrag zeigt einen Spinner, ein abgeschlossener ein Häkchen. Wartende, blockierte und noch nicht gestartete Aufträge stehen getrennt unter "Als Nächstes". Dadurch erscheinen geplante technische Arbeiten nicht vor der fachlichen Freigabe, die sie erst auslöst. Wartet ein Auftrag auf einen Teilauftrag, führt ein Link direkt zu dessen Details.
+
+Ein Klick auf eine Aufgabe öffnet ihre öffentlichen Meldungen. Der Detaildialog trennt die öffentliche Zusammenfassung der Bearbeitung, die tatsächliche Agentenausgabe, strukturierte Ergebnisse und automatische Vertragsprüfungen. Eine automatische Schema- oder Compilerprüfung heißt ausdrücklich "Automatisierte Prüfung". Die Oberfläche nennt nur dann eine KI-Prüfung, wenn der Server dafür einen eigenen belegten Bericht liefert. Quellen bleiben am Bericht verlinkt. Neue Meldungen erscheinen während eines laufenden Auftrags im geöffneten Dialog. Interne Überlegungen, Tool-Aufrufe und Sitzungskennungen erscheinen nicht.
+
+Neue Aufträge speichern die vom Anbieter ausgegebenen Reasoning-Zusammenfassungen. Provider-Zusammenfassungen, die eine ältere Version bereits verworfen hat, lassen sich durch das Update nicht rekonstruieren. Vorhandene gespeicherte Ergebnisse und Prüfberichte bleiben erhalten; bei älteren Aufträgen zeigt der Dialog ehrlich, wenn keine Reasoning-Zusammenfassung vorliegt.
 
 Du kannst auch während eines laufenden Auftrags eine separate Änderung schreiben. Diese Nachricht verändert keinen bereits laufenden Modellaufruf. Der Server beendet diesen Auftrag kontrolliert und startet danach den Folgeauftrag mit dem bisherigen Stand und deiner Ergänzung. Bei einem bestehenden Ablauf erzeugt die Anweisung zuerst einen Vorschlag. "Vorschlag übernehmen" ändert den gespeicherten Testfall. "Vorschlag verwerfen" lässt den bestätigten Ablauf unverändert.
 
 Offene Rückfragen stehen gemeinsam in einem hervorgehobenen Eingabebereich. Sie erscheinen nur, wenn eine wichtige fachliche Entscheidung fehlt. Eine ausdrückliche Anforderung des Nutzers gilt bereits als Soll; Wissensprüfung und Browsererkundung bleiben Aufgaben des Agenten. Jede Rückfrage hat ein eigenes Textfeld, eine Begründung und den Namen des wartenden Agenten. "Antwort speichern" übermittelt nur diese eine Antwort. Weitere Fragen dürfen offen bleiben. Nicht gesendete Texte bleiben pro Unterhaltung und Frage im Browser erhalten, auch nach einem Neuladen oder fehlgeschlagenen Versuch. Sobald alle nötigen Antworten vorliegen, setzt der Server den wartenden Auftrag genau einmal fort. Solange Rückfragen offen sind, bleibt der normale Eingabebereich geschlossen. "Andere Änderung schreiben" öffnet ihn bewusst als separate Nebenaktion.
 
-Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Sie zeigt keine privaten Überlegungen, Tool-Aufrufe, Sitzungskennungen oder Rohantworten des Modells. Der Agent streamt derzeit auch keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
+Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Eigene Entscheidungen wie eine Freigabe erscheinen als grüne Aktion mit "Du hast ..." und werden nicht Folio zugeschrieben. Der Agent streamt keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
 
 ### Ablauf
 
@@ -38,7 +42,7 @@ Während eines echten Playwright-Laufs zeigt die Ansicht ungefähr einmal pro Se
 
 ## Freigabe, Vorbereitung und Lauf
 
-Die drei Aktionen bleiben getrennt:
+Die drei Aktionen bleiben getrennt. Die Unterhaltung bietet für eine noch nicht freigegebene Fassung den Link "Ablauf prüfen". Er öffnet die Ablaufansicht. Erst dort ist "Freigeben" verfügbar, damit die fachliche Fassung vor der Bestätigung sichtbar ist.
 
 1. "Freigeben" bestätigt die fachliche Revision.
 2. "Technisch vorbereiten" prüft und erstellt die technische Bindung für genau diese Revision.

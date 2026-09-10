@@ -185,6 +185,13 @@ export interface TestingAgentEvent {
   context?:{jobId:string;phase:TestingAgentPhase;taskLabel:string;modelId:string;modelLabel?:string;provider?:TestingProvider;stage?:TestingAgentStage};
   sources?:{label:string;kind:'knowledge'|'scenario'|'definition'|'portal-evidence';ref:string}[];
   content?:{type:'validated-summary';title:string;summary:string;facts?:{label:string;value:string}[]};
+  /** Public, deliberately selected activity detail. Never contains prompts, raw tool output, or hidden reasoning. */
+  publicDetail?:TestingAgentPublicDetail;
+  /** Stable provider identity lets partial events be replaced instead of duplicated. */
+  stream?:{providerEventId:string;status:'streaming'|'completed'};
+}
+export interface TestingAgentPublicDetail {
+  type:'reasoning'|'message'|'validation'|'result'; label:string; data?:unknown;
 }
 export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
