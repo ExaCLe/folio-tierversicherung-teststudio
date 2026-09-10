@@ -24,6 +24,7 @@ if (!settings.noResult) {
  const schema = JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1], 'utf8'));
  let output = {status:'bereit'};
  if (schema.properties?.reuseBindings) { const compiled=JSON.parse(readFileSync('freigegeben.json','utf8')); output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',reuseBindings:compiled.bindings.filter(x=>x.status==='ready').map(x=>({id:x.id,revision:x.revision})),newBindings:[],unsupported:[]}; }
+ if (schema.properties?.reuseBindings && process.env.FOLIO_TECHNICAL_PLAN) output=JSON.parse(readFileSync(process.env.FOLIO_TECHNICAL_PLAN,'utf8'));
  if (schema.properties?.reuseBindings && existsSync('technischer-testplan.json')) { const fixture=JSON.parse(readFileSync('technischer-testplan.json','utf8')); output=process.cwd().endsWith('-korrektur') ? fixture.correction ?? fixture.initial : fixture.initial; }
  if (schema.properties?.decisions) output={explanation:'Test des Prozessvertrags, kein KI-Nachweis.',decisions:[],unresolved:[]};
  if (schema.properties?.decisions && process.env.FOLIO_DUPLICATE_PLAN) { const fixture=JSON.parse(readFileSync(process.env.FOLIO_DUPLICATE_PLAN,'utf8')); output=process.cwd().endsWith('-korrektur') ? fixture.correction : fixture.initial; }
@@ -206,6 +207,20 @@ test('Aktiviert und deaktiviert sind ausdrückliche UI-Assertions mit geschützt
   assert.throws(() => validateTestingBinding(invalidProof, augmented), /boolesches Ergebnis/);
 });
 
+test('Eine neue reine UI-Berechtigungsprüfung wird als ausführbare Vorbereitung gespeichert', async () => {
+  const base=getTestingCatalog().definitions.find(item=>item.id==='pruefung.vorschlagsstatus')!;
+  const definition={...base,id:'qa.pipeline-berechtigung',semanticKey:'qa.pipelineAvailability',operation:'pipelineAvailability',bindingId:'ui.pipelineAvailability',origin:'human' as const,
+    inputs:[{key:'expectedAllowed',label:'Erwartete Berechtigung',type:'boolean' as const,required:true}],outputs:[{key:'matched',label:'Berechtigung geprüft',type:'boolean' as const}]};
+  repository.saveTestingDefinition(definition);
+  const binding={id:definition.bindingId,revision:1,operation:definition.operation,name:'Berechtigung im Portal prüfen',status:'ready' as const,definitionRefs:[{id:definition.id,version:definition.version}],knowledgeRefs:definition.knowledgeRefs,module:'e2e/helpers/agriculture-driver.ts',export:'executeTestingStep',createdAt:'2026-01-01T00:00:00.000Z',changeReason:'Neue sichere UI-Assertion',inputKeys:['expectedAllowed'],locators:[{key:'decision',method:'label' as const,value:'Entscheidung',exact:true}],recipe:[{op:'goto' as const,value:'/portal'},{op:'expectDisabled' as const,locatorKey:'decision',when:{input:'expectedAllowed',equals:false},proof:{matched:'matched'}}]};
+  const source=repository.getTestingScenario('kuh-direktionsanfrage'),scenario=repository.saveTestingScenario({...source,id:'pipeline-berechtigung',title:'Berechtigung prüfen',blocks:[{id:'berechtigung',definition:{id:definition.id,version:definition.version},inputs:{expectedAllowed:false},outputs:{matched:'permissionMatched'}}]},0);
+  repository.approveTestingScenario(scenario.id,scenario.revision);
+  const plan={explanation:'Die deaktivierte Bedienung wird sichtbar im Portal geprüft.',reuseBindings:[],newBindings:[{bindingJson:JSON.stringify(binding),reason:'Für diese neue Definition fehlt eine Bindung.'}],unsupported:[]};
+  const planPath=resolve(temporary,'permission-plan.json'),duplicatePath=resolve(temporary,'permission-duplicates.json');await writeFile(planPath,JSON.stringify(plan));await writeFile(duplicatePath,JSON.stringify({initial:{explanation:'Die neue Berechtigungsprüfung ist fachlich eigenständig.',decisions:[{proposed:{id:definition.id,version:definition.version},decision:'new',chosen:null,compatible:false,reason:'Kein vorhandener Block prüft diese Bedienbarkeit.'}],unresolved:[]}}));process.env.FOLIO_TECHNICAL_PLAN=planPath;process.env.FOLIO_DUPLICATE_PLAN=duplicatePath;
+  try{const completed=await orchestrator.waitTestingJob(orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna',prepareOnly:true}).id),result=completed.result as {prepared?:boolean;preparedBindingRefs?:{id:string;revision:number}[]};assert.equal(completed.status,'completed',completed.error);assert.equal(result.prepared,true);assert.deepEqual(result.preparedBindingRefs,[{id:binding.id,revision:1}]);assert(getTestingCatalog().bindings.some(item=>item.id===binding.id&&item.revision===1));}
+  finally{delete process.env.FOLIO_TECHNICAL_PLAN;delete process.env.FOLIO_DUPLICATE_PLAN;}
+});
+
 test('Technischer Plan verdrahtet elementare Schritte und ersetzt keinen vorhandenen Workflow durch ein Vollrezept', async () => {
   const catalog = getTestingCatalog();
   const compiled = compileTestingScenario(repository.getTestingScenario('kuh-direktionsanfrage'), catalog);
@@ -281,8 +296,10 @@ test('Technische Vorbereitung speichert den geprüften Bindungsstand ohne Browse
   repository.approveTestingScenario(scenario.id,scenario.revision);
   const runIds=new Set(repository.listTestingRuns().map(run=>run.id));
   const started=orchestrator.startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:'luna',prepareOnly:true});
-  const completed=await orchestrator.waitTestingJob(started.id),result=completed.result as {prepared?:boolean;preparedBindingRefs?:unknown[];run?:unknown};
+  const completed=await orchestrator.waitTestingJob(started.id),result=completed.result as {prepared?:boolean;preparedBindingRefs?:unknown[];run?:unknown;plan?:{explanation?:string}};
   assert.equal(completed.status,'completed',completed.error);assert.equal(result.prepared,true);assert(result.preparedBindingRefs?.length);assert.equal(result.run,undefined);
+  assert.equal(result.plan?.explanation,'Test des Prozessvertrags, kein KI-Nachweis.','Die separate Dublettenbegründung wird nicht in die technische Antwort kopiert.');
+  assert.equal(completed.metrics?.requestCount,1);assert((completed.metrics?.elapsedMs??-1)>=0);assert.equal(completed.metrics?.inputTokens,undefined);
   assert.deepEqual(repository.listTestingRuns().filter(run=>!runIds.has(run.id)),[]);
 });
 test('Zwei Selbstvergleiche werden gemeinsam korrigiert; die echte Pipeline hält für fachliche Prüfung statt abzubrechen', async () => {

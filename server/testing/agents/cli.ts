@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, appendFile, rm } from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import type { TestingAgentConfiguration, TestingAgentEvent, TestingModel } from '../../../shared/testing';
+import type { TestingAgentConfiguration, TestingAgentEvent, TestingAgentMetrics, TestingModel } from '../../../shared/testing';
 
 import { DEFAULT_CODEX_MODELS, providerExecutable, resolveAgentConfiguration, validateExtraArgs } from './settings';
 import { resolveAgentProcessEnvironment, resolveAgentProcessLaunch } from './process-launch';
@@ -23,6 +23,32 @@ export interface CodexInvocation {
   agentConfig?: TestingAgentConfiguration;
 }
 export interface CodexResult { value: unknown; directory: string; model: string; contextHash: string; provider?: 'codex' | 'claude'; }
+type InvocationMetrics = Omit<TestingAgentMetrics, 'elapsedMs'> & { elapsedMs?: number };
+
+const finiteMetric = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+export function providerInvocationMetrics(event: any): InvocationMetrics | undefined {
+  if (event?.type === 'turn.completed') {
+    const usage = event.usage ?? event.turn?.usage;
+    if (!usage || typeof usage !== 'object') return { requestCount: 1 };
+    const inputTokens=finiteMetric(usage.input_tokens),cachedInputTokens=finiteMetric(usage.cached_input_tokens),outputTokens=finiteMetric(usage.output_tokens),reportedTotal=finiteMetric(usage.total_tokens);
+    const totalTokens=reportedTotal ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + outputTokens : undefined);
+    return {requestCount:1,...(inputTokens!==undefined?{inputTokens}:{}),...(cachedInputTokens!==undefined?{cachedInputTokens}:{}),...(outputTokens!==undefined?{outputTokens}:{}),...(totalTokens!==undefined?{totalTokens}:{})};
+  }
+  if (event?.type === 'result') {
+    const usage = event.usage;
+    const requestCount=1;
+    if (!usage || typeof usage !== 'object') return { requestCount };
+    const inputTokens=finiteMetric(usage.input_tokens),cacheRead=finiteMetric(usage.cache_read_input_tokens),cacheCreation=finiteMetric(usage.cache_creation_input_tokens),cachedInputTokens=cacheRead!==undefined||cacheCreation!==undefined?(cacheRead??0)+(cacheCreation??0):undefined,outputTokens=finiteMetric(usage.output_tokens),reportedTotal=finiteMetric(usage.total_tokens);
+    const totalTokens=reportedTotal ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + (cachedInputTokens??0) + outputTokens : undefined);
+    return {requestCount,...(inputTokens!==undefined?{inputTokens}:{}),...(cachedInputTokens!==undefined?{cachedInputTokens}:{}),...(outputTokens!==undefined?{outputTokens}:{}),...(totalTokens!==undefined?{totalTokens}:{})};
+  }
+}
+
+function mergeInvocationMetrics(current: InvocationMetrics | undefined, next: InvocationMetrics): InvocationMetrics {
+  const merged: InvocationMetrics = { requestCount: Math.max(current?.requestCount ?? 0, next.requestCount) };
+  for (const key of ['inputTokens','cachedInputTokens','outputTokens','totalTokens'] as const) { const value=next[key] ?? current?.[key]; if(value!==undefined)merged[key]=value; }
+  return merged;
+}
 
 export function redactCLIText(value: string): string {
   return value.replace(/\b(sk-[a-zA-Z0-9_-]{16,}|Bearer\s+[a-zA-Z0-9._-]+)\b/g, '[ZUGANGSDATEN ENTFERNT]')
@@ -192,8 +218,10 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   let resultError: Error | undefined;
   let publicReasoningSeen = false;
   let publicMessageSeen = false;
+  let invocationMetrics: InvocationMetrics = { requestCount: 1 };
   const processLine = (line: string) => {
     let event: any; try { event = JSON.parse(line); } catch { return; }
+    const reportedMetrics=providerInvocationMetrics(event); if(reportedMetrics)invocationMetrics=mergeInvocationMetrics(invocationMetrics,reportedMetrics);
     if (configuration.provider === 'claude') {
       if (event.type === 'result') {
         resultCount += 1;
@@ -203,6 +231,8 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
     } else for (const message of codexPublicEvents(event, `${input.id}:codex`)) { publicReasoningSeen ||= message.publicDetail?.type === 'reasoning'; publicMessageSeen ||= message.publicDetail?.type === 'message'; publish(message); }
   };
   if (input.signal?.aborted) throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');
+  const invocationStarted=Date.now();
+  publish({id:`${input.id}:metrics`,kind:'metrics',message:'Modellaufruf gestartet.',metrics:invocationMetrics});
   await new Promise<void>((done, reject) => {
     const child = spawn(launch.executable, launch.args, { cwd: directory, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', env: resolveAgentProcessEnvironment(configuration.provider) });
     processes.set(input.id, child);
@@ -236,6 +266,9 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       else if (code !== 0) reject(new Error(`${providerName} ist mit Fehlercode ${code ?? 'unbekannt'} beendet worden. ${resultError?.message || stderr.slice(-2500).trim() || 'Prüfen Sie die lokale Anmeldung und den Zugang zum gewählten Modell.'}`));
       else done();
     });
+  }).finally(()=>{
+    invocationMetrics={...invocationMetrics,elapsedMs:Date.now()-invocationStarted};
+    publish({id:`${input.id}:metrics`,kind:'metrics',message:'Modellaufruf beendet.',metrics:invocationMetrics});
   });
   if (!publicReasoningSeen) publish({ kind: 'status', message: configuration.provider === 'codex'
     ? 'Codex hat für diesen Lauf keine öffentliche Begründungszusammenfassung ausgegeben.'

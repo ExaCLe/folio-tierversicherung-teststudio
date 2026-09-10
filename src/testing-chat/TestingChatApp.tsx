@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, Info, LoaderCircle, MessageSquare, Play, Plus, RefreshCw, Save, Send, Sparkles, Workflow, X } from 'lucide-react';
 import { currentTestingChildren, type TestingAgentSettings, type TestingBlockInstance, type TestingCatalog, type TestingScenario, type TestingScenarioLayout, type TestingValue } from '../../shared/testing';
 import type { TestingChatCommand, TestingChatEntry, TestingChatQuestion, TestingChatSnapshot, TestingChatTask } from '../../shared/testing-chat';
@@ -41,7 +41,6 @@ const deliveryLabels = { routing: 'Nachricht gespeichert', replanning: 'Neuplanu
 const stageLabels: Record<string, string> = { naming: 'Benennung', knowledge: 'Fachwissen', exploring: 'Erkundung', planning: 'Ablaufplanung', validating: 'Prüfung', revising: 'Überarbeitung', duplicates: 'Dublettensuche', wiring: 'Technische Vorbereitung', running: 'Testlauf', reuse: 'Wiederverwendung' };
 const sourceKindLabels = { knowledge: 'Fachwissen', scenario: 'Testfall', definition: 'Baustein', 'portal-evidence': 'Browsernachweis' } as const;
 type PublicDetail = { type: 'reasoning'|'message'|'validation'|'result'; label: string; data?: unknown };
-const detailTypeLabels: Record<PublicDetail['type'], string> = { reasoning: 'Reasoning-Zusammenfassung', message: 'Agentenausgabe', validation: 'Automatisierte Prüfung', result: 'Ergebnis' };
 function sourceHref(source: NonNullable<TestingChatEntry['sources']>[number]) {
   if (source.kind === 'knowledge') return `/testing/knowledge/${encodeURIComponent(source.ref)}`;
   if (source.kind === 'definition') return `/testing/library/${encodeURIComponent(source.ref)}`;
@@ -70,38 +69,81 @@ function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails
 const taskStatusLabels: Record<PublicTask['status'], string> = { not_started: 'Eingereiht', queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', blocked: 'Blockiert', cancelled: 'Abgebrochen' };
 function taskStateLabel(task: PublicTask, awaitsAnswer = false) { return task.activityState === 'waiting' ? awaitsAnswer ? 'Wartet auf Antwort' : 'Wartet auf Unterauftrag' : task.activityState === 'attention' ? 'Eingabe nötig' : taskStatusLabels[task.status]; }
 const detailKeyLabels: Record<string, string> = { summary: 'Zusammenfassung', valid: 'Gültig', errors: 'Fehler', correction: 'Korrektur', attempt: 'Versuch', facts: 'Fakten', title: 'Titel', explanation: 'Begründung', status: 'Status', changes: 'Änderungen', result: 'Resultat' };
+function detailKeyLabel(key: string) { return detailKeyLabels[key] ?? key.replace(/([a-zäöü])([A-ZÄÖÜ])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, value => value.toLocaleUpperCase('de-DE')); }
+function hasDetailValue(value: unknown) { return value != null && value !== '' && (!Array.isArray(value) || value.length > 0) && (typeof value !== 'object' || Array.isArray(value) || Object.keys(value as object).length > 0); }
+function InlineMarkdown({ text }: { text: string }) {
+  const parts = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g);
+  return <>{parts.map((part, index) => part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : <Fragment key={index}>{part}</Fragment>)}</>;
+}
+function Markdown({ children }: { children: string }) {
+  const blocks: ReactNode[] = [];
+  const lines = children.replace(/\r/g, '').split('\n');
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (line.startsWith('```')) { const code: string[] = []; index += 1; while (index < lines.length && !lines[index].startsWith('```')) code.push(lines[index++]); index += index < lines.length ? 1 : 0; blocks.push(<pre key={blocks.length}><code>{code.join('\n')}</code></pre>); continue; }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) { const Tag = `h${Math.min(heading[1].length + 2, 6)}` as 'h3'; blocks.push(<Tag key={blocks.length}><InlineMarkdown text={heading[2]}/></Tag>); index += 1; continue; }
+    if (/^[-*]\s+/.test(line)) { const items: string[] = []; while (index < lines.length && /^[-*]\s+/.test(lines[index])) items.push(lines[index++].replace(/^[-*]\s+/, '')); blocks.push(<ul key={blocks.length}>{items.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item}/></li>)}</ul>); continue; }
+    if (/^\d+\.\s+/.test(line)) { const items: string[] = []; while (index < lines.length && /^\d+\.\s+/.test(lines[index])) items.push(lines[index++].replace(/^\d+\.\s+/, '')); blocks.push(<ol key={blocks.length}>{items.map((item, itemIndex) => <li key={itemIndex}><InlineMarkdown text={item}/></li>)}</ol>); continue; }
+    if (!line.trim()) { index += 1; continue; }
+    const paragraph = [line]; index += 1; while (index < lines.length && lines[index].trim() && !/^(?:```|#{1,4}\s+|[-*]\s+|\d+\.\s+)/.test(lines[index])) paragraph.push(lines[index++]);
+    blocks.push(<p key={blocks.length}><InlineMarkdown text={paragraph.join('\n')}/></p>);
+  }
+  return <div className="tc-markdown">{blocks}</div>;
+}
 function DetailValue({ value }: { value: unknown }) {
   if (value == null) return null;
   if (Array.isArray(value)) return <ol className="tc-detail-data">{value.map((item, index) => <li key={index}><DetailValue value={item}/></li>)}</ol>;
-  if (typeof value === 'object') return <dl className="tc-detail-data">{Object.entries(value as Record<string, unknown>).map(([key, item]) => <div key={key}><dt>{detailKeyLabels[key] ?? key}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>;
+  if (typeof value === 'object') return <dl className="tc-detail-data">{Object.entries(value as Record<string, unknown>).filter(([, item]) => hasDetailValue(item)).map(([key, item]) => <div key={key}><dt>{detailKeyLabel(key)}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>;
   if (typeof value === 'boolean') return <span>{value ? 'Ja' : 'Nein'}</span>;
-  return <span>{String(value)}</span>;
+  return typeof value === 'string' ? <Markdown>{value}</Markdown> : <span>{String(value)}</span>;
 }
 function DetailData({ value }: { value: unknown }) {
   if (!value || Array.isArray(value) || typeof value !== 'object') return <DetailValue value={value}/>;
   const entries = Object.entries(value as Record<string, unknown>);
-  const readable = entries.filter(([key]) => key in detailKeyLabels);
-  const technical = entries.filter(([key]) => !(key in detailKeyLabels));
-  return <>{!!readable.length && <dl className="tc-detail-data">{readable.map(([key, item]) => <div key={key}><dt>{detailKeyLabels[key]}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>}{!!technical.length && <details className="tc-technical-data"><summary>Technische Originaldaten</summary><pre>{JSON.stringify(Object.fromEntries(technical), null, 2)}</pre></details>}</>;
+  const readable = entries.filter(([, item]) => hasDetailValue(item));
+  return <>{!!readable.length && <dl className="tc-detail-data">{readable.map(([key, item]) => <div key={key}><dt>{detailKeyLabel(key)}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>}{!!entries.length && <details className="tc-technical-data"><summary>Original vollständig anzeigen</summary><pre>{JSON.stringify(value, null, 2)}</pre></details>}</>;
 }
 function DetailReport({ detail, message }: { detail?: PublicDetail; message?: string }) {
   if (!detail) return null;
-  const category = detailTypeLabels[detail.type];
-  const synonymousReasoningLabel = detail.type === 'reasoning' && /^(?:begründungs|reasoning)[ -]?zusammenfassung$/i.test(detail.label);
-  return <section className={`tc-detail-report is-${detail.type}`}><small>{category}</small>{detail.label !== category && !synonymousReasoningLabel && <h4>{detail.label}</h4>}{message && <p>{message}</p>}<DetailData value={detail.data}/></section>;
+  const dataSummary = detail.data && typeof detail.data === 'object' && !Array.isArray(detail.data) ? (detail.data as Record<string, unknown>).summary : undefined;
+  const placeholder = /^(?:Korrigiert(?:e|er|es|en)?\s+)?(?:Agentenantwort|Agentenentwurf|Technischer Agentenplan|Agentenausgabe)(?:,|\s).*noch nicht geprüft\.?$/i;
+  const showMessage = !!message && message.trim() !== String(dataSummary ?? '').trim() && !placeholder.test(message.trim());
+  return <section className={`tc-detail-report is-${detail.type}`}>{showMessage && <Markdown>{message}</Markdown>}<DetailData value={detail.data}/></section>;
+}
+function simpleNamingData(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const data = value as Record<string, unknown>;
+  if (Object.keys(data).some(key => !['title', 'summary', 'facts'].includes(key)) || typeof data.summary !== 'string' || !data.summary.trim() || (data.title != null && typeof data.title !== 'string') || (data.facts != null && (!Array.isArray(data.facts) || data.facts.length))) return;
+  return { summary: data.summary.trim(), title: typeof data.title === 'string' ? data.title.trim() : undefined };
+}
+function sameResponse(candidate: PublicDetail, result: PublicDetail) {
+  if (JSON.stringify(candidate.data) === JSON.stringify(result.data)) return true;
+  const candidateNaming = simpleNamingData(candidate.data);
+  const resultNaming = simpleNamingData(result.data);
+  return !!candidateNaming && !!resultNaming && candidateNaming.summary === resultNaming.summary && (!resultNaming.title || candidateNaming.title === resultNaming.title);
 }
 function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void }) {
+  const hiddenCandidates = new Set<string>();
+  const replacementData = new Map<string, unknown>();
+  task.publicDetails.forEach((item, index) => {
+    if (item.detail?.type !== 'result') return;
+    const candidate = [...task.publicDetails.slice(0, index)].reverse().find(previous => previous.detail?.type === 'message' && sameResponse(previous.detail as PublicDetail, item.detail as PublicDetail));
+    if (!candidate) return;
+    hiddenCandidates.add(candidate.id);
+    if (candidate.detail?.data && typeof candidate.detail.data === 'object' && item.detail.data && typeof item.detail.data === 'object') replacementData.set(item.id, { ...(candidate.detail.data as Record<string, unknown>), ...(item.detail.data as Record<string, unknown>) });
+  });
+  const visibleDetails = task.publicDetails.filter(item => !hiddenCandidates.has(item.id));
   return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog tc-task-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-task-dialog-title"><header><div><small>AUFGABENDETAILS</small><h2 id="tc-task-dialog-title">{task.purpose}</h2></div><button aria-label="Aufgabendetails schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
     <dl><div><dt>Agent</dt><dd>{task.agent.name}</dd></div><div><dt>Status</dt><dd>{taskStatusLabels[task.status]}</dd></div>{task.stage && <div><dt>Arbeitsschritt</dt><dd>{stageLabels[task.stage] ?? task.stage}</dd></div>}</dl>
-    {!task.publicDetails.some(item => item.detail?.type === 'reasoning') && <p className="tc-reasoning-empty">{task.status === 'running' ? 'Bisher liegt für diesen Auftrag keine Reasoning-Zusammenfassung vor.' : 'Für diesen Auftrag liegt keine Reasoning-Zusammenfassung vor.'}</p>}
-    <h3>Öffentliche Meldungen</h3>{task.publicDetails.length ? <ol className="tc-task-events">{task.publicDetails.map(item => { const detail = item.detail as PublicDetail | undefined; return <li key={item.id} className={`is-${item.kind}`}><time>{formatTime(item.at)}</time><div>{detail ? <DetailReport detail={detail} message={item.message}/> : <p>{item.message}</p>}{!!item.sources?.length && <ul className="tc-event-sources">{item.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer">{source.label}</a> : source.label}<small>{sourceKindLabels[source.kind]}</small></li>; })}</ul>}</div></li>; })}</ol> : <p className="tc-muted-copy">Noch keine öffentliche Meldung.</p>}
+    {visibleDetails.length ? <><ol className="tc-task-events">{visibleDetails.map(item => { const detail = item.detail as PublicDetail | undefined; const renderedDetail = detail && replacementData.has(item.id) ? { ...detail, data: replacementData.get(item.id) } : detail; return <li key={item.id} className={`is-${item.kind} ${detail?.type === 'result' ? 'is-final' : ''}`}><time>{formatTime(item.at)}</time><div>{renderedDetail ? <DetailReport detail={renderedDetail} message={item.message}/> : <Markdown>{item.message}</Markdown>}{!!item.sources?.length && <ul className="tc-event-sources">{item.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer">{source.label}</a> : source.label}<small>{sourceKindLabels[source.kind]}</small></li>; })}</ul>}</div></li>; })}</ol>{hiddenCandidates.size > 0 && <details className="tc-technical-data tc-event-archive"><summary>Alle ursprünglichen Ereignisse anzeigen</summary><pre>{JSON.stringify(task.publicDetails, null, 2)}</pre></details>}</> : <p className="tc-muted-copy">Noch keine Ausgabe.</p>}
   </div></section></div>;
 }
 
 function TaskCard({ task, awaitsAnswer, dependency, onDetails }: { task: PublicTask; awaitsAnswer: boolean; dependency?: PublicTask; onDetails: (task: PublicTask) => void }) {
   const style = { '--agent-color': task.agent.color } as CSSProperties;
   const stateLabel = taskStateLabel(task, awaitsAnswer);
-  const compact = !awaitsAnswer && ['waiting', 'not_started', 'blocked'].includes(task.activityState);
+  const compact = !awaitsAnswer && (['waiting', 'not_started'].includes(task.activityState) || task.activityState === 'blocked' && !!dependency);
   if (compact) {
     const relation = task.activityState === 'blocked' ? 'Blockiert durch' : task.activityState === 'waiting' ? 'Wartet auf' : 'Eingereiht';
     return <article className="tc-queued-row" style={style} data-task-id={task.id} data-status={task.status} data-activity={task.activityState} aria-label={`${task.purpose}, ${stateLabel}`}>
@@ -112,8 +154,21 @@ function TaskCard({ task, awaitsAnswer, dependency, onDetails }: { task: PublicT
   }
   return <button className="tc-task-card" style={style} data-task-id={task.id} data-status={task.status} data-activity={task.activityState} onClick={() => onDetails(task)} aria-label={`${task.purpose}, ${stateLabel}, Details öffnen`}>
     <span className="tc-task-state" aria-hidden="true">{task.status === 'completed' ? <Check size={14}/> : task.activityState === 'working' ? <LoaderCircle size={15}/> : task.status === 'failed' ? <X size={14}/> : <span/>}</span>
-    <span className="tc-task-copy"><strong>{task.purpose}</strong><small><i/>{task.agent.name} · {stateLabel}</small></span><ChevronRight size={15}/>
+    <span className="tc-task-copy"><strong>{task.purpose}</strong><small><i/>{task.agent.name} · {stateLabel}</small><TaskMetrics task={task}/></span><ChevronRight size={15}/>
   </button>;
+}
+
+type TaskWithMetrics = PublicTask & { metrics?: { elapsedMs?: number; durationMs?: number; requestCount?: number; inputTokens?: number; outputTokens?: number; totalTokens?: number } };
+function formatDuration(value: number) { const seconds = Math.max(0, Math.round(value / 1000)); return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')} min`; }
+function TaskMetrics({ task }: { task: PublicTask }) {
+  const metrics = (task as TaskWithMetrics).metrics;
+  const [, tick] = useState(0);
+  useEffect(() => { if (task.status !== 'running' || !metrics) return; const timer = window.setInterval(() => tick(value => value + 1), 1000); return () => window.clearInterval(timer); }, [task.status, metrics]);
+  if (!metrics) return null;
+  const elapsed = metrics.elapsedMs ?? metrics.durationMs;
+  const tokens = metrics.totalTokens ?? ((metrics.inputTokens ?? 0) + (metrics.outputTokens ?? 0) || undefined);
+  const visibleElapsed = elapsed == null ? undefined : task.status === 'running' ? Math.max(elapsed, Date.now() - new Date(task.startedAt).getTime()) : elapsed;
+  return <span className="tc-task-metrics">{visibleElapsed != null && <span>{formatDuration(visibleElapsed)}</span>}{metrics.requestCount != null && <span>{metrics.requestCount} Modellaufrufe</span>}{tokens != null && <span>{tokens.toLocaleString('de-DE')} Tokens</span>}</span>;
 }
 
 function QuestionPanel({ conversationId, questions, tasks, busy, onSubmit }: { conversationId: string; questions: PublicQuestion[]; tasks: PublicTask[]; busy: boolean; onSubmit: (answers: { questionId: string; answer: string }[]) => Promise<boolean> }) {
@@ -162,7 +217,8 @@ function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, on
   const questions = snapshot.questions ?? [];
   const hasOpenQuestions = questions.some(question => question.status === 'open' && question.kind === 'clarification');
   const sendCommand: TestingChatCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
-  const nextActions = (['prepare'] as TestingChatCommand[]).filter(command => allowed.has(command));
+  const technicalBlocked = tasks.flatMap(task => task.publicDetails.map(item => item.detail?.data)).find(data => data && typeof data === 'object' && (data as Record<string, unknown>).technicalStatus === 'blocked') as Record<string, unknown> | undefined;
+  const nextActions = (['prepare'] as TestingChatCommand[]).filter(command => allowed.has(command) && !(command === 'prepare' && (technicalBlocked || snapshot.technicalReview?.issues.length)));
   const placeholder = snapshot.scenario ? 'Weitere Änderung beschreiben …' : 'Nachricht an Folio …';
   const visibleTimeline = snapshot.timeline.filter(belongsInConversation);
   const questionJobIds = new Set(questions.filter(question => question.status === 'open').map(question => question.jobId));
@@ -173,6 +229,7 @@ function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, on
     <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={entry => setDetailId(entry.id)}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} dependency={tasks.find(task => task.id === item.task.waitingForJobId || task.id === item.task.blockedByJobId)} onDetails={task => setTaskDetailId(task.id)}/>)}</div>
       {!!queuedTasks.length && <section className="tc-queue" aria-labelledby="tc-queue-title"><header><strong id="tc-queue-title">Als Nächstes</strong><span>{queuedTasks.length}</span></header>{queuedTasks.map(task => <TaskCard key={`queue:${task.id}`} task={task} awaitsAnswer={false} dependency={tasks.find(item => item.id === task.waitingForJobId || item.id === task.blockedByJobId)} onDetails={item => setTaskDetailId(item.id)}/>)}</section>}
       <QuestionPanel conversationId={snapshot.conversation.id} questions={questions} tasks={tasks} busy={busy} onSubmit={onAnswers}/>
+      {(technicalBlocked || snapshot.technicalReview?.issues.length) && <section className="tc-technical-blocked"><strong>Technische Vorbereitung blockiert</strong><DetailValue value={technicalBlocked?.nextAction ?? snapshot.technicalReview?.issues ?? technicalBlocked}/></section>}
       {snapshot.proposed && <ProposalCard snapshot={snapshot} busy={busy} onCommand={onCommand}/>}<div ref={end}/>
     </div></div>
     {hasOpenQuestions && !showAlternativeComposer ? <footer className="tc-alternative-toggle"><button onClick={() => setShowAlternativeComposer(true)}><Plus size={14}/>Andere Änderung schreiben</button></footer> : <footer className="tc-composer">
@@ -196,7 +253,21 @@ function ProposalCard({ snapshot, busy, onCommand }: { snapshot: TestingChatSnap
   </article>;
 }
 
-function FlowEditor({ snapshot, catalog, model, busy, onSave, onCommand }: { snapshot: ChatSnapshot; catalog: TestingCatalog; model: string; busy: boolean; onSave: (scenario: TestingScenario) => void; onCommand: (command: TestingChatCommand) => void }) {
+function FlowComposer({ snapshot, model, text, busy, onText, onModel, onSend }: { snapshot: ChatSnapshot; model: string; text: string; busy: boolean; onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void }) {
+  const [focused, setFocused] = useState(false);
+  const allowed = new Set(snapshot.allowedCommands);
+  const sendCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
+  const expanded = focused || !!text;
+  const activeTask = snapshot.tasks?.find(task => task.id === snapshot.conversation.activeJobId);
+  const latestOutput = snapshot.tasks?.flatMap(task => task.publicDetails).filter(item => item.detail?.type === 'result' || item.detail?.type === 'message').at(-1);
+  return <aside className={`tc-flow-composer ${expanded ? 'is-expanded' : ''}`} aria-label="Ablauf-Chat">
+    {expanded && (activeTask || latestOutput) && <div className="tc-flow-context">{activeTask ? <span><i/> {activeTask.purpose}</span> : latestOutput ? <span>{latestOutput.message}</span> : null}<button onMouseDown={event => event.preventDefault()} onClick={() => navigate(snapshot.conversation.id, 'chat')}>Unterhaltung öffnen</button></div>}
+    <textarea aria-label="Nachricht zum Ablauf" rows={expanded ? 3 : 1} value={text} onFocus={() => setFocused(true)} onBlur={() => { if (!text) setFocused(false); }} onChange={event => onText(event.target.value)} placeholder="Änderung zum Ablauf …" disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
+    <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" aria-label="Nachricht zum Ablauf senden" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onMouseDown={event => event.preventDefault()} onClick={onSend}><Send size={15}/><span>Senden</span></button></div>
+  </aside>;
+}
+
+function FlowEditor({ snapshot, catalog, model, text, busy, onText, onModel, onSend, onSave, onCommand }: { snapshot: ChatSnapshot; catalog: TestingCatalog; model: string; text: string; busy: boolean; onText: (value: string) => void; onModel: (value: string) => void; onSend: (scenario?: TestingScenario) => void; onSave: (scenario: TestingScenario) => void; onCommand: (command: TestingChatCommand) => void }) {
   const preview = snapshot.validatedFlowPreview;
   const effectiveCatalog = useMemo(() => preview ? { ...catalog, definitions: [...catalog.definitions, ...(preview.newDefinitions ?? [])], knowledge: [...catalog.knowledge, ...(preview.newKnowledge ?? [])] } : catalog, [catalog, preview]);
   const previewScenario = preview ? { id: `preview-${preview.jobId}`, title: preview.title, intent: preview.expectedOutcome, revision: preview.scenarioRevision ?? 0, blocks: preview.blocks, expectedOutcome: preview.expectedOutcome, knowledgeRefs: preview.knowledgeRefs, createdAt: '', updatedAt: '', source: 'agent' as const } : undefined;
@@ -217,12 +288,13 @@ function FlowEditor({ snapshot, catalog, model, busy, onSave, onCommand }: { sna
   const patchBlock = (change: (block: typeof entries[number]['block']) => typeof entries[number]['block'] | null) => { if (!draft || !selected) return; setDraft({ ...draft, blocks: updateBlockAtPath(draft.blocks, selected, catalog, change) }); };
   const move = (direction: number) => { if (!draft || !selected || selected.includes('/')) return; const index = draft.blocks.findIndex(block => block.id === selected); const target = index + direction; if (index < 0 || target < 0 || target >= draft.blocks.length) return; const blocks = [...draft.blocks]; [blocks[index], blocks[target]] = [blocks[target], blocks[index]]; setDraft({ ...draft, blocks }); };
   const duplicate = () => { if (!draft || !selected) return; const segments = selected.split('/'); const visit = (blocks: TestingBlockInstance[], depth = 0): TestingBlockInstance[] => blocks.flatMap(block => { if (block.id !== segments[depth]) return [block]; if (depth === segments.length - 1) return [block, { ...structuredClone(block), id: `${block.id}-${crypto.randomUUID().slice(0, 6)}` }]; return [{ ...block, children: visit(currentTestingChildren(block, effectiveCatalog), depth + 1) }]; }); setDraft({ ...draft, blocks: visit(draft.blocks) }); };
-  if (!draft) return <div className="tc-empty"><Workflow size={28}/><h2>Noch kein Ablauf</h2><p>Beschreibe den Testfall in der Unterhaltung. Der bestätigte Entwurf erscheint hier.</p></div>;
+  if (!draft) return <section className="tc-flow-pane"><div className="tc-empty"><Workflow size={28}/><h2>Noch kein Ablauf</h2><p>Beschreibe den Testfall. Der bestätigte Entwurf erscheint hier.</p></div><FlowComposer snapshot={snapshot} model={model} text={text} busy={busy} onText={onText} onModel={onModel} onSend={() => onSend()}/></section>;
   return <section className="tc-flow-pane testing-app">
     <header className="tc-pane-head"><div><small>{snapshot.proposed ? 'ÄNDERUNGSVORSCHLAG' : isPreview ? preview?.status === 'ready' ? 'VALIDIERTE VORSCHAU' : 'VORLÄUFIGE VORSCHAU' : 'BESTÄTIGTER ABLAUF'}</small><h2>{draft.title}</h2><p>{conflict || (isPreview ? `${draft.expectedOutcome}${draft.knowledgeRefs.length ? ` · ${draft.knowledgeRefs.length} fachliche Quellen` : ''}` : agentOwns ? snapshot.proposed ? 'Prüfe den Vorschlag in der Unterhaltung.' : 'Der Agent bearbeitet diesen Entwurf. Die Arbeitsfläche ist vorübergehend schreibgeschützt.' : dirty ? 'Ungespeicherte manuelle Änderungen' : `Revision ${draft.revision}`)}</p></div><div>{dirty && !agentOwns && <button className="tc-primary" disabled={busy || !!conflict} onClick={() => onSave(draft)}><Save size={15}/>Revision speichern</button>}{snapshot.allowedCommands.includes('approve') && !dirty && <button className="tc-primary" disabled={busy} onClick={() => onCommand('approve')}><Check size={15}/>Freigeben</button>}</div></header>
     <div className="tc-flow-grid"><div className="tc-scratch-card"><div className="tc-canvas-tools"><select aria-label="Baustein hinzufügen" value={definitionId} disabled={agentOwns} onChange={event => setDefinitionId(event.target.value)}><option value="">Baustein auswählen …</option>{effectiveCatalog.definitions.filter((definition, index, all) => !all.slice(index + 1).some(item => item.id === definition.id)).map(definition => <option key={`${definition.id}@${definition.version}`} value={definition.id}>{definition.name}</option>)}</select><button disabled={agentOwns || !definitionId} onClick={() => { const definition = effectiveCatalog.definitions.filter(item => item.id === definitionId).at(-1); if (!definition) return; setDraft({ ...draft, blocks: [...draft.blocks, newInstance(definition, draft.blocks, effectiveCatalog)] }); setDefinitionId(''); }}><Plus size={14}/>Hinzufügen</button><a href={`/testing/editor/${encodeURIComponent(draft.id)}`}>Erweiterte Bearbeitung <ExternalLink size={13}/></a></div><Suspense fallback={<p className="tc-loading">Arbeitsfläche wird geladen …</p>}><ScratchWorkspace ref={scratch} blocks={draft.blocks} catalog={effectiveCatalog} parameters={draft.parameters} layout={layout} selected={selected} readOnly={agentOwns} onChange={blocks => setDraft(current => current ? { ...current, blocks } : current)} onSelect={setSelected} onLayout={value => setLayout(current => { const next = { id: draft.id, scenarioId: draft.id, collapsed: [], ...current, ...value }; localStorage.setItem(layoutKey(draft.id), JSON.stringify(next)); return next; })}/></Suspense></div>
       {entry && <Inspector entry={entry} entries={entries} catalog={effectiveCatalog} onClose={() => setSelected(undefined)} onChange={patchBlock} onValue={(key, value) => patchBlock(block => ({ ...block, inputs: { ...block.inputs, [key]: value } }))} onDefinition={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onKnowledge={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onOverride={text => { navigate(snapshot.conversation.id, 'chat'); sessionStorage.setItem(`folio-testing-chat-prefill:${snapshot.conversation.id}`, text); }} busy={agentOwns} onMove={move} onDuplicate={duplicate} scenarioParameters={draft.parameters}/>}</div>
     <section className="tc-matrix"><header><div><small>VARIANTEN</small><h3>Testmatrix</h3></div><span>{draft.matrix?.rows.length ?? 0} Fälle</span></header><TestMatrix scenario={draft} catalog={effectiveCatalog} disabled={agentOwns} onChange={matrix => setDraft({ ...draft, matrix })}/></section>
+    <FlowComposer snapshot={snapshot} model={model} text={text} busy={busy} onText={onText} onModel={onModel} onSend={() => onSend(draft)}/>
   </section>;
 }
 
@@ -264,8 +336,26 @@ export function TestingChatApp() {
   async function create(scenarioId: string) { setBusy(true); setError(''); try { const next = await chatApi.create({ scenarioId, model, requestId: crypto.randomUUID() }); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
   async function createFromMessage() { const message = text.trim(); if (!message || busy) return; setBusy(true); setError(''); try { const next = await chatApi.create({ message, model, requestId: crypto.randomUUID() }); setText(''); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
   async function save(scenario: TestingScenario) { if (!snapshot) return; if (await mutate('save', { scenario, expectedRevision: scenario.revision })) localStorage.removeItem(draftKey(scenario.id)); }
+  async function sendFromFlow(scenario?: TestingScenario) {
+    const message = text.trim();
+    if (!message || !snapshot || busy) return;
+    const dirty = !!scenario && !!snapshot.scenario && (JSON.stringify(scenario.blocks) !== JSON.stringify(snapshot.scenario.blocks) || JSON.stringify(scenario.matrix) !== JSON.stringify(snapshot.scenario.matrix));
+    if (!dirty) { await send(); return; }
+    setBusy(true); setError('');
+    try {
+      const guard = snapshot.scenarioState ? { expectedScenarioRevision: snapshot.scenarioState.revision, fingerprint: snapshot.scenarioState.fingerprint } : {};
+      const saved = await chatApi.command(snapshot.conversation.id, 'save', snapshot.conversation.revision, { ...guard, scenario, expectedRevision: scenario!.revision });
+      localStorage.removeItem(draftKey(scenario!.id)); revision.current = saved.conversation.revision; setSnapshot(saved);
+      const allowed = new Set(saved.allowedCommands);
+      const command: TestingChatCommand = saved.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore';
+      const nextGuard = saved.scenarioState ? { expectedScenarioRevision: saved.scenarioState.revision, fingerprint: saved.scenarioState.fingerprint } : {};
+      const next = await chatApi.command(saved.conversation.id, command, saved.conversation.revision, { ...nextGuard, message, text: message, model });
+      setText(''); revision.current = next.conversation.revision; setSnapshot(next);
+    } catch (cause) { setError(messageOf(cause)); if ((cause as { status?: number }).status === 409) await load(snapshot.conversation.id); }
+    finally { setBusy(false); }
+  }
   const scenarioId = snapshot?.scenario?.id;
   return <AgentSettingsContext.Provider value={settings}><main className="testing-chat-app"><aside className="tc-sidebar"><a className="tc-brand" href="/testing/chat" onClick={event => { event.preventDefault(); navigate(); }}><span>F</span><strong>Folio Studio</strong></a><button className="tc-new" disabled={busy} onClick={() => navigate()}><Plus size={16}/>Neuer Testfall</button><nav aria-label="Testfälle">{bootstrap?.scenarios.map(scenario => <button key={scenario.id} className={scenario.id === scenarioId ? 'active' : ''} onClick={() => void create(scenario.id)}><span>{scenario.title}</span><small>Revision {scenario.revision}</small><ChevronRight size={14}/></button>)}</nav><a className="tc-classic" href="/testing"><ArrowLeft size={14}/>Klassische Ansicht</a></aside>
     <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
-      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })} onReviewFlow={() => navigate(snapshot.conversation.id, 'flow')}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
+      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })} onReviewFlow={() => navigate(snapshot.conversation.id, 'flow')}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} text={text} busy={busy} onText={setText} onModel={setModel} onSend={scenario => void sendFromFlow(scenario)} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
 }

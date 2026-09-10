@@ -180,7 +180,7 @@ export interface TestingScenarioLifecycle {
   nextAction:'plan'|'wait'|'approve'|'review'|'technical'|'run'|'retry-business'|'retry-technical'|'inspect-run'; message:string;
 }
 export interface TestingAgentEvent {
-  id:string;at:string;kind:'status'|'message'|'tool'|'error';message:string;
+  id:string;at:string;kind:'status'|'message'|'tool'|'error'|'metrics';message:string;
   /** Ausschließlich für die Oberfläche freigegebener Kontext, keine Prompts oder internen Gedankengänge. */
   context?:{jobId:string;phase:TestingAgentPhase;taskLabel:string;modelId:string;modelLabel?:string;provider?:TestingProvider;stage?:TestingAgentStage};
   sources?:{label:string;kind:'knowledge'|'scenario'|'definition'|'portal-evidence';ref:string}[];
@@ -189,9 +189,14 @@ export interface TestingAgentEvent {
   publicDetail?:TestingAgentPublicDetail;
   /** Stable provider identity lets partial events be replaced instead of duplicated. */
   stream?:{providerEventId:string;status:'streaming'|'completed'};
+  /** One stable record per real CLI invocation. The terminal update replaces its start record. */
+  metrics?:Omit<TestingAgentMetrics,'elapsedMs'> & {elapsedMs?:number};
 }
 export interface TestingAgentPublicDetail {
   type:'reasoning'|'message'|'validation'|'result'; label:string; data?:unknown;
+}
+export interface TestingAgentMetrics {
+  elapsedMs:number; requestCount:number; inputTokens?:number; cachedInputTokens?:number; outputTokens?:number; totalTokens?:number;
 }
 export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -199,7 +204,7 @@ export interface TestingAgentJob {
   startedAt: string; finishedAt?: string; events: TestingAgentEvent[]; error?: string;
   result?: unknown; artifactDirectory?: string; agentConfig?: TestingAgentConfiguration;
   parentJobId?:string; childJobIds?:string[]; stage?:TestingAgentStage; runId?:string;
-  termination?:TestingAgentTermination; progress?:TestingAgentProgress; workStages?:TestingAgentWorkStage[];
+  termination?:TestingAgentTermination; progress?:TestingAgentProgress; workStages?:TestingAgentWorkStage[]; metrics?:TestingAgentMetrics;
 }
 export interface TestingStepResult {
   id: string; instanceId: string; path: string; label: string; status: 'running' | 'passed' | 'failed' | 'skipped';

@@ -11,6 +11,7 @@ const eventPresentations: Record<TestingAgentEvent['kind'], EventPresentation> =
   message: { label: 'Erläuterung', Icon: MessageSquareText },
   tool: { label: 'Werkzeug', Icon: Wrench },
   error: { label: 'Fehler', Icon: CircleX },
+  metrics: { label: 'Messwerte', Icon: Info },
 };
 const timeFormatter = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 

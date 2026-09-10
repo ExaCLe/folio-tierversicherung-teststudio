@@ -11,6 +11,8 @@ process.env.FOLIO_AGENT_ARTIFACTS_ROOT=join(temporary,'agents');
 const {db}=await import('../store');
 const chat=await import('./chat');
 const orchestrator=await import('./agents/orchestrator');
+const {getTestingCatalog}=await import('./catalog');
+const {testingFingerprint}=await import('./compiler');
 after(()=>rmSync(temporary,{recursive:true,force:true}));
 
 const at='2026-09-10T12:00:00.000Z';
@@ -148,6 +150,40 @@ test('öffentliche Provider-Aktualisierungen ersetzen dieselbe stabile Aktivitä
   orchestrator.addTestingAgentEvent(job.id,{id:'provider-summary',at:'2026-09-10T12:00:01.000Z',kind:'message',message:'Die Rollenregel gilt für Vermittler und Innendienst.',publicDetail:{type:'reasoning',label:'Überlegung'},stream:{providerEventId:'provider-17',status:'completed'}});
   unsubscribe();const stored=orchestrator.getTestingJob(job.id).events.filter(event=>event.stream?.providerEventId==='provider-17'),snapshot=chat.getTestingChatSnapshot(chatId),details=snapshot.tasks.find(item=>item.id===job.id)!.publicDetails.filter(item=>item.id==='provider-summary');
   assert.equal(stored.length,1);assert.equal(stored[0].at,at);assert.equal(stored[0].message,'Die Rollenregel gilt für Vermittler und Innendienst.');assert.equal(details.length,1);assert.equal(details[0].detail?.type,'reasoning');assert.equal(details[0].context?.jobId,job.id);assert.equal(snapshot.timeline.filter(entry=>entry.id===`${job.id}:provider-summary`).length,0);assert.equal(streamed.filter(event=>event.type==='entry'&&(event as any).entry.id===`${job.id}:provider-summary`).length,0);assert(streamed.filter(event=>event.type==='state').length>=2);
+});
+
+test('Aufrufmetriken bleiben trotz gekürzter Aktivität vollständig und erscheinen im Chat-Snapshot',()=>{
+  const scenarioId='metrics-scenario',chatId='metrics-chat';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation(chatId,scenarioId);
+  const job:TestingAgentJob={id:'metrics-job',phase:'technical',model:'luna',status:'running',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,events:[],metrics:{elapsedMs:0,requestCount:0}};
+  db.upsert('testingAgentJobs',job);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),activeJobId:job.id,jobIds:[job.id]});
+  orchestrator.addTestingAgentEvent(job.id,{id:'call-1:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,inputTokens:10,outputTokens:2,totalTokens:12}});
+  for(let index=0;index<305;index++)orchestrator.addTestingAgentEvent(job.id,{id:`tool-${index}`,at,kind:'tool',message:`Werkzeug ${index}`});
+  orchestrator.addTestingAgentEvent(job.id,{id:'call-2:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,inputTokens:20,cachedInputTokens:5,outputTokens:3,totalTokens:23}});
+  const saved=orchestrator.getTestingJob(job.id),task=chat.getTestingChatSnapshot(chatId).tasks.find(item=>item.id===job.id)!;
+  assert.equal(saved.events.filter(event=>event.kind==='metrics').length,2);assert.deepEqual(saved.metrics,{elapsedMs:0,requestCount:2,inputTokens:30,cachedInputTokens:5,outputTokens:5,totalTokens:35});assert.deepEqual(task.metrics,saved.metrics);
+});
+
+test('Nur der neueste technische Versuch bestimmt den offenen Prüfbedarf',()=>{
+  const scenarioId='technical-retry-scenario',chatId='technical-retry-chat',current=scenario(scenarioId,[]),fingerprint=testingFingerprint(current,getTestingCatalog());db.upsert('testingScenarios',current);conversation(chatId,scenarioId);
+  const common={phase:'technical' as const,model:'luna',status:'completed' as const,prompt:'Fixture',scenarioId,scenarioRevision:1,fingerprint,events:[],finishedAt:'2026-09-10T13:00:02.000Z'};
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...common,id:'technical-old-blocked',startedAt:'2026-09-10T13:00:00.000Z',result:{technicalStatus:'blocked',repairContext:{issues:[{summary:'Alter Prüfbedarf'}]}}});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{...common,id:'technical-new-prepared',startedAt:'2026-09-10T13:00:01.000Z',result:{prepared:true}});
+  db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),jobIds:['technical-old-blocked','technical-new-prepared']});
+  assert.equal(chat.getTestingChatSnapshot(chatId).technicalReview,undefined);
+});
+
+test('Historische Fehler und exakt kopierte Dublettenbegründungen werden nur in der Ansicht bereinigt',()=>{
+  const scenarioId='historical-projection-scenario',chatId='historical-projection-chat',current=scenario(scenarioId,[]);db.upsert('testingScenarios',current);conversation(chatId,scenarioId);
+  const duplicateExplanation='Kein vorhandener Baustein ist fachlich gleichwertig.',technicalExplanation='Die UI-Berechtigung ist technisch geprüft.',error='Die strukturierte Antwort verletzt den Ausgabevertrag.';
+  const parent:TestingAgentJob={id:'historical-technical',phase:'technical',model:'luna',status:'failed',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[],error,childJobIds:['historical-duplicates']};
+  const child:TestingAgentJob={id:'historical-duplicates',parentJobId:parent.id,phase:'duplicates',model:'luna',status:'completed',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[],result:{explanation:duplicateExplanation}};
+  db.upsert('testingAgentJobs',parent);db.upsert('testingAgentJobs',child);
+  const copied=`${technicalExplanation}\n\n${duplicateExplanation}`;
+  const summary={id:`${parent.id}:completed`,at,kind:'agent_summary' as const,message:copied,jobId:parent.id,content:{type:'validated-summary' as const,title:'Technik',summary:copied},detail:{type:'result' as const,label:'Technik',data:{summary:copied}}},eventError={id:`${parent.id}:provider-error`,at,kind:'error' as const,message:error,jobId:parent.id},terminalError={id:`${parent.id}:failed`,at,kind:'error' as const,message:error,jobId:parent.id};
+  for(const entry of [summary,eventError,terminalError])db.upsert('testingChatEntries',entry);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),jobIds:[parent.id],entryIds:[summary.id,eventError.id,terminalError.id]});
+  const snapshot=chat.getTestingChatSnapshot(chatId),visibleSummary=snapshot.timeline.find(entry=>entry.kind==='agent_summary')!;
+  assert.equal(visibleSummary.message,technicalExplanation);assert.equal(visibleSummary.content?.summary,technicalExplanation);assert.equal((visibleSummary.detail?.data as any).summary,technicalExplanation);assert.equal(snapshot.timeline.filter(entry=>entry.kind==='error').length,1);
+  assert.equal(db.find<any>('testingChatEntries',summary.id).message,copied);assert.equal(db.find<any>('testingChatEntries',terminalError.id).message,error);
 });
 
 test('Nachricht während eines Laufs wird zuerst gespeichert und revisionstreu neu geplant',async()=>{

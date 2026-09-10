@@ -97,6 +97,13 @@ test('Providerparser ignorieren Rohdenken und ungeprüfte strukturierte Endausga
   assert.equal(withoutMessageId.length,1); assert.equal(withoutMessageId[0].id,undefined); assert.equal(withoutMessageId[0].stream,undefined);
 });
 
+test('Provider-Metriken stammen nur aus abgeschlossenen Aufrufen und lassen unbekannte Werte weg', () => {
+  assert.equal(cli.providerInvocationMetrics({type:'item.updated',usage:{input_tokens:999}}),undefined);
+  assert.deepEqual(cli.providerInvocationMetrics({type:'turn.completed',usage:{input_tokens:120,cached_input_tokens:20,output_tokens:30}}),{requestCount:1,inputTokens:120,cachedInputTokens:20,outputTokens:30,totalTokens:150});
+  assert.deepEqual(cli.providerInvocationMetrics({type:'turn.completed'}),{requestCount:1});
+  assert.deepEqual(cli.providerInvocationMetrics({type:'result',num_turns:3,usage:{input_tokens:50,cache_read_input_tokens:10,cache_creation_input_tokens:5,output_tokens:12}}),{requestCount:1,inputTokens:50,cachedInputTokens:15,outputTokens:12,totalTokens:77});
+});
+
 test('Windows startet PATH-, CMD- und PowerShell-Shims ohne Shell', { skip: process.platform !== 'win32' }, async () => {
   const shimDirectory = join(directory, 'windows-shims');
   mkdirSync(shimDirectory);

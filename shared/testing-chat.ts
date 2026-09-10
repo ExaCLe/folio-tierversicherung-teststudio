@@ -1,4 +1,4 @@
-import type { TestingAgentJob, TestingAgentPublicDetail, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
+import type { TestingAgentJob, TestingAgentMetrics, TestingAgentPublicDetail, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
 
 export type TestingChatCommand = 'message'|'explore'|'resume'|'answer'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
 export type TestingChatEntryKind = 'user'|'user_action'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
@@ -28,7 +28,7 @@ export interface TestingChatTask {
   agent:{name:string;modelId:string;provider?:'codex'|'claude';color:string};
   status:'not_started'|'queued'|'running'|'completed'|'failed'|'blocked'|'cancelled'; stage?:TestingAgentStage;
   activityState:'not_started'|'working'|'waiting'|'attention'|'done'|'failed'|'blocked'|'cancelled';
-  startedAt:string; executionAt?:string; finishedAt?:string;
+  startedAt:string; executionAt?:string; finishedAt?:string; metrics?:TestingAgentMetrics;
   /** detail is absent only on snapshots persisted by older versions. */
   publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string;detail?:TestingAgentPublicDetail;sources?:TestingChatEntry['sources'];context?:TestingChatEntry['context']}[];
 }

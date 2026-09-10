@@ -70,7 +70,7 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
     tasks: [
       { id: 'job-parent', waitingForJobId: 'job-child', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Sol', modelId: 'sol', color: '#635bff' }, status: 'queued', activityState: 'waiting', stage: 'planning', startedAt: '2026-09-10T08:07:00.000Z', publicDetails: [] },
       { id: 'job-next', purpose: 'Technische Vorbereitung', agent: { name: 'Luna', modelId: 'luna', color: '#e56b25' }, status: 'not_started', activityState: 'not_started', stage: 'wiring', startedAt: '2026-09-10T08:08:00.000Z', publicDetails: [] },
-      { id: 'job-child', parentJobId: 'job-parent', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'running', activityState: 'working', stage: 'knowledge', startedAt: '2026-09-10T08:09:00.000Z', publicDetails: [] },
+      { id: 'job-child', parentJobId: 'job-parent', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'running', activityState: 'working', stage: 'knowledge', startedAt: new Date(Date.now() - 4_000).toISOString(), metrics: { elapsedMs: 4_000, requestCount: 2, inputTokens: 1200, outputTokens: 340, totalTokens: 1540 }, publicDetails: [] },
     ],
     allowedCommands: ['message', 'cancel'],
   });
@@ -90,7 +90,9 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   expect(await queued.first().evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(await running.evaluate(element => element.getBoundingClientRect().height));
   await queued.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
-  await expect(page.getByRole('dialog')).toContainText('Bisher liegt für diesen Auftrag keine Reasoning-Zusammenfassung vor.');
+  await expect(page.getByRole('dialog')).toContainText('Noch keine Ausgabe.');
+  await expect(running).toContainText('2 Modellaufrufe');
+  await expect(running).toContainText('1.540 Tokens');
   await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
 
   const assertBottomReachable = async () => {
@@ -226,6 +228,20 @@ test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne intern
   await expect(page.getByText('Antrag und Freigabe werden fachlich geprüft.')).toBeVisible();
   await expect(page.getByLabel('Baustein hinzufügen')).toBeDisabled();
   await expect(page.locator('.blocklyText').filter({ hasText: 'Neue Direktionsfreigabe prüfen' })).toBeVisible();
+  const flowComposer = page.getByRole('textbox', { name: 'Nachricht zum Ablauf' });
+  await expect(flowComposer).toBeVisible();
+  await flowComposer.fill('Behalte meine manuelle Änderung und ergänze den Grenzwert.');
+  await expect(page.getByLabel('Ablauf-Chat').getByLabel('Modell')).toHaveValue('luna');
+  await page.setViewportSize({ width: 681, height: 930 });
+  await page.getByRole('heading', { name: 'Testmatrix' }).scrollIntoViewIfNeeded();
+  const overlayBounds = await page.getByLabel('Ablauf-Chat').evaluate(element => { const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, bottom: rect.bottom }; });
+  expect(overlayBounds.left).toBeGreaterThanOrEqual(0);
+  expect(overlayBounds.right).toBeLessThanOrEqual(681);
+  expect(overlayBounds.bottom).toBeLessThanOrEqual(930);
+  await expect(page.getByRole('heading', { name: 'Testmatrix' })).toBeVisible();
+  await page.screenshot({ path: '.local/verification/chat/flow-composer-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: 'Unterhaltung', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Separate Nachricht' })).toHaveValue('Behalte meine manuelle Änderung und ergänze den Grenzwert.');
   await page.screenshot({ path: '.local/verification/chat/agent-summary-and-preview.png', fullPage: true });
 });
 
@@ -267,8 +283,8 @@ test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zu
     status: 'running', activityState: 'working', stage: 'planning', startedAt: '2026-09-10T07:58:00.000Z', executionAt: '2026-09-10T08:03:00.000Z',
     publicDetails: [
       { id: 'reasoning', at: '2026-09-10T08:03:00.000Z', kind: 'progress', message: 'Die öffentliche Herleitung vergleicht die Versicherungssumme mit der belegten Bayern-Grenze.', detail: { type: 'reasoning', label: 'Fachliche Herleitung', data: { summary: 'In Bayern beginnt die Direktionsprüfung oberhalb von 11.000 Euro.', facts: ['Bundesland Bayern', 'Versicherungssumme 12.000 Euro'] } }, sources: [source] },
-      { id: 'answer', at: '2026-09-10T08:03:20.000Z', kind: 'progress', message: 'Der Agent lieferte einen Ablauf mit Antrag, Grenzprüfung und erwartetem Status.', detail: { type: 'message', label: 'Antwort des Fachagenten', data: { title: 'Kuhleben Bayern', result: 'Direktionsprüfung' } } },
-      { id: 'validation', at: '2026-09-10T08:03:40.000Z', kind: 'error', message: 'Der erste Entwurf enthielt einen nicht aufgelösten Ergebnisverweis.', detail: { type: 'validation', label: 'Schema- und Compilerprüfung', data: { valid: false, attempt: 1, errors: ['expectedStatus verweist auf keinen erzeugten Wert.'] } } },
+      { id: 'answer', at: '2026-09-10T08:03:20.000Z', kind: 'progress', message: 'Korrigierte Agentenantwort, noch nicht geprüft.', detail: { type: 'message', label: 'Antwort des Fachagenten', data: { title: 'Korrigierter Ablauf', summary: 'Antrag, Grenzprüfung und Statusprüfung sind vollständig.' } } },
+      { id: 'validation', at: '2026-09-10T08:03:40.000Z', kind: 'error', message: 'Der erste Entwurf enthielt einen nicht aufgelösten Ergebnisverweis.', detail: { type: 'validation', label: 'Schema- und Compilerprüfung', data: { valid: false, attempt: 1, errors: ['expectedStatus verweist auf keinen erzeugten Wert.'], correction: 'Die Statusprüfung liest jetzt proposal.status.' } } },
     ],
   };
   const queuedTask: TestingChatSnapshot['tasks'][number] = { id: 'job-technical', purpose: 'Technische Bindung vorbereiten', agent: { name: 'Luna', modelId: 'luna', provider: 'codex', color: '#e56b25' }, status: 'not_started', activityState: 'not_started', stage: 'wiring', startedAt: '2026-09-10T07:57:00.000Z', publicDetails: [] };
@@ -277,7 +293,7 @@ test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zu
     timeline: [{ id: 'request', at: '2026-09-10T08:00:00.000Z', kind: 'user', message: 'Prüfe den Bayern-Grenzwert und korrigiere den Ablauf.' }],
     tasks: [queuedTask, baseTask], allowedCommands: ['message', 'cancel'],
   });
-  const completedTask = { ...baseTask, status: 'completed' as const, activityState: 'done' as const, finishedAt: '2026-09-10T08:04:20.000Z', publicDetails: [...baseTask.publicDetails, { id: 'result', at: '2026-09-10T08:04:20.000Z', kind: 'result' as const, message: 'Der korrigierte Ablauf verwendet den erzeugten Status und ist strukturell gültig.', detail: { type: 'result' as const, label: 'Korrigierter Ablauf', data: { valid: true, correction: 'Die Statusprüfung liest jetzt proposal.status.', result: { expectedStatus: 'Direktionsprüfung', scenarioRevision: 4 } } }, sources: [source] }] };
+  const completedTask = { ...baseTask, status: 'completed' as const, activityState: 'done' as const, finishedAt: '2026-09-10T08:04:20.000Z', publicDetails: [...baseTask.publicDetails, { id: 'result', at: '2026-09-10T08:04:20.000Z', kind: 'result' as const, message: 'Der korrigierte Ablauf verwendet den erzeugten Status und ist strukturell gültig.', detail: { type: 'result' as const, label: 'Korrigierter Ablauf', data: { summary: 'Antrag, Grenzprüfung und Statusprüfung sind vollständig.', facts: [] } }, sources: [source] }] };
   const completed = { ...initial, conversation: { ...initial.conversation, revision: 12, eventSequence: 12, activeJobId: undefined }, tasks: [queuedTask, completedTask], allowedCommands: ['message', 'approve'] as TestingChatSnapshot['allowedCommands'] };
   const approvedEntry: TestingChatSnapshot['timeline'][number] = { id: 'approval', at: '2026-09-10T08:05:00.000Z', kind: 'user_action', message: 'Du hast Revision 4 fachlich freigegeben.', scenarioRevision: seed.revision };
   const approved = { ...completed, conversation: { ...completed.conversation, revision: 13, eventSequence: 13, entryIds: ['request', 'approval'] }, timeline: [...completed.timeline, approvedEntry], allowedCommands: ['message', 'prepare'] as TestingChatSnapshot['allowedCommands'] };
@@ -304,12 +320,14 @@ test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zu
   expect(await feed.locator('[data-entry-id="request"], [data-task-id="job-business"]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-entry-id') ?? node.getAttribute('data-task-id')))).toEqual(['request', 'job-business']);
   await page.locator('[data-task-id="job-business"]').click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByText('Reasoning-Zusammenfassung', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Agentenausgabe', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('Automatisierte Prüfung', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Reasoning-Zusammenfassung', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('Agentenausgabe', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('Korrigierte Agentenantwort, noch nicht geprüft.', { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText('Antrag, Grenzprüfung und Statusprüfung sind vollständig.', { exact: true })).toHaveCount(1);
+  await expect(dialog.getByText('Alle ursprünglichen Ereignisse anzeigen', { exact: true })).toBeVisible();
   await expect(dialog.getByText('KI-Prüfer', { exact: false })).toHaveCount(0);
-  await expect(dialog.getByText('Korrigierter Ablauf', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await expect(dialog.getByText('proposal.status', { exact: false })).toBeVisible();
+  await expect(dialog.getByText('Der korrigierte Ablauf verwendet den erzeugten Status und ist strukturell gültig.', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(dialog.getByText('Die Statusprüfung liest jetzt proposal.status.', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('link', { name: source.label, exact: true }).first()).toBeVisible();
   expect(await dialog.locator('.tc-detail-report').evaluateAll(cards => cards.every(card => card.querySelectorAll('details').length <= 1))).toBe(true);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -354,9 +372,9 @@ test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespei
   await expect(page.locator(`[data-task-id="${liveTaskId}"]`)).toHaveAttribute('data-status', 'running');
   await page.locator(`[data-task-id="${liveTaskId}"]`).click();
   await expect(page.getByRole('dialog').getByText('Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('dialog').getByText('Reasoning-Zusammenfassung', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Reasoning-Zusammenfassung', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('dialog').getByText('Der Ablauf verbindet die fachliche Anforderung mit den vorhandenen Bausteinen; offene Annahmen bleiben im Ergebnis sichtbar.', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('dialog').getByText('Agentenausgabe', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('dialog').getByText('Agentenausgabe', { exact: true })).toHaveCount(0);
   await expect(page.locator('.tc-feed')).not.toContainText('Der Ablauf verbindet die fachliche Anforderung mit den vorhandenen Bausteinen; offene Annahmen bleiben im Ergebnis sichtbar.');
   expect(await page.getByRole('dialog').locator('.tc-detail-report').evaluateAll(cards => cards.every(card => card.querySelectorAll('details').length <= 1))).toBe(true);
   await page.screenshot({ path: '.local/verification/chat/details/provider-real-sse.png', fullPage: true });
