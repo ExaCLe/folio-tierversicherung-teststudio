@@ -20,15 +20,16 @@ export interface ExplorationEvidence {
 }
 export interface ExplorationResult {
   catalog: TestingCatalog; newKnowledge: TestingKnowledgeDocument[]; evidence: ExplorationEvidence[];
-  openQuestions: string[]; explored: boolean; explanation: string; knowledgeIds: string[]; questions: TestingExplorationQuestion[]; termination?: TestingAgentTermination;
+  openQuestions: string[]; researchGaps: string[]; explored: boolean; explanation: string; knowledgeIds: string[]; questions: TestingExplorationQuestion[]; termination?: TestingAgentTermination;
 }
 const actionParser = z.object({ op: z.enum(['goto', 'click', 'fill', 'select', 'check', 'readSnapshot']),
   targetId: z.string().nullable(), path: z.string().nullable(), value: z.string().max(1000).nullable(), checked: z.boolean().nullable(),
 }).strict();
 const replyParser = z.object({ decision: z.enum(['explore', 'act', 'finish']), explanation: z.string().min(1).max(5000),
   knowledgeIds: z.array(z.string()).max(80), gaps: z.array(z.string().max(1000)).max(20), action: actionParser.nullable(),
-  questions: z.array(z.object({ id: z.string().min(1).max(100), text: z.string().min(1).max(1000), requiresBrowser: z.boolean(),
-    status: z.enum(['open', 'answered']), answer: z.string().max(4000), evidenceIds: z.array(z.string()).max(32), knowledgeIds: z.array(z.string()).max(80) }).strict()).min(1).max(30),
+  questions: z.array(z.object({ id: z.string().min(1).max(100), text: z.string().min(1).max(1000), kind: z.enum(['requirement', 'research', 'clarification']),
+    why: z.string().max(1000), requestQuote: z.string().max(1000), requiresBrowser: z.boolean(),
+    status: z.enum(['open', 'answered']), answer: z.string().max(4000), evidenceIds: z.array(z.string()).max(32), knowledgeIds: z.array(z.string()).max(80) }).strict()).max(30),
   findings: z.array(z.object({ title: z.string().min(1).max(200), summary: z.string().min(1).max(1000), content: z.string().min(1).max(8000),
     evidenceIds: z.array(z.string()).min(1).max(32), }).strict()).max(12),
 }).strict();
@@ -42,7 +43,8 @@ export function explorationSchema(knowledge: TestingKnowledgeDocument[], evidenc
   const evidenceIds = references(evidence.map(item => item.id), 32);
   return object({ decision: { type: 'string', enum: ['explore', 'act', 'finish'] }, explanation: text,
     knowledgeIds, gaps: texts,
-    questions: { type: 'array', minItems: 1, maxItems: 30, items: object({ id: text, text, requiresBrowser: { type: 'boolean' }, status: { type: 'string', enum: ['open', 'answered'] }, answer: text, evidenceIds, knowledgeIds }) },
+    questions: { type: 'array', maxItems: 30, items: object({ id: text, text, kind: { type: 'string', enum: ['requirement', 'research', 'clarification'] }, why: text, requestQuote: text,
+      requiresBrowser: { type: 'boolean' }, status: { type: 'string', enum: ['open', 'answered'] }, answer: text, evidenceIds, knowledgeIds }) },
     action: { anyOf: [object({ op: { type: 'string', enum: ['goto', 'click', 'fill', 'select', 'check', 'readSnapshot'] }, targetId: nullableText,
       path: nullableText, value: nullableText, checked: { type: ['boolean', 'null'] } }), { type: 'null' }] },
     findings: { type: 'array', maxItems: evidence.length ? 12 : 0, items: object({ title: text, summary: text, content: text, evidenceIds: { ...evidenceIds, minItems: 1 } }) },
@@ -56,7 +58,7 @@ function knowledgeReferenceIssue(ids: string[], knowledge: TestingKnowledgeDocum
 }
 
 export function validateExplorationQuestions(questions: TestingExplorationQuestion[], previous: TestingExplorationQuestion[],
-  knowledge: TestingKnowledgeDocument[], evidence: ExplorationEvidence[], decision: 'explore' | 'act' | 'finish', gaps: string[]) {
+  knowledge: TestingKnowledgeDocument[], evidence: ExplorationEvidence[], decision: 'explore' | 'act' | 'finish', gaps: string[], request = '') {
   const issues: string[] = [], ids = new Set<string>();
   for (const question of previous) {
     const next = questions.find(item => item.id === question.id);
@@ -69,14 +71,24 @@ export function validateExplorationQuestions(questions: TestingExplorationQuesti
     const referenceIssue = knowledgeReferenceIssue(question.knowledgeIds, knowledge, `${question.id}.knowledgeIds`);
     if (referenceIssue) issues.push(referenceIssue);
     if (question.evidenceIds.some(id => !evidence.some(item => item.id === id))) issues.push(`${question.id}: nicht beobachteter Browserbeleg.`);
-    if (question.status === 'answered') {
+    if (question.kind === 'requirement') {
+      if (question.status !== 'answered' || !question.answer.trim()) issues.push(`${question.id}: Eine ausdrückliche Nutzeranforderung wird als beantwortetes Soll geführt.`);
+      if (!question.requestQuote?.trim() || !request.includes(question.requestQuote)) issues.push(`${question.id}: requestQuote muss die ausdrückliche Festlegung wörtlich aus der Nutzeranforderung zitieren.`);
+      if (question.why?.trim()) issues.push(`${question.id}: Eine bereits gesetzte Nutzeranforderung braucht keine Klärungsbegründung.`);
+    } else if (question.kind === 'clarification') {
+      if (question.status !== 'open') issues.push(`${question.id}: Menschliche Antworten werden beim nächsten Auftrag als gesetzte Anforderung übernommen; eine Klärungsfrage dieses Laufs bleibt offen.`);
+      if (!question.why?.trim()) issues.push(`${question.id}: Eine Klärungsfrage braucht in why die konkret fehlende wichtige fachliche Entscheidung.`);
+      if (question.requestQuote?.trim()) issues.push(`${question.id}: Eine echte Klärungsfrage hat keine bereits gesetzte Anforderungsquelle.`);
+    } else if (question.status === 'answered') {
       if (!question.answer.trim()) issues.push(`${question.id}: Eine beantwortete Teilfrage braucht eine konkrete Antwort.`);
       if (!question.evidenceIds.length && (question.requiresBrowser || !question.knowledgeIds.length)) issues.push(`${question.id}: ${question.requiresBrowser ? 'Diese Teilfrage verlangt Browserbelege; Dokumentation allein reicht nicht.' : 'Die Antwort braucht einen vorhandenen Wissens- oder Browserbeleg.'}`);
     }
   }
-  const open = questions.filter(question => question.status === 'open');
-  if (decision === 'finish' && !gaps.length && open.length) issues.push(`Der Abschluss übergeht offene Teilfragen: ${open.map(question => `${question.id}: ${question.text}`).join('; ')}. Belege die Antworten oder benenne die verbleibenden Fragen in gaps.`);
-  if (decision === 'act' && !open.length) issues.push('Alle Teilfragen sind beantwortet. Schließe ab oder ergänze zuerst die tatsächlich noch fehlende Teilanforderung.');
+  const openResearch = questions.filter(question => question.kind === 'research' && question.status === 'open');
+  const clarifications = questions.filter(question => question.kind === 'clarification' && question.status === 'open');
+  for (const question of clarifications) if (!gaps.includes(question.text)) issues.push(`${question.id}: Die offene Klärungsfrage muss wortgleich in gaps stehen.`);
+  if (decision === 'finish' && !gaps.length && openResearch.length) issues.push(`Der Abschluss übergeht offene Erkundungsfragen: ${openResearch.map(question => `${question.id}: ${question.text}`).join('; ')}. Belege die Antworten oder benenne die technische Restlücke in gaps.`);
+  if (decision === 'act' && !openResearch.length) issues.push('Keine interne Erkundungsfrage ist offen. Schließe ab oder ergänze zuerst die tatsächlich noch fehlende technische Prüfung.');
   if (issues.length) throw new Error(issues.join('\n'));
 }
 
@@ -133,7 +145,12 @@ export function explorationPromptContext(request: string, catalog: TestingCatalo
     preconditions: definition.preconditions, postconditions: definition.postconditions,
   })), 25_000);
   const previous = evidence.slice(0, -1), historyPerObservation = Math.min(6000, Math.floor(HISTORY_BUDGET / Math.max(1, previous.length)));
-  return { request, round, browserOpen: evidence.length > 0, remainingActions: Math.max(0, LIMIT_ACTIONS - round), remainingMs, gaps, questions,
+  return { request, clarificationPolicy: {
+      expectedTruth: 'Ausdrücklich gesetzte Regeln, Rollen, Berechtigungen, Sperren und Erwartungen sind das Soll. Als kind requirement, status answered und mit exaktem requestQuote erfassen; nicht beim Menschen bestätigen lassen.',
+      userQuestionGate: 'kind clarification und status open ausschließlich für eine wichtige fachliche Entscheidung, die weder request, beantworteter Kontext noch Wissen festlegt. why benennt die fehlende Entscheidung konkret.',
+      researchBoundary: 'kind research ist interne Wissens- oder UI-Prüfung und wird nie als Nutzerfrage ausgegeben. Das Portal bestimmt Umsetzbarkeit und Beobachtbarkeit, nicht die fachliche Absicht.',
+      fixtures: 'Für fachlich irrelevante Pflichtdaten plausible sichere synthetische Demowerte selbst wählen.' },
+    round, browserOpen: evidence.length > 0, remainingActions: Math.max(0, LIMIT_ACTIONS - round), remainingMs, gaps, questions,
     completion: explorationCompletion(evidence, gaps, round, remainingMs),
     knowledgeIndex: [...latest.values()].map(doc => ({ id: doc.id, revision: doc.revision, title: doc.title, summary: doc.summary.slice(0, 300), summaryTruncated: doc.summary.length > 300 })),
     knowledge: knowledge.rows, definitions: definitions.rows,
@@ -253,7 +270,10 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
   const progress = (status: TestingAgentProgress['status'], summary: string) => input.onProgress?.({ stage: page ? 'exploring' : 'knowledge',
     status, round, observationCount: evidence.length, actionLimit: LIMIT_ACTIONS, startedAt, deadlineAt, summary, questions: structuredClone(questions) });
   const finish = async (newKnowledge: TestingKnowledgeDocument[], openQuestions: string[], termination?: TestingAgentTermination): Promise<ExplorationResult> => {
-    const result = { catalog: { ...input.catalog, knowledge: [...input.catalog.knowledge, ...newKnowledge] }, newKnowledge, evidence, openQuestions: [...new Set([...openQuestions, ...questions.filter(question => question.status === 'open').map(question => question.text)])], explored: evidence.length > 0, explanation, knowledgeIds, questions, ...(termination ? { termination } : {}) };
+    const result = { catalog: { ...input.catalog, knowledge: [...input.catalog.knowledge, ...newKnowledge] }, newKnowledge, evidence,
+      openQuestions: [...new Set(questions.filter(question => question.kind === 'clarification' && question.status === 'open').map(question => question.text))],
+      researchGaps: [...new Set(openQuestions.filter(gap => !questions.some(question => question.kind === 'clarification' && question.text === gap)))],
+      explored: evidence.length > 0, explanation, knowledgeIds, questions, ...(termination ? { termination } : {}) };
     await writeFile(resolve(directory, 'exploration-result.json'), JSON.stringify({ ...result, catalog: undefined }, null, 2));
     progress('finished', explanation);
     return result;
@@ -277,7 +297,7 @@ export async function exploreBusinessKnowledge(input: { id: string; request: str
           const parsed = replyParser.safeParse(raw);
           if (!parsed.success) throw new Error(`Die Erkundungsantwort passt nicht zum Vertrag:\n${parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('\n')}`);
           const value = parsed.data, issues: string[] = [];
-          try { validateExplorationQuestions(value.questions, questions, knowledge, evidence, value.decision, value.gaps); } catch (cause) { issues.push(cause instanceof Error ? cause.message : String(cause)); }
+          try { validateExplorationQuestions(value.questions, questions, knowledge, evidence, value.decision, value.gaps, input.request); } catch (cause) { issues.push(cause instanceof Error ? cause.message : String(cause)); }
           if (inlineContext.completion.finishRequired && value.decision !== 'finish') issues.push(`Die Erkundung verlangt jetzt einen Abschluss (${inlineContext.completion.reason}). Liefere decision:finish mit belegten findings oder ehrlichen offenen gaps, action:null.`);
           if (value.decision === 'act' && !value.gaps.length) issues.push('Eine weitere Aktion braucht eine konkrete noch offene Wissenslücke in gaps. Wenn keine Frage offen ist, liefere decision:finish mit den bereits vorhandenen Belegen.');
           const referenceIssue = knowledgeReferenceIssue(value.knowledgeIds, knowledge, 'knowledgeIds');

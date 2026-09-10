@@ -1,7 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, Info, MessageSquare, Play, Plus, RefreshCw, Save, Send, Sparkles, Workflow, X } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, Info, LoaderCircle, MessageSquare, Play, Plus, RefreshCw, Save, Send, Sparkles, Workflow, X } from 'lucide-react';
 import { currentTestingChildren, type TestingAgentSettings, type TestingBlockInstance, type TestingCatalog, type TestingScenario, type TestingScenarioLayout, type TestingValue } from '../../shared/testing';
-import type { TestingChatCommand, TestingChatEntry, TestingChatSnapshot } from '../../shared/testing-chat';
+import type { TestingChatCommand, TestingChatEntry, TestingChatQuestion, TestingChatSnapshot, TestingChatTask } from '../../shared/testing-chat';
 import { AgentSettingsContext, ModelSelect } from '../testing/AgentModels';
 import { Inspector } from '../testing/Inspector';
 import { TestMatrix } from '../testing/TestMatrix';
@@ -11,6 +11,7 @@ import { chatApi, messageOf, subscribeConversation, subscribeObservations, type 
 import '../testing/testing.css';
 import '../testing/canvas-workspace.css';
 import './testing-chat.css';
+import './testing-conversation.css';
 
 const ScratchWorkspace = lazy(() => import('../testing/ScratchWorkspace').then(module => ({ default: module.ScratchWorkspace })));
 type Tab = 'chat' | 'flow' | 'browser';
@@ -33,6 +34,9 @@ function formatTime(value: string) { return new Intl.DateTimeFormat('de-DE', { h
 
 type PublicChatEntry = TestingChatEntry;
 type ChatSnapshot = TestingChatSnapshot;
+type PublicTask = TestingChatTask;
+type PublicQuestion = TestingChatQuestion;
+type RichChatSnapshot = ChatSnapshot & { tasks?: PublicTask[]; questions?: PublicQuestion[] };
 const deliveryLabels = { routing: 'Nachricht gespeichert', replanning: 'Neuplanung gestartet', applied: 'In Ergebnis übernommen', rejected: 'Nicht übernommen' } as const;
 const stageLabels: Record<string, string> = { naming: 'Benennung', knowledge: 'Fachwissen', exploring: 'Erkundung', planning: 'Ablaufplanung', validating: 'Prüfung', revising: 'Überarbeitung', duplicates: 'Dublettensuche', wiring: 'Technische Vorbereitung', running: 'Testlauf', reuse: 'Wiederverwendung' };
 const sourceKindLabels = { knowledge: 'Fachwissen', scenario: 'Testfall', definition: 'Baustein', 'portal-evidence': 'Browsernachweis' } as const;
@@ -46,13 +50,50 @@ function sourceHref(source: NonNullable<TestingChatEntry['sources']>[number]) {
 function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails: (entry: PublicChatEntry) => void }) {
   const own = entry.kind === 'user';
   const hasDetails = !!(entry.content || entry.context || entry.sources?.length || entry.delivery?.detail);
-  const author = own ? 'Du' : entry.kind === 'question' ? 'Rückfrage' : entry.context?.modelLabel ?? entry.context?.modelId ?? 'Agent';
+  const author = own ? 'Du' : entry.context?.taskLabel ?? 'Folio';
   return <article className={`tc-entry ${own ? 'is-user' : ''} is-${entry.kind}`} data-entry-id={entry.id}>
     <div className="tc-entry-icon">{own ? <MessageSquare size={15}/> : entry.kind === 'question' ? <Sparkles size={15}/> : <Bot size={15}/>}</div>
     <div><header><strong>{author}</strong><time>{formatTime(entry.at)}</time></header>{entry.context?.taskLabel && <small className="tc-entry-task">{entry.context.taskLabel}</small>}<p>{entry.content?.summary ?? entry.message}</p>
-      <footer className="tc-entry-meta">{entry.delivery && <span className={`is-${entry.delivery.state}`}>{deliveryLabels[entry.delivery.state]}</span>}{hasDetails && <button onClick={() => onDetails(entry)}><Info size={13}/>Details</button>}</footer>
+      <footer className="tc-entry-meta">{hasDetails && <button onClick={() => onDetails(entry)}><Info size={13}/>Details</button>}</footer>
     </div>
   </article>;
+}
+
+const taskStatusLabels: Record<PublicTask['status'], string> = { queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', cancelled: 'Abgebrochen' };
+function taskStateLabel(task: PublicTask, awaitsAnswer = false) { return task.activityState === 'waiting' ? awaitsAnswer ? 'Wartet auf Antwort' : 'Wartet auf Unterauftrag' : task.activityState === 'attention' ? 'Eingabe nötig' : taskStatusLabels[task.status]; }
+function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void }) {
+  return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog tc-task-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-task-dialog-title"><header><div><small>AUFGABENDETAILS</small><h2 id="tc-task-dialog-title">{task.purpose}</h2></div><button aria-label="Aufgabendetails schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
+    <dl><div><dt>Agent</dt><dd>{task.agent.name}</dd></div><div><dt>Status</dt><dd>{taskStatusLabels[task.status]}</dd></div>{task.stage && <div><dt>Arbeitsschritt</dt><dd>{stageLabels[task.stage] ?? task.stage}</dd></div>}</dl>
+    <h3>Öffentliche Meldungen</h3>{task.publicDetails.length ? <ol className="tc-task-events">{task.publicDetails.map(detail => <li key={detail.id} className={`is-${detail.kind}`}><time>{formatTime(detail.at)}</time><p>{detail.message}</p></li>)}</ol> : <p className="tc-muted-copy">Noch keine öffentliche Meldung.</p>}
+  </div></section></div>;
+}
+
+function TaskCard({ task, awaitsAnswer, onDetails }: { task: PublicTask; awaitsAnswer: boolean; onDetails: (task: PublicTask) => void }) {
+  const style = { '--agent-color': task.agent.color } as CSSProperties;
+  const stateLabel = taskStateLabel(task, awaitsAnswer);
+  return <button className="tc-task-card" style={style} data-status={task.status} data-activity={task.activityState} onClick={() => onDetails(task)} aria-label={`${task.purpose}, ${stateLabel}, Details öffnen`}>
+    <span className="tc-task-state" aria-hidden="true">{task.status === 'completed' ? <Check size={14}/> : task.activityState === 'working' ? <LoaderCircle size={15}/> : task.status === 'failed' ? <X size={14}/> : <span/>}</span>
+    <span className="tc-task-copy"><strong>{task.purpose}</strong><small><i/>{task.agent.name} · {stateLabel}</small></span><ChevronRight size={15}/>
+  </button>;
+}
+
+function QuestionPanel({ conversationId, questions, tasks, busy, onSubmit }: { conversationId: string; questions: PublicQuestion[]; tasks: PublicTask[]; busy: boolean; onSubmit: (answers: { questionId: string; answer: string }[]) => Promise<boolean> }) {
+  const open = questions.filter(question => question.status === 'open' && question.kind === 'clarification');
+  const answerKey = `folio-testing-chat-answers:${conversationId}`;
+  const [answers, setAnswers] = useState<Record<string, string>>(() => readLocal<Record<string, string>>(answerKey) ?? {});
+  useEffect(() => setAnswers(current => Object.fromEntries(open.map(question => [question.id, current[question.id] ?? '']))), [open.map(question => question.id).join('|')]);
+  useEffect(() => { if (open.length) localStorage.setItem(answerKey, JSON.stringify(answers)); }, [answerKey, answers, open.length]);
+  if (!open.length) return null;
+  const complete = open.every(question => answers[question.id]?.trim());
+  const save = async (questionsToSave: PublicQuestion[]) => {
+    const submitted = questionsToSave.map(question => ({ questionId: question.id, answer: answers[question.id].trim() }));
+    if (!await onSubmit(submitted)) return;
+    setAnswers(current => { const next = { ...current }; for (const item of submitted) delete next[item.questionId]; if (Object.keys(next).length) localStorage.setItem(answerKey, JSON.stringify(next)); else localStorage.removeItem(answerKey); return next; });
+  };
+  return <section className="tc-questions" aria-labelledby="tc-question-title"><header><div><small>DEINE ENTSCHEIDUNG</small><h2 id="tc-question-title">{open.length === 1 ? 'Eine Angabe fehlt' : `${open.length} Angaben fehlen`}</h2></div><span>{open.length} offen</span></header><p>Beantworte jede Frage einzeln. Danach setzen die zuständigen Agenten ihre Aufgaben fort.</p>
+    <div className="tc-question-list">{open.map((question, index) => { const task = tasks.find(item => item.id === question.jobId || item.parentJobId === question.jobId); const style = { '--agent-color': task?.agent.color ?? '#3867a8' } as CSSProperties; return <div className="tc-question" key={question.id} style={style}><label><span><b>{index + 1}</b><strong>{question.text}</strong></span><small>{question.why}</small><textarea aria-label={`Antwort auf: ${question.text}`} rows={3} value={answers[question.id] ?? ''} onChange={event => setAnswers(current => ({ ...current, [question.id]: event.target.value }))} placeholder="Deine Antwort" disabled={busy}/><em><i/>{task?.agent.name ?? 'Folio'} · wartet auf deine Antwort</em></label><button disabled={busy || !answers[question.id]?.trim()} onClick={() => void save([question])}>Antwort speichern</button></div>; })}</div>
+    {open.length > 1 && <footer><button className="tc-primary" disabled={busy || !complete} onClick={() => void save(open)}><Send size={15}/>Alle Antworten senden</button></footer>}
+  </section>;
 }
 
 function EntryDetails({ entry, onClose }: { entry: PublicChatEntry; onClose: () => void }) {
@@ -65,30 +106,40 @@ function EntryDetails({ entry, onClose }: { entry: PublicChatEntry; onClose: () 
   </div></section></div>;
 }
 
-function Conversation({ snapshot, model, busy, connected, text, onText, onModel, onSend, onCommand }: {
-  snapshot: ChatSnapshot; model: string; busy: boolean; connected: boolean; text: string;
-  onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void; onCommand: (command: TestingChatCommand) => void;
+function Conversation({ snapshot, model, busy, text, onText, onModel, onSend, onAnswers, onCommand }: {
+  snapshot: RichChatSnapshot; model: string; busy: boolean; text: string;
+  onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void; onAnswers: (answers: { questionId: string; answer: string }[]) => Promise<boolean>; onCommand: (command: TestingChatCommand) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
   const [details, setDetails] = useState<PublicChatEntry>();
+  const [taskDetails, setTaskDetails] = useState<PublicTask>();
+  const [showAlternativeComposer, setShowAlternativeComposer] = useState(false);
   useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [snapshot.timeline.length]);
   const allowed = new Set(snapshot.allowedCommands);
-  const question = allowed.has('resume') ? [...snapshot.timeline].reverse().find(item => item.kind === 'question') : undefined;
-  const sendCommand: TestingChatCommand = question && allowed.has('resume') ? 'resume' : snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
+  const tasks = snapshot.tasks ?? [];
+  const questions = snapshot.questions ?? [];
+  const hasOpenQuestions = questions.some(question => question.status === 'open' && question.kind === 'clarification');
+  const sendCommand: TestingChatCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
   const nextActions = (['approve', 'prepare'] as TestingChatCommand[]).filter(command => allowed.has(command));
-  const placeholder = question ? 'Deine Antwort …' : snapshot.scenario ? 'Welche Änderung soll Folio vorschlagen?' : 'Beschreibe deinen Testfall …';
+  const placeholder = snapshot.scenario ? 'Weitere Änderung beschreiben …' : 'Nachricht an Folio …';
+  const visibleTimeline = snapshot.timeline.filter(entry => entry.kind !== 'status' && entry.kind !== 'question');
+  const questionJobIds = new Set(questions.filter(question => question.status === 'open').map(question => question.jobId));
+  const feed = [...visibleTimeline.map(entry => ({ type: 'entry' as const, id: entry.id, at: entry.at, entry })), ...tasks.map(task => ({ type: 'task' as const, id: task.id, at: task.startedAt, task }))].sort((a, b) => a.at.localeCompare(b.at));
   return <section className="tc-chat-pane" aria-label="Unterhaltung">
-    <div className="tc-stream-status"><span className={connected ? 'online' : ''}/>{connected ? 'Live verbunden' : 'Verbindung wird wiederhergestellt'}</div>
-    <div className="tc-timeline">{snapshot.timeline.map(entry => <TimelineEntry key={entry.id} entry={entry} onDetails={setDetails}/>)}
-      {snapshot.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status) && <div className="tc-working" role="status"><span/><span/><span/><p>{snapshot.lifecycle?.message ?? 'Folio arbeitet am Testfall …'}</p></div>}
+    <div className="tc-timeline"><div className="tc-reading-column"><div className="tc-feed">{feed.map(item => item.type === 'entry' ? <TimelineEntry key={`entry:${item.id}`} entry={item.entry} onDetails={setDetails}/> : <TaskCard key={`task:${item.id}`} task={item.task} awaitsAnswer={questionJobIds.has(item.id)} onDetails={setTaskDetails}/>)}</div>
+      <QuestionPanel conversationId={snapshot.conversation.id} questions={questions} tasks={tasks} busy={busy} onSubmit={onAnswers}/>
       {snapshot.proposed && <ProposalCard snapshot={snapshot} busy={busy} onCommand={onCommand}/>}<div ref={end}/>
-    </div>
-    <footer className="tc-composer">
+    </div></div>
+    {hasOpenQuestions && !showAlternativeComposer ? <footer className="tc-alternative-toggle"><button onClick={() => setShowAlternativeComposer(true)}><Plus size={14}/>Andere Änderung schreiben</button></footer> : <footer className="tc-composer">
+      <div className="tc-composer-inner">
       {!!nextActions.length && <div className="tc-command-actions">{nextActions.map(command => <button key={command} className="tc-primary" disabled={busy} onClick={() => onCommand(command)}>{command === 'run' ? <Play size={15}/> : command === 'approve' ? <Check size={15}/> : <Sparkles size={15}/>} {commandLabels[command]}</button>)}</div>}
-      <textarea value={text} onChange={event => onText(event.target.value)} placeholder={placeholder} rows={3} disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
-      <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onClick={onSend}><Send size={16}/>{question ? 'Antworten' : snapshot.scenario ? 'Änderung vorschlagen' : 'Senden'}</button></div>
-    </footer>
-    {details && <EntryDetails entry={details} onClose={() => setDetails(undefined)}/>}
+      {hasOpenQuestions && <div className="tc-composer-mode"><p>Separate Änderung</p><button onClick={() => setShowAlternativeComposer(false)}>Schließen</button></div>}
+      <textarea aria-label="Separate Nachricht" value={text} onChange={event => onText(event.target.value)} placeholder={placeholder} rows={2} disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
+      <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" aria-label="Separate Nachricht senden" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onClick={onSend}><Send size={16}/>{snapshot.scenario ? 'Änderung senden' : 'Senden'}</button></div>
+      </div>
+    </footer>}
+    {details ? <EntryDetails entry={details} onClose={() => setDetails(undefined)}/> : null}
+    {taskDetails ? <TaskDetails task={taskDetails} onClose={() => setTaskDetails(undefined)}/> : null}
   </section>;
 }
 
@@ -150,7 +201,7 @@ export function TestingChatApp() {
   const [model, setModel] = useState('luna');
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
-  const [connected, setConnected] = useState(false);
+  const [, setConnected] = useState(false);
   const [error, setError] = useState('');
   const revision = useRef(0);
   const streamSequence = useRef(0);
@@ -163,12 +214,13 @@ export function TestingChatApp() {
   useEffect(() => { if (!currentRoute.id || !snapshot?.latestRun || !['queued', 'running'].includes(snapshot.latestRun.status)) return; const timer = window.setInterval(() => void load(currentRoute.id).catch(() => {}), 1200); return () => clearInterval(timer); }, [currentRoute.id, snapshot?.latestRun?.id, snapshot?.latestRun?.status, load]);
   useEffect(() => { if (!snapshot?.scenario) return; setBootstrap(current => current ? { ...current, scenarios: [snapshot.scenario!, ...current.scenarios.filter(item => item.id !== snapshot.scenario!.id)] } : current); }, [snapshot?.scenario?.id, snapshot?.scenario?.revision]);
   async function mutate(command: TestingChatCommand, payload?: Record<string, unknown>) { if (!snapshot || busy) return false; setBusy(true); setError(''); try { const guarded = snapshot.scenarioState ? { ...payload, expectedScenarioRevision: snapshot.scenarioState.revision, fingerprint: snapshot.scenarioState.fingerprint } : payload; const next = await chatApi.command(snapshot.conversation.id, command, snapshot.conversation.revision, guarded); revision.current = next.conversation.revision; setSnapshot(next); return true; } catch (cause) { setError(messageOf(cause)); if ((cause as { status?: number }).status === 409) await load(snapshot.conversation.id); return false; } finally { setBusy(false); } }
-  async function send() { const message = text.trim(); if (!message || !snapshot) return; const allowed = new Set(snapshot.allowedCommands); const question = allowed.has('resume') ? [...snapshot.timeline].reverse().find(item => item.kind === 'question') : undefined; const command: TestingChatCommand = question ? 'resume' : snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore'; setText(''); await mutate(command, { message, text: message, questionId: question?.id, model }); }
+  async function send() { const message = text.trim(); if (!message || !snapshot) return; const allowed = new Set(snapshot.allowedCommands); const command: TestingChatCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore'; setText(''); await mutate(command, { message, text: message, model }); }
+  async function answerQuestions(answers: { questionId: string; answer: string }[]) { return mutate('answer', { answers, model }); }
   async function create(scenarioId: string) { setBusy(true); setError(''); try { const next = await chatApi.create({ scenarioId, model, requestId: crypto.randomUUID() }); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
   async function createFromMessage() { const message = text.trim(); if (!message || busy) return; setBusy(true); setError(''); try { const next = await chatApi.create({ message, model, requestId: crypto.randomUUID() }); setText(''); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
   async function save(scenario: TestingScenario) { if (!snapshot) return; if (await mutate('save', { scenario, expectedRevision: scenario.revision })) localStorage.removeItem(draftKey(scenario.id)); }
   const scenarioId = snapshot?.scenario?.id;
   return <AgentSettingsContext.Provider value={settings}><main className="testing-chat-app"><aside className="tc-sidebar"><a className="tc-brand" href="/testing/chat" onClick={event => { event.preventDefault(); navigate(); }}><span>F</span><strong>Folio Studio</strong></a><button className="tc-new" disabled={busy} onClick={() => navigate()}><Plus size={16}/>Neuer Testfall</button><nav aria-label="Testfälle">{bootstrap?.scenarios.map(scenario => <button key={scenario.id} className={scenario.id === scenarioId ? 'active' : ''} onClick={() => void create(scenario.id)}><span>{scenario.title}</span><small>Revision {scenario.revision}</small><ChevronRight size={14}/></button>)}</nav><a className="tc-classic" href="/testing"><ArrowLeft size={14}/>Klassische Ansicht</a></aside>
     <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
-      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} connected={connected} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onCommand={command => void mutate(command, { model })}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
+      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} busy={busy} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
 }

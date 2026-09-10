@@ -41,7 +41,7 @@ let prompt='';process.stdin.on('data',v=>prompt+=v);process.stdin.on('end',()=>{
    if(!process.cwd().endsWith('-korrektur')||prompt.includes('IMMER_FALSCH'))result.knowledgeIds=['pruefung.vorschlagsstatus'];
  }
  if(prompt.includes('KORREKTUR_TEST')&&!process.cwd().endsWith('-korrektur')) result.knowledgeIds=['unbekannt'];
- const questions=inline.questions.length?inline.questions:[{id:'prueffrage-1',text:'Die angeforderte synthetische Prüfung vollständig belegen.',requiresBrowser:!prompt.includes('NUR_VORHANDEN')}];
+ const questions=inline.questions.length?inline.questions:[{id:'prueffrage-1',text:'Die angeforderte synthetische Prüfung vollständig belegen.',kind:'research',why:'',requestQuote:'',requiresBrowser:!prompt.includes('NUR_VORHANDEN')}];
  result.questions=questions.map(question=>({...question,status:result.decision==='finish'&&!result.gaps.length?'answered':'open',answer:result.decision==='finish'&&!result.gaps.length?result.explanation:'',knowledgeIds:result.decision==='finish'?result.knowledgeIds:[],evidenceIds:result.decision==='finish'?result.findings.flatMap(finding=>finding.evidenceIds):[]}));
  if(prompt.includes('TEXT_KORREKTUR')&&state.round===1&&!process.cwd().endsWith('-korrektur'))result.questions[0].text='Versehentlich veränderte Frage';
  writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(result));process.stdout.write(JSON.stringify({type:'turn.completed'})+'\\n');
@@ -137,12 +137,12 @@ test('Abschlusssteuerung erkennt leere Fragen, Budget und wiederkehrende Zustän
 });
 
 test('Vollständige Teilfragen bleiben stabil; offene Vergleiche und fehlende Browserbelege verhindern grünen Abschluss',()=>{
-  const question=(id:string):TestingExplorationQuestion=>({id,text:`Vergleich ${id} unter derselben Vorbedingung prüfen.`,requiresBrowser:true,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]});
+  const question=(id:string):TestingExplorationQuestion=>({id,text:`Vergleich ${id} unter derselben Vorbedingung prüfen.`,kind:'research',why:'',requestQuote:'',requiresBrowser:true,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]});
   const previous=[question('eins'),question('zwei'),question('drei')];
   const evidence=[{id:'beleg-001',action:'readSnapshot',path:'/portal',snapshot:'Synthetischer Zustand',screenshot:'',observedAt:'',targets:[],paths:[]}];
   const answered={...previous[0],status:'answered' as const,answer:'Beobachtete Antwort.',evidenceIds:['beleg-001']};
-  assert.throws(()=>validateExplorationQuestions([answered,previous[1]],previous,catalog.knowledge,evidence,'finish',[]),/drei.*fehlt[\s\S]*offene Teilfragen/);
-  assert.throws(()=>validateExplorationQuestions([answered,previous[1],previous[2]],previous,catalog.knowledge,evidence,'finish',[]),/offene Teilfragen/);
+  assert.throws(()=>validateExplorationQuestions([answered,previous[1]],previous,catalog.knowledge,evidence,'finish',[]),/drei.*fehlt[\s\S]*offene Erkundungsfragen/);
+  assert.throws(()=>validateExplorationQuestions([answered,previous[1],previous[2]],previous,catalog.knowledge,evidence,'finish',[]),/offene Erkundungsfragen/);
   assert.throws(()=>validateExplorationQuestions([{...answered,evidenceIds:[],knowledgeIds:['wissen.fixture']}],previous.slice(0,1),catalog.knowledge,evidence,'finish',[]),/Dokumentation allein reicht nicht/);
   assert.throws(()=>validateExplorationQuestions([{...answered,requiresBrowser:false}],previous.slice(0,1),catalog.knowledge,evidence,'finish',[]),/ursprünglichen Text und requiresBrowser/);
   assert.throws(()=>validateExplorationQuestions([{...answered,evidenceIds:['erfunden']}],previous.slice(0,1),catalog.knowledge,evidence,'finish',[]),/nicht beobachteter Browserbeleg/);
@@ -150,6 +150,21 @@ test('Vollständige Teilfragen bleiben stabil; offene Vergleiche und fehlende Br
   assert.doesNotThrow(()=>validateExplorationQuestions([...previous,question('neu')],previous,catalog.knowledge,evidence,'act',['Noch offen.']));
   assert.doesNotThrow(()=>validateExplorationQuestions(previous,[answered,previous[1],previous[2]],catalog.knowledge,evidence,'act',['Ein neuer Widerspruch muss untersucht werden.']));
   assert.equal(previous[0].status,'open','Die Validierung verändert das übernommene Ledger nicht.');
+});
+
+test('Explizite Rollenregeln sind gesetztes Soll; nur echte fehlende Fachentscheidungen werden Nutzerfragen',()=>{
+  const request='Direktion darf offene Direktionsanfragen freigeben; Sachbearbeiter und Vermittler dürfen nicht.';
+  const requirement:TestingExplorationQuestion={id:'rollen-soll',text:'Wer darf eine offene Direktionsanfrage freigeben?',kind:'requirement',why:'',
+    requestQuote:'Direktion darf offene Direktionsanfragen freigeben; Sachbearbeiter und Vermittler dürfen nicht.',requiresBrowser:false,status:'answered',
+    answer:'Nur die Direktion darf freigeben.',knowledgeIds:[],evidenceIds:[]};
+  assert.doesNotThrow(()=>validateExplorationQuestions([requirement],[],catalog.knowledge,[],'finish',[],request));
+  assert.throws(()=>validateExplorationQuestions([{...requirement,kind:'clarification',status:'open',answer:'',requestQuote:'',why:''}],[],catalog.knowledge,[],'finish',[],request),/Klärungsfrage braucht.*konkret fehlende/);
+  const unknown:TestingExplorationQuestion={id:'ablehnungsgrund',text:'Welcher Ablehnungsgrund soll erwartet werden?',kind:'clarification',
+    why:'Ohne den Grund fehlt der fachliche Sollwert der Begründungsassertion.',requestQuote:'',requiresBrowser:false,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]};
+  assert.doesNotThrow(()=>validateExplorationQuestions([requirement,unknown],[],catalog.knowledge,[],'finish',[unknown.text],request));
+  const context=explorationPromptContext(request,catalog,0,[],[]);
+  assert.match(context.clarificationPolicy.expectedTruth,/nicht beim Menschen bestätigen lassen/);
+  assert.match(context.clarificationPolicy.userQuestionGate,/wichtige fachliche Entscheidung/);
 });
 
 test('Wiederholte Rollenwechsel führen zur belegten Abschlussantwort statt weiteren Browseraktionen', {timeout:90_000}, async()=>{
@@ -167,7 +182,8 @@ test('Ignorierte Abschlussaufforderung stoppt nach einer Korrektur mit Belegen u
   const result=await exploreBusinessKnowledge({id:'loop-incomplete',request:'ROLLEN_SCHLEIFE ABSCHLUSS_IGNORIEREN',model:'luna',catalog});
   assert(result.evidence.length <= 6);
   assert.equal(result.newKnowledge.length,0);
-  assert(result.openQuestions.length>0);
+  assert.deepEqual(result.openQuestions,[]);
+  assert(result.researchGaps.length>0);
   assert.equal(result.termination?.cause,'no_progress');
   assert(existsSync(join(directory,`agents/loop-incomplete-observation-${result.evidence.length}-korrektur/result.json`)));
 });
@@ -200,7 +216,8 @@ test('Internes Zeitlimit wird als unvollständige Prüfung statt menschlichem Ab
     const result=await exploreBusinessKnowledge({id:'internal-deadline',request:'NUR_VORHANDEN',model:'luna',catalog,
       onProgress:value=>{if(value.status==='waiting-model')context.mock.timers.tick(360_000);}});
     assert.equal(result.termination?.cause,'time_limit');
-    assert(result.openQuestions.length>0);
+    assert.deepEqual(result.openQuestions,[]);
+    assert(result.researchGaps.length>0);
     assert.deepEqual(result.newKnowledge,[]);
     assert.doesNotMatch(result.explanation,/Menschen/);
     assert(existsSync(join(directory,'agents/internal-deadline/exploration-result.json')));
@@ -291,7 +308,7 @@ test('Baustein-ID aus dem Fehlerbericht wird konkret korrigiert und niemals als 
   assert.match(report,/pruefung\.vorschlagsstatus/);
   assert.match(report,/Erlaubte Wissens-IDs: wissen\.fixture/);
   assert.match(report,/Baustein-IDs/);
-  const question={id:'question',text:'Offene Frage',requiresBrowser:true,status:'open' as const,answer:'',knowledgeIds:['pruefung.vorschlagsstatus'],evidenceIds:[]};
+  const question={id:'question',text:'Offene Frage',kind:'research' as const,why:'',requestQuote:'',requiresBrowser:true,status:'open' as const,answer:'',knowledgeIds:['pruefung.vorschlagsstatus'],evidenceIds:[]};
   assert.throws(()=>validateExplorationQuestions([question],[],catalog.knowledge,[],'explore',['Offene Frage']),/question\.knowledgeIds.*pruefung\.vorschlagsstatus.*wissen\.fixture/);
   await assert.rejects(exploreBusinessKnowledge({id:'block-reference-invalid',request:'NUR_VORHANDEN BLOCK_ID_TEST IMMER_FALSCH',model:'luna',catalog}),/Auch die KI-Korrektur.*pruefung\.vorschlagsstatus/s);
 });

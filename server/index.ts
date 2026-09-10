@@ -6,6 +6,7 @@ import { createInsuranceRouter } from './insurance/router';
 import { createStudioRouter } from './studio/router';
 import { createAgricultureRouter } from './agriculture/router';
 import { createTestingRouter } from './testing/router';
+import { startupLines } from './startup';
 
 export async function createApp() {
   const app = express();
@@ -35,11 +36,7 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(pro
 if (isMain) {
   const app = await createApp();
   const port = Number(process.env.PORT || 3001);
-  const appUrl = (process.env.FOLIO_APP_URL || 'http://127.0.0.1:5173').replace(/\/$/, '');
   app.listen(port, '127.0.0.1', () => {
-    console.log(`Folio API listening on http://127.0.0.1:${port}`);
-    console.log(`Versicherungsportal: ${appUrl}/portal`);
-    console.log(`Teststudio: ${appUrl}/testing`);
-    console.log(`Chat-Arbeitsplatz: ${appUrl}/testing/chat`);
+    for(const line of startupLines(port))console.log(line);
   });
 }

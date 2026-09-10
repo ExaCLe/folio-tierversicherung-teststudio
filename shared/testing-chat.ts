@@ -1,6 +1,6 @@
 import type { TestingAgentJob, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
 
-export type TestingChatCommand = 'message'|'explore'|'resume'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
+export type TestingChatCommand = 'message'|'explore'|'resume'|'answer'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
 export type TestingChatEntryKind = 'user'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
 
 export interface TestingChatEntry {
@@ -15,6 +15,20 @@ export interface TestingChatConversation {
   id:string; revision:number; eventSequence:number; createdAt:string; updatedAt:string; model:TestingModel;
   scenarioId?:string; activeJobId?:string; entryIds:string[];
   handledRequests?:{id:string;revision:number}[];
+  /** Root jobs started by this conversation. Used to keep unrelated historical scenario jobs out. */
+  jobIds?:string[];
+}
+export interface TestingChatQuestion {
+  id:string; jobId:string; kind:'clarification'; text:string; why:string; status:'open'|'answered';
+  answer?:string; answeredAt?:string;
+}
+export interface TestingChatTask {
+  id:string; parentJobId?:string; purpose:string;
+  agent:{name:string;modelId:string;provider?:'codex'|'claude';color:string};
+  status:'queued'|'running'|'completed'|'failed'|'cancelled'; stage?:TestingAgentStage;
+  activityState:'working'|'waiting'|'attention'|'done'|'failed'|'cancelled';
+  startedAt:string; finishedAt?:string;
+  publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string}[];
 }
 export interface TestingChatProposal {
   jobId:string; fingerprint:string; expectedRevision:number; scenario:TestingScenario;
@@ -22,6 +36,7 @@ export interface TestingChatProposal {
 }
 export interface TestingChatSnapshot {
   conversation:TestingChatConversation; timeline:TestingChatEntry[];
+  tasks:TestingChatTask[]; questions:TestingChatQuestion[];
   scenario?:TestingScenario; proposed?:TestingChatProposal; lifecycle?:TestingScenarioLifecycle;
   activeJob?:Pick<TestingAgentJob,'id'|'phase'|'status'|'stage'|'startedAt'|'finishedAt'|'error'|'progress'|'workStages'|'runId'>;
   latestRun?:Pick<TestingRun,'id'|'status'|'startedAt'|'finishedAt'|'error'|'steps'|'artifacts'|'summary'|'matrixRows'|'scenarioRevision'> & {fingerprint?:string;isCurrent?:boolean};

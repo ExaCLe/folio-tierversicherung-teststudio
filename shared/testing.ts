@@ -165,7 +165,8 @@ export interface TestingAgentProgress {
   questions?:TestingExplorationQuestion[];
 }
 export interface TestingExplorationQuestion {
-  id:string; text:string; requiresBrowser:boolean; status:'open'|'answered'; answer:string; evidenceIds:string[]; knowledgeIds:string[];
+  id:string; text:string; kind?:'requirement'|'research'|'clarification'; why?:string; requestQuote?:string;
+  requiresBrowser:boolean; status:'open'|'answered'; answer:string; evidenceIds:string[]; knowledgeIds:string[];
 }
 export interface TestingAgentWorkStage {
   stage:TestingAgentStage; status:'running'|'completed'|'skipped'|'failed'; startedAt?:string; finishedAt?:string; summary?:string;

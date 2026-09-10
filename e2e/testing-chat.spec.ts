@@ -7,7 +7,7 @@ import type { TestingChatSnapshot } from '../shared/testing-chat';
 
 const conversation = (scenario?: TestingScenario, patch: Partial<TestingChatSnapshot> = {}): TestingChatSnapshot => ({
   conversation: { id: 'chat-browser-contract', revision: 3, eventSequence: 2, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:00:00.000Z', model: 'luna', ...(scenario ? { scenarioId: scenario.id } : {}), entryIds: [] },
-  timeline: [], scenario, allowedCommands: scenario ? ['message', 'revise', 'save'] : ['explore', 'message'],
+  timeline: [], tasks: [], questions: [], scenario, allowedCommands: scenario ? ['message', 'revise', 'save'] : ['explore', 'message'],
   confirmedFlow: scenario ? { scenarioRevision: scenario.revision, blocks: scenario.blocks } : null,
   ...(scenario ? { scenarioState: { revision: scenario.revision, fingerprint: 'browser-contract' } } : {}), ...patch,
 });
@@ -56,7 +56,7 @@ test('alternative Chat-Navigation erstellt leer, hängt bestehende Tests ohne Ag
   await expect(page.getByRole('link', { name: 'Klassische Ansicht', exact: true })).toHaveAttribute('href', '/testing');
 });
 
-test('zeigt öffentlichen Agentenbericht, Routingstatus und validierte Ablaufvorschau während der Arbeit', async ({ page, request }) => {
+test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne internen Statuslärm', async ({ page, request }) => {
   mkdirSync('.local/verification/chat', { recursive: true });
   const seed = await scenario(request);
   const catalogResponse = await request.get('/api/testing/catalog');
@@ -72,10 +72,19 @@ test('zeigt öffentlichen Agentenbericht, Routingstatus und validierte Ablaufvor
       { id: 'steering', at: '2026-09-10T08:02:00.000Z', kind: 'user', message: 'Ergänze die Ablehnung ohne Direktionsfreigabe.', delivery: { state: 'routing', targetLabel: 'Planungsauftrag', detail: 'Die Nachricht ist gespeichert. Der laufende Auftrag wird beendet, bevor ein Folgeauftrag entsteht.' } },
     ],
     activeJob: { id: 'job-plan', phase: 'business', status: 'running', stage: 'planning', startedAt: '2026-09-10T08:01:30.000Z' },
-    allowedCommands: ['message', 'cancel'],
+    tasks: [
+      { id: 'job-research', purpose: 'Fachliche Regeln und vorhandenes Wissen prüfen', agent: { name: 'Fachprüfung', modelId: 'luna', provider: 'codex', color: '#286b57' }, status: 'completed', activityState: 'done', stage: 'validating', startedAt: '2026-09-10T08:00:10.000Z', finishedAt: '2026-09-10T08:01:00.000Z', publicDetails: [{ id: 'research-result', at: '2026-09-10T08:01:00.000Z', kind: 'result', message: 'Versicherungssumme und Direktionsregel sind belegt.' }] },
+      { id: 'job-plan', purpose: 'Prüfablauf für die Direktionsanfrage entwerfen', agent: { name: 'Ablaufentwurf', modelId: 'sol', provider: 'codex', color: '#7656a4' }, status: 'running', activityState: 'waiting', stage: 'planning', startedAt: '2026-09-10T08:01:30.000Z', publicDetails: [{ id: 'plan-progress', at: '2026-09-10T08:02:00.000Z', kind: 'progress', message: 'Der fachliche Ablauf steht. Für den Ablehnungsfall fehlt noch die gewünschte Begründung.' }] },
+    ],
+    questions: [
+      { id: 'question-reason', jobId: 'job-plan', kind: 'clarification', text: 'Welcher Ablehnungsgrund soll im Test geprüft werden?', why: 'Die erwartete Begründung bestimmt den letzten Prüfschritt.', status: 'open' },
+      { id: 'question-channel', jobId: 'job-plan', kind: 'clarification', text: 'Soll die Ablehnung im Portal oder per Brief erscheinen?', why: 'Davon hängt ab, wo der Test den Nachweis sucht.', status: 'open' },
+    ],
+    allowedCommands: ['message', 'answer', 'cancel'],
     validatedFlowPreview: { jobId: 'job-plan', scenarioRevision: 0, title: 'Kuhleben mit Direktionsanfrage', expectedOutcome: 'Antrag und Freigabe werden fachlich geprüft.', blocks: [newBlock], knowledgeRefs: seed.knowledgeRefs, newDefinitions: [newDefinition], newKnowledge: [], status: 'provisional', readonly: true },
   });
   let current = running;
+  const commands: { command: string; payload?: { message?: string; answers?: { questionId: string; answer: string }[] } }[] = [];
   const routedEntry = { ...running.timeline[1], delivery: { state: 'replanning' as const, targetLabel: 'Planungsauftrag', successorJobId: 'job-plan-next', detail: 'Ein Folgeauftrag wurde angelegt.' } };
   let streamConnections = 0;
   await page.route('**/api/testing/chat/conversations/chat-browser-contract', route => route.fulfill({ json: current }));
@@ -87,16 +96,30 @@ test('zeigt öffentlichen Agentenbericht, Routingstatus und validierte Ablaufvor
     return route.fulfill({ contentType: 'text/event-stream', body });
   });
   await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => {
-    const input = route.request().postDataJSON() as { command: string; payload?: { message?: string } };
+    const input = route.request().postDataJSON() as { command: string; payload?: { message?: string; answers?: { questionId: string; answer: string }[] } };
+    commands.push(input);
+    if (input.command === 'answer') {
+      const submitted = input.payload?.answers ?? [];
+      expect(submitted).toHaveLength(1);
+      const questions = current.questions.map(question => { const answer = submitted.find(item => item.questionId === question.id); return answer ? { ...question, status: 'answered' as const, answer: answer.answer } : question; });
+      const allAnswered = questions.every(question => question.status === 'answered');
+      current = { ...current, conversation: { ...current.conversation, revision: current.conversation.revision + 1 }, questions, tasks: current.tasks.map(task => task.id === 'job-plan' && allAnswered ? { ...task, activityState: 'working' as const, publicDetails: [...task.publicDetails, { id: 'plan-resumed', at: '2026-09-10T08:04:00.000Z', kind: 'progress' as const, message: 'Die Antworten sind übernommen. Der Ablaufentwurf wird fertiggestellt.' }] } : task) };
+      await route.fulfill({ json: current });
+      return;
+    }
     expect(input.command).toBe('message');
     expect(input.payload?.message).toBe('Prüfe zusätzlich den Ablehnungsgrund.');
     const message = input.payload?.message ?? '';
-    current = { ...running, conversation: { ...running.conversation, revision: 8 }, timeline: [...running.timeline, { id: 'steering-new', at: '2026-09-10T08:03:00.000Z', kind: 'user', message, delivery: { state: 'routing', targetLabel: 'Planungsauftrag' } }] };
+    current = { ...current, conversation: { ...current.conversation, revision: 9 }, timeline: [...current.timeline, { id: 'steering-new', at: '2026-09-10T08:03:00.000Z', kind: 'user', message, delivery: { state: 'routing', targetLabel: 'Planungsauftrag' } }] };
     await route.fulfill({ json: current });
   });
   await page.goto('/testing/chat/chat-browser-contract/chat');
-  await expect(page.getByText('Kuhlebensversicherung fachlich erkunden')).toBeVisible();
-  await expect(page.getByText('Neuplanung gestartet')).toBeVisible();
+  await expect(page.getByRole('strong').filter({ hasText: 'Kuhlebensversicherung fachlich erkunden' })).toBeVisible();
+  await expect(page.getByText('Neuplanung gestartet')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Fachliche Regeln und vorhandenes Wissen prüfen, Abgeschlossen/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Prüfablauf für die Direktionsanfrage entwerfen, Wartet auf Antwort/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '2 Angaben fehlen' })).toBeVisible();
+  await expect(page.getByLabel('Antwort auf: Welcher Ablehnungsgrund soll im Test geprüft werden?')).toBeVisible();
   await page.getByRole('button', { name: 'Details', exact: true }).first().click();
   await expect(page.getByRole('dialog')).toContainText('Fachliche Erkundung abgeschlossen');
   await expect(page.getByRole('dialog')).toContainText(sourceTitle);
@@ -108,10 +131,41 @@ test('zeigt öffentlichen Agentenbericht, Routingstatus und validierte Ablaufvor
   await expect(sourcePage.getByRole('heading', { name: sourceTitle, exact: true })).toBeVisible();
   await sourcePage.close();
   await page.getByRole('button', { name: 'Details schließen' }).click();
-  const composer = page.getByPlaceholder('Beschreibe deinen Testfall …');
+  await page.screenshot({ path: '.local/verification/chat/conversation-working-questions-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 1050 });
+  await page.screenshot({ path: '.local/verification/chat/conversation-working-questions-mobile.png', fullPage: true });
+  const secondAnswer = page.getByLabel('Antwort auf: Soll die Ablehnung im Portal oder per Brief erscheinen?');
+  const secondSave = page.locator('.tc-question').filter({ hasText: 'Soll die Ablehnung im Portal oder per Brief erscheinen?' }).getByRole('button', { name: 'Antwort speichern' });
+  await secondSave.scrollIntoViewIfNeeded();
+  await expect(secondAnswer).toBeVisible();
+  await expect(secondSave).toBeVisible();
+  await page.screenshot({ path: '.local/verification/chat/question-fields-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.getByRole('button', { name: 'Andere Änderung schreiben', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Separate Nachricht', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Schließen', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Separate Nachricht', exact: true })).toHaveCount(0);
+  const reasonAnswer = page.getByLabel('Antwort auf: Welcher Ablehnungsgrund soll im Test geprüft werden?');
+  await reasonAnswer.fill('Fehlende Direktionsfreigabe');
+  await page.reload();
+  await expect(reasonAnswer).toHaveValue('Fehlende Direktionsfreigabe');
+  await page.locator('.tc-question').filter({ hasText: 'Welcher Ablehnungsgrund soll im Test geprüft werden?' }).getByRole('button', { name: 'Antwort speichern' }).click();
+  await expect(page.getByRole('heading', { name: 'Eine Angabe fehlt' })).toBeVisible();
+  expect(commands[0]?.payload?.answers).toEqual([{ questionId: 'question-reason', answer: 'Fehlende Direktionsfreigabe' }]);
+  await page.getByLabel('Antwort auf: Soll die Ablehnung im Portal oder per Brief erscheinen?').fill('Im Portal');
+  await page.getByRole('button', { name: 'Antwort speichern', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Eine Angabe fehlt' })).toHaveCount(0);
+  expect(commands[1]?.payload?.answers).toEqual([{ questionId: 'question-channel', answer: 'Im Portal' }]);
+  await expect(page.getByRole('button', { name: /Prüfablauf für die Direktionsanfrage entwerfen, In Arbeit/ })).toBeVisible();
+  await page.getByRole('button', { name: /Prüfablauf für die Direktionsanfrage entwerfen, In Arbeit/ }).click();
+  await expect(page.getByRole('dialog')).toContainText('Die Antworten sind übernommen. Der Ablaufentwurf wird fertiggestellt.');
+  await page.screenshot({ path: '.local/verification/chat/task-details-after-answer.png', fullPage: true });
+  await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
+  const composer = page.getByRole('textbox', { name: 'Separate Nachricht', exact: true });
   await expect(composer).toBeEnabled();
   await composer.fill('Prüfe zusätzlich den Ablehnungsgrund.');
-  await page.getByRole('button', { name: 'Senden', exact: true }).click();
+  await page.getByRole('button', { name: 'Separate Nachricht senden', exact: true }).click();
+  expect(commands[2]?.command).toBe('message');
   await expect(page.getByText('Prüfe zusätzlich den Ablehnungsgrund.')).toBeVisible();
   await page.getByRole('button', { name: 'Ablauf', exact: true }).click();
   await expect(page.getByText('VORLÄUFIGE VORSCHAU')).toBeVisible();
