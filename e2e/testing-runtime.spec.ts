@@ -105,31 +105,35 @@ test('Testmatrix führt Grenzwerte als isolierte Fälle aus und setzt nach einer
     ],
     rows: [
       { id: 'bayern-10000', label: 'Bayern 10.000', enabled: true, values: { bundesland: 'Bayern', summe: 10000, erwartung: 'Freigegeben' } },
-      { id: 'falsche-erwartung', label: 'Absichtliche Abweichung', enabled: true, values: { bundesland: 'Bayern', summe: 15000, erwartung: 'Freigegeben' } },
-      { id: 'bayern-10001', label: 'Bayern 10.001', enabled: true, values: { bundesland: 'Bayern', summe: 10001, erwartung: 'Freigegeben' } },
       { id: 'bayern-11000', label: 'Bayern 11.000', enabled: true, values: { bundesland: 'Bayern', summe: 11000, erwartung: 'Freigegeben' } },
-      { id: 'bayern-11001', label: 'Bayern 11.001', enabled: true, values: { bundesland: 'Bayern', summe: 11001, erwartung: 'Direktionsprüfung' } },
-      { id: 'niedersachsen-10001', label: 'Niedersachsen 10.001', enabled: true, values: { bundesland: 'Niedersachsen', summe: 10001, erwartung: 'Direktionsprüfung' } },
+      { id: 'falsche-erwartung', label: 'Absichtliche Abweichung', enabled: true, values: { bundesland: 'Bayern', summe: 12000, erwartung: 'Freigegeben' } },
+      { id: 'bayern-12000', label: 'Bayern 12.000', enabled: true, values: { bundesland: 'Bayern', summe: 12000, erwartung: 'Direktionsprüfung' } },
+      { id: 'hessen-10000', label: 'Hessen 10.000', enabled: true, values: { bundesland: 'Hessen', summe: 10000, erwartung: 'Freigegeben' } },
+      { id: 'hessen-11000', label: 'Hessen 11.000', enabled: true, values: { bundesland: 'Hessen', summe: 11000, erwartung: 'Direktionsprüfung' } },
+      { id: 'hessen-12000', label: 'Hessen 12.000', enabled: true, values: { bundesland: 'Hessen', summe: 12000, erwartung: 'Direktionsprüfung' } },
     ],
   }; });
   await approve(request, scenario); const result = await run(request, scenario);
   expect(result.mode).toBe('matrix'); expect(result.status).toBe('failed');
-  expect(result.summary).toEqual({ total: 6, passed: 5, failed: 1, skipped: 0 });
-  expect(result.matrixRows?.map(row => row.status)).toEqual(['passed', 'failed', 'passed', 'passed', 'passed', 'passed']);
-  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'kuhvorschlag/betrieb')?.inputs.state)).toEqual(['Bayern', 'Bayern', 'Bayern', 'Bayern', 'Bayern', 'Niedersachsen']);
-  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'kuhvorschlag/tier')?.inputs.sumInsured)).toEqual([10000, 15000, 10001, 11000, 11001, 10001]);
-  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'pruefung')?.inputs.expectedStatus)).toEqual(['Freigegeben', 'Freigegeben', 'Freigegeben', 'Freigegeben', 'Direktionsprüfung', 'Direktionsprüfung']);
+  expect(result.summary).toEqual({ total: 7, passed: 6, failed: 1, skipped: 0 });
+  expect(result.matrixRows?.map(row => row.status)).toEqual(['passed', 'passed', 'failed', 'passed', 'passed', 'passed', 'passed']);
+  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'kuhvorschlag/betrieb')?.inputs.state)).toEqual(['Bayern', 'Bayern', 'Bayern', 'Bayern', 'Hessen', 'Hessen', 'Hessen']);
+  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'kuhvorschlag/tier')?.inputs.sumInsured)).toEqual([10000, 11000, 12000, 12000, 10000, 11000, 12000]);
+  expect(result.matrixRows?.map(row => row.compiled?.steps.find(step => step.path === 'pruefung')?.inputs.expectedStatus)).toEqual(['Freigegeben', 'Freigegeben', 'Freigegeben', 'Direktionsprüfung', 'Freigegeben', 'Direktionsprüfung', 'Direktionsprüfung']);
   const customerReferences = result.matrixRows?.map(row => Object.entries(row.outputs ?? {}).find(([key]) => key.endsWith('::customer'))?.[1]);
-  expect(new Set(customerReferences).size).toBe(6);
-  expect(result.matrixRows?.[1].steps?.find(step => step.status === 'failed')?.path).toBe('pruefung');
+  expect(new Set(customerReferences).size).toBe(7);
+  expect(result.matrixRows?.[2].steps?.find(step => step.status === 'failed')?.path).toBe('pruefung');
   for (const row of result.matrixRows ?? []) {
     expect(row.artifacts?.trace).toBeTruthy(); expect((await request.get(row.artifacts!.trace!)).status()).toBe(200);
     expect(row.artifacts?.source).toBeTruthy(); expect((await request.get(row.artifacts!.source!)).status()).toBe(200);
     const screenshot = row.steps?.find(step => step.screenshot)?.screenshot;
     expect(screenshot).toBeTruthy(); expect((await request.get(screenshot!)).status()).toBe(200);
   }
+  const replay = await (await request.get(result.artifacts!.source!)).text();
+  expect(replay).toContain("variant.row.label + ' [' + variant.row.id + ']'");
+  expect(replay).toContain("'wiederholung-' + variant.row.id");
   await page.goto(`/testing/editor/${scenario.id}?step=5`);
-  await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toContainText('5 von 6 Testfällen bestanden');
+  await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toContainText('6 von 7 Testfällen bestanden');
   await expect(page.getByRole('region', { name: 'Prüfergebnis', exact: true })).toContainText('Absichtliche Abweichung');
   await page.screenshot({ path: '.local/verification/matrix/testmatrix-ergebnis-mit-abweichung.png', fullPage: true });
 });

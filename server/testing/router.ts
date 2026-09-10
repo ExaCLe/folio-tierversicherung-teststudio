@@ -63,11 +63,12 @@ export function createTestingRouter(): Router {
   router.post('/scenarios/:id/matrix/generate', guard((req, res) => {
     const input = body(req), scenario = getTestingScenario(req.params.id);
     if (scenario.revision !== revision(input.revision)) throw new TestingModelError('Der Testfall wurde zwischenzeitlich geändert. Lade die aktuelle Fassung vor der Matrixerzeugung.', 409, 'REVISION_CONFLICT');
-    const columns = z.array(z.object({ id: z.string(), label: z.string(), target: z.object({ blockPath: z.string(), inputPath: z.string() }).strict(), type: z.enum(['text','number','money','boolean','date','choice','object','list','customer-ref','farm-ref','animal-ref','proposal-ref','referral-ref','contract-ref','policy-ref','document-ref']), values: z.array(z.unknown()).min(1) }).strict()).min(1).max(20, 'Eine Testmatrix darf höchstens 20 Spalten enthalten.').parse(input.columns) as any;
-    const matrix = generateTestingMatrix(columns), candidate = { ...scenario, matrix };
+    const columns = z.array(z.object({ id: z.string(), label: z.string(), target: z.object({ blockPath: z.string(), inputPath: z.string() }).strict(), role:z.enum(['input','expectation']).optional(), type: z.enum(['text','number','money','boolean','date','choice','object','list','customer-ref','farm-ref','animal-ref','proposal-ref','referral-ref','contract-ref','policy-ref','document-ref']), values: z.array(z.unknown()) }).strict()).min(1).max(20, 'Eine Testmatrix darf höchstens 20 Spalten enthalten.').parse(input.columns) as any;
+    const matrix = generateTestingMatrix(columns,scenario,getTestingCatalog()), candidate = { ...scenario, matrix };
     const issues = validateTestingMatrix(candidate, getTestingCatalog());
-    if (issues.length) throw new TestingModelError(issues.map(issue => issue.message).join(' '), 400, 'MATRIX_INVALID');
-    res.json({ matrix });
+    const blocking=issues.filter(issue=>issue.code!=='MATRIX_VALUE_MISSING');
+    if (blocking.length) throw new TestingModelError(blocking.map(issue => issue.message).join(' '), 400, 'MATRIX_INVALID');
+    res.json({ matrix, issues });
   }));
   router.post('/scenarios/:id/approve', guard((req, res) => res.json(approveTestingScenario(req.params.id, revision(body(req).revision), 'Fachliche Prüfung durch den Menschen', body(req).comment))));
   router.get('/scenarios/:id/layout', guard((req, res) => { getTestingScenario(req.params.id); res.json(getTestingLayout(req.params.id)); }));

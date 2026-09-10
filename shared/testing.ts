@@ -50,6 +50,8 @@ export interface TestingBlockInstance {
 export interface TestingMatrixTarget { blockPath: string; inputPath: string }
 export interface TestingMatrixColumn {
   id: string; label: string; target: TestingMatrixTarget;
+  /** Fehlende Rolle in gespeicherten Altmatrizen wird aus dem Assertion-Schema abgeleitet. */
+  role?: 'input' | 'expectation';
   /** UI metadata. The backend verifies this against the target definition. */
   type: TestingValueType;
 }
@@ -57,6 +59,10 @@ export interface TestingMatrixRow {
   id: string; label: string; enabled: boolean; values: Record<string, TestingValue>;
 }
 export interface TestingMatrix { columns: TestingMatrixColumn[]; rows: TestingMatrixRow[] }
+export function inferTestingMatrixColumnRole(column: TestingMatrixColumn, definitionKind?: TestingBlockKind, input?: Pick<TestingInput,'key'|'label'>): 'input'|'expectation' {
+  if(column.role)return column.role;
+  return definitionKind==='assertion'&&!!input&&(/^expected(?:[A-Z_]|$)/.test(input.key)||/^erwartet/i.test(input.label))?'expectation':'input';
+}
 export interface TestingScenario {
   id: string; title: string; intent: string; revision: number; blocks: TestingBlockInstance[];
   expectedOutcome: string; knowledgeRefs: string[]; createdAt: string; updatedAt: string;
@@ -207,6 +213,7 @@ export interface TestingBusinessDraft {
   explanation: string; assumptions: string[]; openQuestions: string[];
   matrix?: TestingMatrix;
   matrixMode?: 'keep' | 'replace' | 'remove';
+  caseDesign?: { mode: 'single' | 'matrix'; dimensions: string[]; expectedCaseCount: number; expectedResults: string[]; rationale: string };
 }
 export interface TestingScenarioEditChange {
   kind: 'add' | 'remove' | 'move' | 'values' | 'metadata'; path: string; label: string;

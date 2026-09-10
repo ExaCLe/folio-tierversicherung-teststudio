@@ -34,6 +34,10 @@ Der optionale Zusatz `TestingScenario.naming` hält Titel, Zusammenfassung, Them
 
 Ein Eingabeschema verwendet bekannte Werttypen. Auswahlfelder benötigen Auswahlwerte. Objektfelder können wiederum typisierte `fields` enthalten. `requiredWhen` und `applicableWhen` beschreiben tierartabhängige Pflichtfelder und erlaubte Angaben. Unbekannte Felder werden nicht still verworfen.
 
+Eine `TestingMatrixColumn` verweist mit `target.blockPath` und `target.inputPath` auf genau ein skalares Ablauffeld. `role` ist für alte gespeicherte Matrizen optional. Fehlt die Angabe, erkennt der Server erwartete Felder in Prüfblöcken anhand ihres Schemas als Sollwerte; alle anderen Spalten gelten als Eingaben. `role: "input"` kennzeichnet Eingaben, deren Wertelisten der Generator kartesisch kombiniert. `role: "expectation"` muss auf einen Prüfblock zeigen und erzeugt keine weiteren Kombinationen. Ihre Werteliste darf einen gemeinsamen Sollwert, genau einen Sollwert je erzeugter Zeile oder keine Werte enthalten.
+
+Eine leere Sollwertliste fordert den Server auf, vorhandene Sollwerte zu erhalten. Er ordnet sie anhand der vollständigen Eingabekombination und der fachlichen Zielpfade zu, nicht anhand der bisherigen Zeilenposition oder Spalten-ID. Neue Kombinationen enthalten für diesen Sollwert noch keinen Eintrag. Die Antwort führt diese offenen Zellen als `MATRIX_VALUE_MISSING` in `issues` auf, gibt die erzeugte Matrix aber zurück. Andere Validierungsfehler verhindern die Erzeugung. Die übergebene `revision` muss der aktuellen Testfallrevision entsprechen; sonst antwortet die Route mit HTTP 409 und `REVISION_CONFLICT`.
+
 ## Kompilierung und Fachfreigabe
 
 `compileTestingScenario(scenario, catalog, approval?)` liefert `TestingCompiledScenario` mit:
@@ -131,6 +135,7 @@ Alle Pfade beginnen mit `/api/testing`. Die Antworten sind die Datentypen aus `s
 | `POST /jobs/:id/dismiss-revision` | Verwirft einen noch offenen Ablaufvorschlag |
 | `POST /jobs/technical` | `{scenarioId,revision,model,repairBindingId?}` → Agentenauftrag einschließlich Dublettenprüfung und echtem Browserlauf |
 | `POST /scenarios/:id/run` | `{revision,model?}` → tatsächlicher Browserlauf mit vorhandenen Bindungen |
+| `POST /scenarios/:id/matrix/generate` | `{revision,columns:[{id,label,target,type,role?,values}]}` → `{matrix,issues}` mit höchstens 100 kartesischen Eingabekombinationen und gemeinsamen, zeilenweisen oder erhaltenen Sollwerten |
 | `POST /runs/:id/reuse` | `{model}` → erneute KI-Wiederverwendungsprüfung des bereits bestandenen, unveränderten Laufs, ohne Browserlauf oder neue Versicherungsobjekte |
 | `GET /jobs/:id` / `POST /jobs/:id/cancel` | Fortschritt lesen oder laufenden Auftrag abbrechen |
 | `POST /jobs/:id/resolve-duplicates` | `{choices:[{proposed,chosen}]}` → gleichwertige geprüfte Auswahl als neue fachliche Revision; erneute Freigabe erforderlich |

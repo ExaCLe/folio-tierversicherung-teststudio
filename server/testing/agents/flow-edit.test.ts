@@ -84,6 +84,22 @@ test('Gesamter Ablaufvorschlag bleibt unveröffentlicht; Übernahme erhält Iden
   assert.throws(() => applyScenarioEditJob(acceptance(job)), /bereits übernommen/);
 });
 
+test('matrixMode keep erkennt Sollwerte einer gespeicherten Legacy-Matrix ohne role',async()=>{
+  const scenario=fixture('flow-legacy-matrix');
+  scenario.matrix={columns:[
+    {id:'wert',label:'Versicherungssumme',target:{blockPath:'kuhvorschlag',inputPath:'sumInsured'},type:'money'},
+    {id:'status',label:'Erwarteter Status',target:{blockPath:'pruefung',inputPath:'expectedStatus'},type:'choice'},
+  ],rows:[
+    {id:'fall-1',label:'10.000 EUR',enabled:true,values:{wert:10000,status:'Freigegeben'}},
+    {id:'fall-2',label:'12.000 EUR',enabled:true,values:{wert:12000,status:'Direktionsprüfung'}},
+  ]};
+  const saved=repository.saveTestingScenario(scenario,scenario.revision),draft=draftOf(saved);
+  draft.caseDesign={mode:'matrix',dimensions:['Versicherungssumme'],expectedCaseCount:2,expectedResults:['Freigegeben','Direktionsprüfung'],rationale:'Die bestehende Matrix bleibt unverändert.'};
+  delete draft.matrix;
+  const job=await proposal(saved,draft),value=job.result as TestingScenarioEditProposal;
+  assert.equal(value.scenario.matrix?.rows.length,2);assert.deepEqual(value.scenario.matrix,saved.matrix);
+});
+
 test('Technische Fachlücke startet über die API einen geprüften Vorschlag auf der aktuellen Revision', async () => {
   const original = fixture('flow-technical-repair');
   const compiled = compileTestingScenario(original, getTestingCatalog());

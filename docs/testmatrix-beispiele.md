@@ -13,27 +13,27 @@ Die Assertion ist hier das fachliche Ergebnis des Laufs: Eine Rinderversicherung
 > Erstelle einen parametrisierten End-to-End-Test für eine Kuhlebensversicherung. Verwende für jede Zeile der folgenden Testmatrix denselben Ablauf: Kunde anlegen, Betrieb mit dem Matrixwert für `Bundesland` anlegen, dieselbe Kuh Alma mit ihren festen Pflichtangaben anlegen, den Matrixwert für `Versicherungssumme` setzen, Angebot berechnen und Antrag einreichen. Die Matrix hat drei Spalten: `Bundesland` und `Versicherungssumme` sind variable Eingabefelder; `Erwarteter Status` ist ein explizites Assertionfeld und darf nicht aus dem beobachteten Ergebnis abgeleitet oder nachträglich überschrieben werden. Prüfe pro Lauf als Assertions, dass das gespeicherte Bundesland dem Matrixwert entspricht und dass der Vorschlagsstatus exakt dem Wert aus `Erwarteter Status` entspricht. Schließe keinen Vertrag ab. Jeder Lauf muss eigene Testdaten und eine eigene Vorschlagsreferenz verwenden.
 >
 > ```text
-> Bundesland      | Versicherungssumme | Erwarteter Status
-> Niedersachsen   | 10.000 EUR         | Freigegeben
-> Niedersachsen   | 10.001 EUR         | Direktionsprüfung
-> Bayern          | 10.000 EUR         | Freigegeben
-> Bayern          | 10.001 EUR         | Freigegeben
-> Bayern          | 11.000 EUR         | Freigegeben
-> Bayern          | 11.001 EUR         | Direktionsprüfung
+> Bundesland | Versicherungssumme | Erwarteter Status
+> Bayern     | 10.000 EUR          | Freigegeben
+> Bayern     | 11.000 EUR          | Freigegeben
+> Bayern     | 12.000 EUR          | Direktionsprüfung
+> Hessen     | 10.000 EUR          | Freigegeben
+> Hessen     | 11.000 EUR          | Direktionsprüfung
+> Hessen     | 12.000 EUR          | Direktionsprüfung
 > ```
 
-Die Zeilen prüfen beide standortabhängigen Grenzen und die Werte direkt darüber. Der erwartete Status ist pro Zeile Teil der Testdefinition und damit die Prüfvorlage; ein Lauf darf ihn nicht aus seinem tatsächlichen Ergebnis berechnen. Für einen konkreten 100-Zeilen-Lauf kann die UI zehn tatsächlich angebotene Bundesländer (zum Beispiel Baden-Württemberg, Bayern, Berlin, Brandenburg, Bremen, Hamburg, Hessen, Mecklenburg-Vorpommern, Niedersachsen und Nordrhein-Westfalen) mit den zehn Summenwerten 11.001, 12.000, 13.000, 14.000, 15.000, 16.000, 17.000, 18.000, 19.000 und 20.000 EUR kombinieren. Alle 100 Zeilen erhalten dabei den expliziten erwarteten Status `Direktionsprüfung`; es entstehen 100 Testdatenzeilen, nicht 100 Kopien des Scratch-Ablaufs. Die kleine Grenzwertmatrix oben bleibt der Grenzfallnachweis.
+Die Zeilen prüfen die bayerische Sondergrenze und die niedrigere Grenze in Hessen. Der erwartete Status ist pro Zeile Teil der Testdefinition und damit die Prüfvorlage. Ein Lauf darf ihn nicht aus seinem tatsächlichen Ergebnis berechnen oder nachträglich überschreiben.
 
 ## Bedienung der Matrix im Teststudio
 
-Nach dem fachlichen Ablauf wird die optionale Matrix über den Schalter „Mit Testdaten variieren“ aktiviert. Beim ersten Öffnen sind noch keine Testfallzeilen erzeugt; die Vorschau zählt die möglichen Kombinationen aus den eingetragenen Werten.
+Nach dem fachlichen Ablauf wird die optionale Matrix über den Schalter „Mit Testdaten variieren“ aktiviert. Jede Tabellenzeile beschreibt genau einen Testlauf. Die Werte derselben Zeile bleiben gekoppelt.
 
-1. Klicke „Erste Spalte hinzufügen“. Wähle im Feld „Feld im Ablauf“ das Eingabefeld für `Bundesland` und trage unter „Werte für Kombinationen“ je einen Bundeslandwert in eine eigene Zeile ein.
-2. Klicke „Spalte hinzufügen“. Wähle das Eingabefeld für `Versicherungssumme` und trage die zehn Summenwerte ein. Die Vorschau muss jetzt 100 Kombinationen anzeigen.
-3. Füge eine weitere Spalte hinzu und wähle im „Feld im Ablauf“ das Feld `Erwarteter Zustand` aus dem vorhandenen Status-Prüfblock. Trage unter „Werte für Kombinationen“ für den beschriebenen 100-Zeilen-Lauf nur den einen Wert `Direktionsprüfung` ein. Dieser einzelne Wert gilt als Erwartung für jede Kombination; er erzeugt keine weiteren Kombinationen.
-4. Klicke „Kombinationen erzeugen“. Die Tabelle enthält danach höchstens 100 Zeilen. Mit „Ausführen“ werden einzelne Zeilen ein- oder ausgeschlossen; die Ausführung startet über den normalen Lauf des Testfalls.
+1. Klicke „Erste Eingabe hinzufügen“ und wähle `Bundesland` aus dem Vorbereitungsblock. Wähle Bayern und ergänze mit „Weiteren Wert“ Hessen.
+2. Klicke „Eingabe hinzufügen“, wähle `Versicherungssumme` aus demselben Block und trage 10.000, 11.000 und 12.000 EUR als einzelne Werte ein. Die Vorschau zeigt sechs Kombinationen.
+3. Klicke „Erwartetes Ergebnis hinzufügen“ und wähle `Erwarteter Zustand` aus dem Status-Prüfblock. Erzeuge die Kombinationen und übertrage anschließend die sechs Sollwerte aus der Tabelle oben zeilenweise. Geldbeträge werden als Geldwerte gespeichert, Bundesland und Status als erlaubte Auswahlwerte.
+4. Speichere den Testfall und lade ihn neu. Prüfe vor dem Lauf, dass die sechs Kombinationen unverändert angezeigt werden. Mit „Ausführen“ lassen sich einzelne Zeilen ein- oder ausschließen.
 
-Das Ergebnis zeigt für eine Matrix den Text „Alle Testfälle sind bestanden“ oder die Anzahl im Format „x von y Testfällen bestanden“. Bei einer Abweichung öffnet die betroffene Zeile die ausgeführten Schritte und den konkreten Fehler. Die vier kleinen Beispielzeilen können entweder als manuelle Zeilen gepflegt oder über je zwei Werte für `Bundesland` und `Versicherungssumme` erzeugt werden. Setze anschließend die erwarteten Statuswerte entsprechend der Beispieltabelle. Die 100-Zeilen-Variante ist ein separater Generatorlauf. Eine Matrix unterstützt höchstens 20 Spalten.
+Das Ergebnis zeigt für eine Matrix den Text „Alle Testfälle sind bestanden“ oder die Anzahl im Format „x von y Testfällen bestanden“. Bei einer Abweichung öffnet die betroffene Zeile die ausgeführten Schritte und den konkreten Fehler. Eine Matrix unterstützt höchstens 20 Spalten und 100 Zeilen.
 
 ## Warum die Matrix nicht „Bundesland und Alter der Kuh“ verwendet
 

@@ -15,7 +15,7 @@ if(process.env.FOLIO_BUSINESS_MODE==='fail')process.exit(1);
 const schema=JSON.parse(readFileSync(args[args.indexOf('--output-schema')+1],'utf8'));let response;
 if(schema.properties.requestedTitleQuote){if(process.env.FOLIO_BUSINESS_MODE==='naming-fail')process.exit(1);const context=JSON.parse(readFileSync('anforderung.json','utf8'));const requested=context.request.includes('Titel: Gewünschter Fachtest');response={title:requested?'Gewünschter Fachtest':'Fachliche Anforderung nachvollziehbar prüfen',summary:'Synthetische Zusammenfassung der Testabsicht.',tags:['Fachprüfung'],titleSource:requested?'user-request':'agent',requestedTitleQuote:requested?'Gewünschter Fachtest':null};}
 else if(schema.properties.knowledgeIds){const docs=JSON.parse(readFileSync('wissen.json','utf8'));const unanswered=process.env.FOLIO_BUSINESS_MODE==='question';response={decision:'finish',explanation:'Synthetische Wissensprüfung, keine KI-Erkundung.',knowledgeIds:[docs[0].id],gaps:unanswered?['Welche zusätzliche fachliche Regel gilt?']:[],questions:[{id:'anforderung-1',text:'Welche fachlichen Regeln gelten für die Anforderung?',requiresBrowser:false,status:'answered',answer:'Die synthetische Wissensprüfung verwendet die bereitgestellte Regel.',knowledgeIds:[docs[0].id],evidenceIds:[]},...(unanswered?[{id:'zusatzregel',text:'Welche zusätzliche fachliche Regel gilt?',requiresBrowser:false,status:'open',answer:'',knowledgeIds:[],evidenceIds:[]}]:[])],action:null,findings:[]};}
-else response=JSON.parse(readFileSync(process.env.FOLIO_BUSINESS_FIXTURE,'utf8'));
+else{const fixture=JSON.parse(readFileSync(process.env.FOLIO_BUSINESS_FIXTURE,'utf8'));response=fixture.initial?(process.cwd().endsWith('-korrektur')?(fixture.correction??fixture.initial):fixture.initial):fixture;}
 writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(response));
 `,{mode:0o700});
 const repository=await import('../repository');
@@ -186,4 +186,20 @@ test('Ein erster fachlich fehlerhafter Entwurf bleibt editierbar und bekommt kei
   const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),invalid=JSON.parse(previous);invalid.blocks.at(-1).inputs.find((input:any)=>input.key==='proposalId').valueJson=JSON.stringify({ref:'nicht-angelegter-vorschlag'});
   await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,JSON.stringify(invalid));
   try{const job=orchestrator.startBusinessJob({request:'Die erste Planung enthält noch eine zu korrigierende Referenz.',model:'luna'}),completed=await orchestrator.waitTestingJob(job.id);assert.equal(completed.status,'completed',completed.error);const scenario=repository.getTestingScenario(job.scenarioId!);assert.equal(scenario.revision,3);assert(scenario.blocks.length);assert.equal((completed.result as any).compiled.valid,false);assert.equal(repository.getTestingApproval(scenario.id),undefined);assert.equal(lifecycle(scenario.id).phase,'review');assert.equal(lifecycle(scenario.id).nextAction,'review');}finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}
+});
+
+test('Fallplanung erzwingt eine fehlende Matrix per Korrektur und übernimmt erst die konsistente Antwort',async()=>{
+  const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),base=JSON.parse(previous);
+  const initial={...base,caseDesign:{mode:'matrix',dimensions:['Bundesland'],expectedCaseCount:2,expectedResults:['Freigegeben','Direktionsprüfung'],rationale:'Zwei Kombinationen sind gefordert.'},matrix:null};
+  const correction={...base,caseDesign:{mode:'single',dimensions:[],expectedCaseCount:1,expectedResults:['Direktionsprüfung'],rationale:'Das Fixture bildet nach Korrektur genau einen Fall.'},matrix:null};
+  await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,JSON.stringify({initial,correction}));
+  try{const job=orchestrator.startBusinessJob({request:'Synthetische Fallplanungs-Korrektur.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'completed',done.error);assert.equal((done.result as any).attempts.length,2);assert.match((done.result as any).attempts[0].errors.join('\n'),/CASE_DESIGN_MATRIX_MISSING/);assert.equal((done.result as any).draft.caseDesign.mode,'single');assert(repository.getTestingScenario(job.scenarioId!).blocks.length);}
+  finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}
+});
+
+test('Zwei inkonsistente Fallplanungen scheitern und übernehmen keinen fachlichen Entwurf',async()=>{
+  const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),base=JSON.parse(previous),invalid={...base,caseDesign:{mode:'single',dimensions:['Bundesland'],expectedCaseCount:2,expectedResults:['Freigegeben','Direktionsprüfung'],rationale:'Absichtlich widersprüchliches Fixture.'},matrix:null};
+  await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,JSON.stringify({initial:invalid,correction:invalid}));
+  try{const job=orchestrator.startBusinessJob({request:'Synthetische dauerhaft inkonsistente Fallplanung.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'failed');assert.match(done.error!,/CASE_DESIGN_SINGLE_COUNT/);const scenario=repository.getTestingScenario(job.scenarioId!);assert.deepEqual(scenario.blocks,[]);assert.equal(scenario.revision,2,'Nur die unabhängige Benennung darf vor der fehlgeschlagenen Fachplanung gespeichert sein.');assert.equal(repository.getTestingApproval(scenario.id),undefined);}
+  finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}
 });

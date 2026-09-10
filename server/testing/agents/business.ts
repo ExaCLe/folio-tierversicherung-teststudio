@@ -4,7 +4,7 @@ import type { TestingAgentEvent, TestingCatalog, TestingModel, TestingScenario }
 import { previewTestingBusinessDraft } from '../repository';
 import { invokeCodex } from './cli';
 import { agentContext, businessPrompt } from './prompts';
-import { BUSINESS_SCHEMA, decodeBusinessDraft } from './schemas';
+import { BUSINESS_SCHEMA, decodeBusinessDraft, validateTestingCaseDesign } from './schemas';
 
 /** A failed schema or compiler check is fed back to the real model once. No local
  * template changes the model's business proposal. Both attempts stay on disk. */
@@ -25,9 +25,13 @@ export async function planBusinessWithCodex(input: { id: string; model: TestingM
       const draft = decodeBusinessDraft(result.value);
       const preview = previewTestingBusinessDraft(input.request, draft, input.model, input.catalog);
       const errors = preview.compiled.issues.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`);
-      attempts.push({ id, contextHash: result.contextHash, valid: preview.compiled.valid, errors });
+      const caseErrors=validateTestingCaseDesign(draft,draft.matrix,preview.scenario,preview.catalog);errors.push(...caseErrors);
+      const valid=preview.compiled.valid&&!errors.length;
+      attempts.push({ id, contextHash: result.contextHash, valid, errors });
       await writeFile(resolve(result.directory, 'validated-draft.json'), JSON.stringify({ draft, preview, attempts }, null, 2));
-      if (preview.compiled.valid || attempt === 1) return { result, draft, preview, attempts };
+      if (valid) return { result, draft, preview, attempts };
+      if(attempt===1&&caseErrors.length)throw new Error(`Auch die KI-Korrektur ist in ihrer Fallplanung nicht konsistent: ${caseErrors.join('\n')}`);
+      if(attempt===1)return {result,draft,preview,attempts};
       diagnostic = errors.join('\n');
     } catch (error) {
       diagnostic = error instanceof Error ? error.message : String(error);

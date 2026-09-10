@@ -115,27 +115,52 @@ test('Testdatenmatrix erzeugt und speichert typisierte Kombinationen aus lesbare
   const matrix = page.getByRole('region', { name: 'Mit Testdaten variieren', exact: true });
   await expect(matrix).toBeVisible();
   await matrix.getByRole('checkbox').first().check();
-  await matrix.getByRole('button', { name: 'Erste Spalte hinzufügen', exact: true }).click();
+  await matrix.getByRole('button', { name: 'Erste Eingabe hinzufügen', exact: true }).click();
   const firstField = matrix.getByLabel(/Feld für/).first();
-  const sumOption = await firstField.locator('option').filter({ hasText: 'Versicherungssumme in EUR' }).first().getAttribute('value');
-  expect(sumOption).toBeTruthy(); await firstField.selectOption(sumOption!);
-  await matrix.getByLabel('Werte für Versicherungssumme in EUR').fill('10.000\n10.001');
-  await matrix.getByRole('button', { name: 'Spalte hinzufügen', exact: true }).click();
+  const stateOption = await firstField.locator('option').filter({ hasText: 'Bundesland' }).first().getAttribute('value');
+  expect(stateOption).toBeTruthy(); await firstField.selectOption(stateOption!);
+  await matrix.getByLabel('Bundesland, Kombinationswert 1').selectOption({ label: 'Bayern' });
+  await matrix.getByRole('button', { name: 'Weiteren Wert', exact: true }).click();
+  await matrix.getByLabel('Bundesland, Kombinationswert 2').selectOption({ label: 'Hessen' });
+  await matrix.getByRole('button', { name: 'Eingabe hinzufügen', exact: true }).click();
   const secondField = matrix.getByLabel(/Feld für/).nth(1);
-  const statusOption = await secondField.locator('option').filter({ hasText: 'Erwarteter Zustand' }).first().getAttribute('value');
-  expect(statusOption).toBeTruthy(); await secondField.selectOption(statusOption!);
-  await matrix.getByLabel('Werte für Erwarteter Zustand').fill('Direktionsprüfung');
-  await expect(matrix).toContainText('2 Kombinationen in der Vorschau');
+  const sumOption = await secondField.locator('option').filter({ hasText: 'Versicherungssumme in EUR' }).first().getAttribute('value');
+  expect(sumOption).toBeTruthy(); await secondField.selectOption(sumOption!);
+  const firstSum = matrix.getByLabel('Versicherungssumme in EUR, Kombinationswert 1');
+  await firstSum.clear();
+  await firstSum.pressSequentially('10.000,50');
+  await expect(firstSum).toHaveValue('10.000,50');
+  await firstSum.fill('10.000');
+  await matrix.getByRole('button', { name: 'Weiteren Wert', exact: true }).nth(1).click();
+  await matrix.getByLabel('Versicherungssumme in EUR, Kombinationswert 2').fill('11.000');
+  await matrix.getByRole('button', { name: 'Weiteren Wert', exact: true }).nth(1).click();
+  await matrix.getByLabel('Versicherungssumme in EUR, Kombinationswert 3').fill('12.000');
+  await matrix.getByRole('button', { name: 'Erwartetes Ergebnis hinzufügen', exact: true }).click();
+  const statusField = matrix.getByLabel(/Feld für/).nth(2);
+  const statusOption = await statusField.locator('option').filter({ hasText: 'Erwarteter Zustand' }).first().getAttribute('value');
+  expect(statusOption).toBeTruthy(); await statusField.selectOption(statusOption!);
+  await expect(matrix).toContainText('6 Kombinationen in der Vorschau');
   await matrix.getByRole('button', { name: 'Kombinationen erzeugen', exact: true }).click();
-  await expect(matrix.getByRole('row')).toHaveCount(3);
-  await expect(matrix).toContainText('2 von 2 Testfällen werden ausgeführt');
+  await expect(matrix.getByRole('row')).toHaveCount(8);
+  const expected = ['Freigegeben', 'Freigegeben', 'Direktionsprüfung', 'Freigegeben', 'Direktionsprüfung', 'Direktionsprüfung'];
+  for (const [index, value] of expected.entries()) await matrix.getByLabel(`Fall ${index + 1}: Erwarteter Zustand`).selectOption({ label: value });
+  await expect(matrix).toContainText('6 von 6 Testfällen werden ausgeführt');
   await page.screenshot({ path: '.local/verification/matrix/testmatrix-tabelle.png', fullPage: true });
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
   const saved = await readScenario(request, current.id);
-  expect(saved.matrix?.rows.map(row => row.values)).toEqual([
-    expect.objectContaining({ [saved.matrix!.columns[0].id]: 10000, [saved.matrix!.columns[1].id]: 'Direktionsprüfung' }),
-    expect.objectContaining({ [saved.matrix!.columns[0].id]: 10001, [saved.matrix!.columns[1].id]: 'Direktionsprüfung' }),
+  expect(saved.matrix?.columns.map(column => [column.type, column.role])).toEqual([['choice', 'input'], ['money', 'input'], ['choice', 'expectation']]);
+  const [state, sum, status] = saved.matrix!.columns.map(column => column.id);
+  expect(saved.matrix?.rows.map(row => [row.values[state], row.values[sum], row.values[status]])).toEqual([
+    ['Bayern', 10000, 'Freigegeben'], ['Bayern', 11000, 'Freigegeben'], ['Bayern', 12000, 'Direktionsprüfung'],
+    ['Hessen', 10000, 'Freigegeben'], ['Hessen', 11000, 'Direktionsprüfung'], ['Hessen', 12000, 'Direktionsprüfung'],
   ]);
+  await page.reload();
+  await expect(matrix).toContainText('6 von 6 Testfällen werden ausgeführt');
+  await expect(matrix.getByLabel('Fall 3: Erwarteter Zustand')).toHaveValue('Direktionsprüfung');
+  await expect(matrix.getByLabel('Fall 5: Erwarteter Zustand')).toHaveValue('Direktionsprüfung');
+  await matrix.getByRole('button', { name: 'Kombinationen aktualisieren', exact: true }).click();
+  await expect(matrix.getByRole('row')).toHaveCount(8);
+  for (const [index, value] of expected.entries()) await expect(matrix.getByLabel(`Fall ${index + 1}: Erwarteter Zustand`)).toHaveValue(value);
 });
 
 test('Offene Bausteinentscheidung zeigt keinen alten grünen Lauf als aktuelles Ergebnis', async ({ page, request }, testInfo) => {

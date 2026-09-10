@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import type { TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingInput, TestingKnowledgeDocument, TestingTechnicalBinding } from '../../../shared/testing';
+import type { TestingBlockDefinition, TestingBlockInstance, TestingBusinessDraft, TestingCatalog, TestingCompiledScenario, TestingInput, TestingKnowledgeDocument, TestingScenario, TestingTechnicalBinding } from '../../../shared/testing';
+import { testingMatrixColumnRole } from '../matrix';
 
 import { duplicateComparisonCandidates, duplicateReviewSubjects } from './duplicate-context';
 
@@ -25,11 +26,12 @@ const definition = object({ id: string, version: string, name: string, descripti
   operation: nullable(string), bindingId: nullable(string), body: array({ $ref: '#/$defs/instance' }), exports: array(object({ key: string, ref: string, type: typeSchema })) });
 const knowledge = object({ id: string, title: string, kind: { enum: ['concept', 'rule', 'procedure', 'technical'] }, summary: string, content: string,
   definitionRefs: array(ref), relatedKnowledge: strings, requiredFields: strings, preconditions: strings, postconditions: strings });
-const matrix = object({ columns: array(object({ id: identifier, label: string, blockPath: string, inputPath: string, type: typeSchema })),
+const matrix = object({ columns: array(object({ id: identifier, label: string, blockPath: string, inputPath: string, role: { enum: ['input', 'expectation'] }, type: typeSchema })),
   rows: array(object({ id: identifier, label: string, enabled: boolean, values: pairs })) });
 
 /** Strict schema uses key/value rows for extensible maps, then validates decoded domain data. */
 export const BUSINESS_SCHEMA = { ...object({ title: string, expectedOutcome: string, blocks: array({ $ref: '#/$defs/instance' }), knowledgeRefs: strings,
+  caseDesign: object({ mode: { enum: ['single', 'matrix'] }, dimensions: strings, expectedCaseCount: { type: 'integer', minimum: 1, maximum: 100 }, expectedResults: strings, rationale: string }),
   newDefinitions: array(definition), newKnowledge: array(knowledge), explanation: string, assumptions: strings, openQuestions: strings }), $defs: { instance } };
 BUSINESS_SCHEMA.properties.matrix = nullable({ ...matrix, description: 'Explizite Testmatrix oder null. Nur verwenden, wenn die Anforderung mehrere Datenkombinationen verlangt. blockPath und inputPath müssen exakt auf ein Eingabefeld im vorgeschlagenen Ablauf zeigen.' });
 BUSINESS_SCHEMA.required.push('matrix');
@@ -106,8 +108,9 @@ function decodeInstance(raw: any, depth = 0): TestingBlockInstance {
 }
 export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
   const value = z.object({ title: text.min(1), expectedOutcome: text.min(1), blocks: z.array(z.unknown()).max(100), knowledgeRefs: z.array(id),
+    caseDesign: z.object({ mode: z.enum(['single','matrix']), dimensions: z.array(text), expectedCaseCount: z.number().int().min(1).max(100), expectedResults: z.array(text), rationale: text }).strict().optional(),
     newDefinitions: z.array(z.any()).max(30), newKnowledge: z.array(z.any()).max(30), explanation: text, assumptions: z.array(text), openQuestions: z.array(text), matrix: z.object({
-      columns: z.array(z.object({ id, label: text.min(1), blockPath: text.min(1), inputPath: text.min(1), type: valueType }).strict()).min(1).max(20),
+      columns: z.array(z.object({ id, label: text.min(1), blockPath: text.min(1), inputPath: text.min(1), role: z.enum(['input','expectation']), type: valueType }).strict()).min(1).max(20),
       rows: z.array(z.object({ id, label: text.min(1), enabled: z.boolean(), values: z.array(pairZ) }).strict()).min(1).max(100),
     }).strict().nullable().optional() }).strict().parse(raw);
   const newDefinitions: TestingBlockDefinition[] = value.newDefinitions.map(row => ({
@@ -132,6 +135,18 @@ export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
   const { matrix: rawMatrix, ...draft } = value;
   return { ...draft, blocks: value.blocks.map(block => decodeInstance(block)), newDefinitions, newKnowledge,
     ...(rawMatrix ? { matrix: { columns: rawMatrix.columns.map(({ blockPath, inputPath, ...column }) => ({ ...column, target: { blockPath, inputPath } })), rows: rawMatrix.rows.map(row => ({ ...row, values: decodedPairs(row.values) })) } } : {}) };
+}
+export function validateTestingCaseDesign(draft:TestingBusinessDraft,matrix=draft.matrix,scenario?:TestingScenario,catalog?:TestingCatalog):string[]{
+  const design=draft.caseDesign;if(!design)return [];
+  const errors:string[]=[];
+  if(design.mode==='single'&&(design.expectedCaseCount!==1||design.dimensions.length))errors.push('CASE_DESIGN_SINGLE_COUNT: Ein Einzelfall muss genau einen erwarteten Fall und keine variierte Dimension ausweisen. Verwende für mehrere Fälle eine Matrix.');
+  if(design.mode==='matrix'&&!design.dimensions.length)errors.push('CASE_DESIGN_DIMENSIONS_MISSING: Eine Matrixplanung muss mindestens eine variierte Eingabedimension benennen.');
+  if(design.mode==='matrix'&&!matrix)errors.push('CASE_DESIGN_MATRIX_MISSING: caseDesign beschreibt mehrere Fälle, aber der Entwurf enthält keine Testmatrix. Lege die genannten Dimensionen als Eingabespalten und die Zielergebnisse als zeilenweise Sollwertspalten an.');
+  if(design.mode==='single'&&matrix)errors.push('CASE_DESIGN_SINGLE_MISMATCH: caseDesign beschreibt einen Einzelfall, der Entwurf enthält aber eine Testmatrix. Korrigiere die Planungsentscheidung oder entferne die Matrix.');
+  if(design.mode==='matrix'&&matrix){const inputIds=matrix.columns.filter(column=>scenario&&catalog?testingMatrixColumnRole(column,scenario,catalog)!=='expectation':column.role!=='expectation').map(column=>column.id),tuples=new Set(matrix.rows.map(row=>JSON.stringify(inputIds.map(id=>row.values[id]))));
+    if(tuples.size!==matrix.rows.length)errors.push('CASE_DESIGN_DUPLICATE_CASES: Die Matrix enthält doppelte Eingabekombinationen. Jede Kombination darf genau eine Zeile mit ihren Sollwerten besitzen.');
+    if(design.expectedCaseCount!==matrix.rows.length)errors.push(`CASE_DESIGN_CASE_COUNT: caseDesign erwartet ${design.expectedCaseCount} Fälle, die Matrix enthält ${matrix.rows.length}. Vervollständige die Kombinationen oder korrigiere die begründete Planung.`);}
+  return errors;
 }
 export function decodeTechnicalPlan(raw: unknown) {
   const value = z.object({ explanation: text, reuseBindings: z.array(z.object({ id, revision: z.number().int().positive() }).strict()),

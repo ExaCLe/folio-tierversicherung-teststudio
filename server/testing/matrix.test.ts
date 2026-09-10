@@ -62,6 +62,61 @@ test('Kartesische Erzeugung liefert deterministisch 100 Zeilen und stoppt vor 10
   }))), (error: any) => error?.code === 'MATRIX_COLUMN_LIMIT');
 });
 
+test('Eingaben werden kreuzkombiniert und Sollwerte exakt zeilenweise zugeordnet', () => {
+  const generated=generateTestingMatrix([
+    {...column('land','aussen/mitte/pruefen','profil.adresse.land','text'),role:'input' as const,values:['Bayern','Hessen']},
+    {...column('wert','aussen/mitte/pruefen','profil.alter','number'),role:'input' as const,values:[10000,11000,12000]},
+    {...column('status','aussen/mitte/pruefen','expected','text'),role:'expectation' as const,values:['Freigegeben','Freigegeben','Direktionsprüfung','Freigegeben','Direktionsprüfung','Direktionsprüfung']},
+  ]);
+  assert.equal(generated.rows.length,6);
+  assert.deepEqual(generated.rows.map(row=>row.values),[
+    {land:'Bayern',wert:10000,status:'Freigegeben'},{land:'Bayern',wert:11000,status:'Freigegeben'},{land:'Bayern',wert:12000,status:'Direktionsprüfung'},
+    {land:'Hessen',wert:10000,status:'Freigegeben'},{land:'Hessen',wert:11000,status:'Direktionsprüfung'},{land:'Hessen',wert:12000,status:'Direktionsprüfung'},
+  ]);
+  assert.throws(()=>generateTestingMatrix([
+    {...column('land','aussen/mitte/pruefen','profil.adresse.land','text'),role:'input' as const,values:['Bayern','Hessen']},
+    {...column('status','aussen/mitte/pruefen','expected','text'),role:'expectation' as const,values:['Freigegeben','Direktionsprüfung','Unklar']},
+  ]),(error:any)=>error?.code==='MATRIX_EXPECTATION_COUNT');
+});
+
+test('Alte erwartete Assertion-Spalten werden semantisch als Sollwert erkannt',()=>{
+  const scenario=baseScenario();
+  scenario.matrix=matrix([column('status','aussen/mitte/pruefen','expected','text')],{status:'Freigegeben'});
+  assert.deepEqual(validateTestingMatrix(scenario,baseCatalog),[]);
+  const generated=generateTestingMatrix([
+    {...column('status','aussen/mitte/pruefen','expected','text'),values:['Freigegeben']},
+  ],scenario,baseCatalog);
+  assert.equal(generated.rows.length,1);
+  assert.equal(generated.rows[0].values.status,'Freigegeben');
+});
+
+test('Regenerieren bewahrt Sollwerte anhand der Eingabekombination statt ihres Zeilenindex',()=>{
+  const scenario=baseScenario();
+  scenario.matrix={columns:[
+    {...column('land-alt','aussen/mitte/pruefen','profil.adresse.land','text'),role:'input'},
+    {...column('status-alt','aussen/mitte/pruefen','expected','text'),role:'expectation'},
+  ],rows:[
+    {id:'hessen',label:'Hessen',enabled:true,values:{'land-alt':'Hessen','status-alt':'Direktionsprüfung'}},
+    {id:'bayern',label:'Bayern',enabled:true,values:{'land-alt':'Bayern','status-alt':'Freigegeben'}},
+  ]};
+  const regenerated=generateTestingMatrix([
+    {...column('land-neu','aussen/mitte/pruefen','profil.adresse.land','text'),role:'input' as const,values:['Bayern','Hessen','Sachsen']},
+    {...column('status-neu','aussen/mitte/pruefen','expected','text'),role:'expectation' as const,values:[]},
+  ],scenario,baseCatalog);
+  assert.deepEqual(regenerated.rows.map(row=>row.values),[
+    {'land-neu':'Bayern','status-neu':'Freigegeben'},
+    {'land-neu':'Hessen','status-neu':'Direktionsprüfung'},
+    {'land-neu':'Sachsen'},
+  ]);
+});
+
+test('Explizite Sollwerte müssen einen Assertionblock adressieren',()=>{
+  const action=definition({...leaf,id:'matrix.aktion-ziel',kind:'action'}),catalog={...baseCatalog,definitions:[action],bindings:[binding(action.id)]};
+  const scenario=baseScenario([instance('aktion',action.id)]);
+  scenario.matrix=matrix([{...column('status','aktion','expected','text'),role:'expectation'}],{status:'Freigegeben'});
+  assert.ok(validateTestingMatrix(scenario,catalog).some(issue=>issue.code==='MATRIX_EXPECTATION_TARGET'));
+});
+
 test('Zweifach verschachtelte Definitionskörper erhalten Objekt-Defaults und Geschwisterfelder', () => {
   const scenario = baseScenario();
   scenario.matrix = matrix([column('land', 'aussen/mitte/pruefen', 'profil.adresse.land', 'text')], { land: 'AT' });

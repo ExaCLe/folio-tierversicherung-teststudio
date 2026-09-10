@@ -3,7 +3,7 @@ import { currentTestingChildren, currentTestingDefinition, testingVersionKey } f
 import { stableTestingStringify } from '../compiler';
 import { previewTestingScenarioEdit } from '../repository';
 import { agentContext, flowRevisionPrompt } from './prompts';
-import { BUSINESS_SCHEMA, decodeBusinessDraft } from './schemas';
+import { BUSINESS_SCHEMA, decodeBusinessDraft, validateTestingCaseDesign } from './schemas';
 import { reviewWithCodex } from './reviews';
 
 // Flow editing must distinguish an inherited body from a deliberately emptied body.
@@ -97,6 +97,7 @@ export async function planScenarioEdit(input: { id: string; model: TestingModel;
       const restoreLabels = (blocks: TestingBlockInstance[], parent = '') => { for (const block of blocks) { const path = parent ? `${parent}/${block.id}` : block.id; if (labels.has(path)) block.label = labels.get(path); if (block.children) restoreLabels(block.children, path); } };
       restoreLabels(draft.blocks);
       const preview = previewTestingScenarioEdit(input.scenario, draft, input.model, input.catalog);
+      const caseErrors=validateTestingCaseDesign(draft,preview.scenario.matrix,preview.scenario,preview.catalog);if(caseErrors.length)throw new Error(caseErrors.join('\n'));
       if (!preview.compiled.valid) throw new Error(preview.compiled.issues.filter(issue => issue.severity === 'error').map(issue => `${issue.path ?? issue.instanceId ?? 'Testfall'}: ${issue.code}: ${issue.message}`).join('\n'));
       return { draft, scenario: preview.scenario, compiled: preview.compiled, changes: scenarioEditChanges(input.scenario, preview.scenario, preview.catalog) };
     } });

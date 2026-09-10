@@ -1,0 +1,20 @@
+.t-matrix-column-groups { display: grid; gap: 18px; }
+.t-matrix-column-groups section { display: grid; gap: 8px; }
+.t-matrix-column-groups h4 { margin: 0; color: #3f583e; font-size: 12px; }
+.t-matrix-column-groups h4 span { margin-left: 6px; color: #82907c; font-size: 9px; font-weight: 400; }
+.t-matrix-column.expectation { border-left: 3px solid #80a8df; }
+.t-matrix-source { display: grid; gap: 6px; }
+.t-matrix-source > span { font-size: 10px; font-weight: 600; color: #63715e; }
+.t-matrix-source-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px; align-items: center; gap: 5px; }
+.t-matrix-source-row > .t-icon { width: 30px; height: 30px; }
+.t-matrix-column-help { align-self: center; margin: 0; color: #697b85; font-size: 10px; line-height: 1.45; }
+.t-matrix-value-unit { display: flex; align-items: center; }
+.t-matrix-value-unit input { border-radius: 5px 0 0 5px; }
+.t-matrix-value-unit span { align-self: stretch; display: grid; place-items: center; padding: 0 7px; border: 1px solid #cfdac8; border-left: 0; border-radius: 0 5px 5px 0; background: #f5f7f2; color: #697563; }
+.t-matrix-group-row th { text-align: center; border-right: 1px solid #d8e1d2; }
+.t-matrix-group-row .input-group { background: #e8f1e4; color: #376044; }
+.t-matrix-group-row .expectation-group { background: #e8f0fb; color: #315f9a; }
+.t-matrix-table-wrap td.expectation-cell { background: #f8fbff; }
+.t-matrix-confirm { display: flex; align-items: center; gap: 8px; }
+.t-matrix-confirm span { flex: 1; }
+.t-matrix-expectation-hint { color: #697b85; font-size: 9px; line-height: 1.4; max-width: 210px; }
