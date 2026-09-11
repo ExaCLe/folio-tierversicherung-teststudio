@@ -1,5 +1,5 @@
-import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, Info, LoaderCircle, MessageSquare, Play, Plus, RefreshCw, Save, Send, Sparkles, Workflow, X } from 'lucide-react';
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ArrowLeft, Bot, Check, ChevronRight, CircleStop, ExternalLink, Info, LoaderCircle, MessageSquare, Play, Plus, Redo2, RefreshCw, Save, Send, Sparkles, Undo2, Workflow, X } from 'lucide-react';
 import { currentTestingChildren, type TestingAgentSettings, type TestingBlockInstance, type TestingCatalog, type TestingScenario, type TestingScenarioLayout, type TestingValue } from '../../shared/testing';
 import type { TestingChatCommand, TestingChatEntry, TestingChatQuestion, TestingChatSnapshot, TestingChatTask } from '../../shared/testing-chat';
 import { AgentSettingsContext, ModelSelect } from '../testing/AgentModels';
@@ -23,16 +23,46 @@ const route = () => {
 };
 const draftKey = (id: string) => `folio-testing-chat-draft:${id}`;
 const draftBackupKey = (id: string) => `folio-testing-chat-draft-backup:${id}`;
+const draftHistoryKey = (id: string) => `folio-testing-chat-draft-history:${id}`;
 const layoutKey = (id: string) => `folio-testing-chat-layout:${id}`;
 
+function catalogContainsScenario(catalog: TestingCatalog, scenario: TestingScenario | undefined) {
+  if (!scenario) return true;
+  const definitions = new Set(catalog.definitions.map(definition => `${definition.id}@${definition.version}`));
+  const contains = (blocks: TestingBlockInstance[], seen = new Set<string>(), depth = 0): boolean => blocks.every(block => {
+    const key = `${block.definition.id}@${block.definition.version}`;
+    if (!definitions.has(key)) return false;
+    if (depth >= 12) return true;
+    if (block.children) return contains(block.children, seen, depth + 1);
+    if (seen.has(key)) return true;
+    return contains(currentTestingChildren(block, catalog), new Set([...seen, key]), depth + 1);
+  });
+  return contains(scenario.blocks);
+}
+const HISTORY_LIMIT = 30;
+
+type DraftHistory = { past: TestingScenario[]; present: TestingScenario; future: TestingScenario[] };
+const sameDraft = (left: TestingScenario, right: TestingScenario) => JSON.stringify(left) === JSON.stringify(right);
+const sameWorkingContent = (left: TestingScenario, right: TestingScenario) => JSON.stringify([left.title, left.intent, left.expectedOutcome, left.blocks, left.matrix, left.parameters, left.knowledgeRefs]) === JSON.stringify([right.title, right.intent, right.expectedOutcome, right.blocks, right.matrix, right.parameters, right.knowledgeRefs]);
+function restoreDraftHistory(source: TestingScenario): DraftHistory {
+  const local = readLocal<TestingScenario>(draftKey(source.id));
+  const present = local ?? structuredClone(source);
+  const stored = readLocal<DraftHistory>(draftHistoryKey(source.id));
+  if (!stored?.present || stored.present.id !== source.id) return { past: [], present, future: [] };
+  if (sameDraft(stored.present, present)) return stored;
+  return { past: [...stored.past, stored.present].slice(-HISTORY_LIMIT), present, future: [] };
+}
+
 function readLocal<T>(key: string): T | undefined { try { const value = localStorage.getItem(key); return value ? JSON.parse(value) as T : undefined; } catch { return; } }
+function writeLocal(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } }
+function removeLocal(key: string) { try { localStorage.removeItem(key); } catch { /* Storage can be unavailable; the in-memory working copy remains usable. */ } }
 function readDraftBackups(id: string) {
   const stored = readLocal<TestingScenario | TestingScenario[]>(draftBackupKey(id));
   const backups = stored ? Array.isArray(stored) ? stored : [stored] : [];
-  for (let index = 0; index < localStorage.length; index += 1) { const key = localStorage.key(index); if (!key?.startsWith(`${draftBackupKey(id)}:`)) continue; const legacy = readLocal<TestingScenario>(key); if (legacy && !backups.some(item => JSON.stringify(item) === JSON.stringify(legacy))) backups.push(legacy); }
+  try { for (let index = 0; index < localStorage.length; index += 1) { const key = localStorage.key(index); if (!key?.startsWith(`${draftBackupKey(id)}:`)) continue; const legacy = readLocal<TestingScenario>(key); if (legacy && !backups.some(item => JSON.stringify(item) === JSON.stringify(legacy))) backups.push(legacy); } } catch { /* Legacy backups are optional when storage access is unavailable. */ }
   return backups;
 }
-function saveDraftBackup(draft: TestingScenario) { const backups = readDraftBackups(draft.id); if (!backups.some(item => JSON.stringify(item) === JSON.stringify(draft))) backups.push(draft); localStorage.setItem(draftBackupKey(draft.id), JSON.stringify(backups)); }
+function saveDraftBackup(draft: TestingScenario) { const backups = readDraftBackups(draft.id); if (!backups.some(item => JSON.stringify(item) === JSON.stringify(draft))) backups.push(draft); return writeLocal(draftBackupKey(draft.id), backups); }
 function navigate(id = '', tab: Tab = 'chat', replace = false) {
   const path = id ? `/testing/chat/${encodeURIComponent(id)}/${tab}` : '/testing/chat';
   history[replace ? 'replaceState' : 'pushState']({}, '', path);
@@ -182,7 +212,7 @@ function TaskMetrics({ task }: { task: PublicTask }) {
     ? Math.max(0, metrics.totalTokens - metrics.outputTokens)
     : metrics.inputTokens;
   const visibleElapsed = elapsed == null ? undefined : task.status === 'running' ? Math.max(elapsed, Date.now() - new Date(task.startedAt).getTime()) : elapsed;
-  return <span className="tc-task-metrics">{visibleElapsed != null && <span>{formatDuration(visibleElapsed)}</span>}{metrics.requestCount != null && <span>{metrics.requestCount} Modellaufrufe</span>}{tokenMetric('Eingabe', inputTokens, metrics.cachedInputTokens !== undefined ? `Cache: ${formatTokenCount(metrics.cachedInputTokens)}` : undefined)}{tokenMetric('Ausgabe', metrics.outputTokens)}{tokenMetric('Gesamt', metrics.totalTokens)}</span>;
+  return <span className="tc-task-metrics">{visibleElapsed != null && <span>{formatDuration(visibleElapsed)}</span>}{metrics.requestCount != null && <span>{metrics.requestCount} Modellaufrufe</span>}{tokenMetric('Eingabe', inputTokens)}{tokenMetric('Cache', metrics.cachedInputTokens)}{tokenMetric('Ausgabe', metrics.outputTokens)}{tokenMetric('Gesamt', metrics.totalTokens)}</span>;
 }
 
 function QuestionPanel({ conversationId, questions, tasks, busy, onSubmit }: { conversationId: string; questions: PublicQuestion[]; tasks: PublicTask[]; busy: boolean; onSubmit: (answers: { questionId: string; answer: string }[]) => Promise<boolean> }) {
@@ -269,14 +299,21 @@ function ProposalCard({ snapshot, busy, onCommand }: { snapshot: TestingChatSnap
 
 function FlowComposer({ snapshot, model, text, busy, onText, onModel, onSend }: { snapshot: ChatSnapshot; model: string; text: string; busy: boolean; onText: (value: string) => void; onModel: (value: string) => void; onSend: () => void }) {
   const [focused, setFocused] = useState(false);
+  const textarea = useRef<HTMLTextAreaElement>(null);
   const allowed = new Set(snapshot.allowedCommands);
   const sendCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : allowed.has('explore') ? 'explore' : 'message';
   const expanded = focused || !!text;
+  useLayoutEffect(() => {
+    const element = textarea.current;
+    if (!element) return;
+    element.style.height = 'auto';
+    element.style.height = `${Math.min(Math.max(element.scrollHeight, 35), 160)}px`;
+  }, [expanded, text]);
   const activeTask = snapshot.tasks?.find(task => task.id === snapshot.conversation.activeJobId);
   const latestOutput = snapshot.tasks?.flatMap(task => task.publicDetails).filter(item => item.detail?.type === 'result' || item.detail?.type === 'message').at(-1);
   return <aside className={`tc-flow-composer ${expanded ? 'is-expanded' : ''}`} aria-label="Ablauf-Chat">
     {expanded && (activeTask || latestOutput) && <div className="tc-flow-context">{activeTask ? <span><i/> {activeTask.purpose}</span> : latestOutput ? <span>{latestOutput.message}</span> : null}<button onMouseDown={event => event.preventDefault()} onClick={() => navigate(snapshot.conversation.id, 'chat')}>Unterhaltung öffnen</button></div>}
-    <textarea aria-label="Nachricht zum Ablauf" rows={expanded ? 3 : 1} value={text} onFocus={() => setFocused(true)} onBlur={() => { if (!text) setFocused(false); }} onChange={event => onText(event.target.value)} placeholder="Änderung zum Ablauf …" disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
+    <textarea ref={textarea} aria-label="Nachricht zum Ablauf" rows={1} value={text} onFocus={() => setFocused(true)} onBlur={() => { if (!text) setFocused(false); }} onChange={event => onText(event.target.value)} placeholder="Änderung zum Ablauf …" disabled={busy || !allowed.has(sendCommand)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); onSend(); } }}/>
     <div><ModelSelect value={model} onChange={onModel} disabled={busy} label="Modell"/><button className="tc-primary" aria-label="Nachricht zum Ablauf senden" disabled={busy || !text.trim() || !allowed.has(sendCommand)} onMouseDown={event => event.preventDefault()} onClick={onSend}><Send size={15}/><span>Senden</span></button></div>
   </aside>;
 }
@@ -287,30 +324,71 @@ function FlowEditor({ snapshot, catalog, model, text, busy, onText, onModel, onS
   const previewScenario: TestingScenario | undefined = preview ? { id: `preview-${preview.jobId}`, title: preview.title, intent: preview.expectedOutcome, revision: preview.scenarioRevision ?? 0, blocks: preview.blocks, expectedOutcome: preview.expectedOutcome, knowledgeRefs: preview.knowledgeRefs, createdAt: '', updatedAt: '', source: 'agent' } : undefined;
   const source = snapshot.proposed?.scenario ?? previewScenario ?? snapshot.scenario;
   const isPreview = !!preview && !snapshot.proposed;
-  const [draft, setDraft] = useState<TestingScenario | undefined>(() => source ? readLocal<TestingScenario>(draftKey(source.id)) ?? structuredClone(source) : undefined);
+  const initialSource = snapshot.scenario ?? source;
+  const [history, setHistory] = useState<DraftHistory | undefined>(() => initialSource ? restoreDraftHistory(initialSource) : undefined);
+  const workingDraft = history?.present;
   const [staleDraft, setStaleDraft] = useState<TestingScenario>();
-  const [viewingStale, setViewingStale] = useState(false);
+  const [incoming, setIncoming] = useState<TestingScenario>();
   const [layout, setLayout] = useState<TestingScenarioLayout | undefined>(() => source ? readLocal(layoutKey(source.id)) : undefined);
   const [selected, setSelected] = useState<string>();
   const [definitionId, setDefinitionId] = useState('');
   const [conflict, setConflict] = useState('');
   const scratch = useRef<ScratchWorkspaceHandle>(null);
-  useEffect(() => { if (!source) return; if (snapshot.proposed || isPreview) { setDraft(structuredClone(source)); setStaleDraft(undefined); setViewingStale(false); setConflict(''); setSelected(undefined); return; } const local = readLocal<TestingScenario>(draftKey(source.id)); const backup = readDraftBackups(source.id).at(-1); if (local && (JSON.stringify(local.blocks) !== JSON.stringify(source.blocks) || JSON.stringify(local.matrix) !== JSON.stringify(source.matrix)) && local.revision < source.revision) { saveDraftBackup(local); localStorage.removeItem(draftKey(source.id)); setStaleDraft(local); setDraft(structuredClone(source)); setViewingStale(false); setConflict(`Revision ${source.revision} ist aktuell. Dein lokaler Entwurf aus Revision ${local.revision} wurde gesichert.`); } else { setStaleDraft(backup); setDraft(local?.revision === source.revision ? local : structuredClone(source)); setViewingStale(false); setConflict(backup ? `Revision ${source.revision} ist aktuell. Dein lokaler Entwurf aus Revision ${backup.revision} bleibt gesichert.` : ''); } setSelected(undefined); }, [source?.id, source?.revision, snapshot.proposed?.jobId, preview?.jobId]);
-  useEffect(() => { if (!draft || !source || snapshot.proposed || isPreview || viewingStale) return; const changed = JSON.stringify(draft.blocks) !== JSON.stringify(source.blocks) || JSON.stringify(draft.matrix) !== JSON.stringify(source.matrix); if (changed) localStorage.setItem(draftKey(draft.id), JSON.stringify(draft)); else localStorage.removeItem(draftKey(draft.id)); }, [draft, source, snapshot.proposed, isPreview, viewingStale]);
+  const base = useRef<TestingScenario | undefined>(snapshot.scenario ? structuredClone(snapshot.scenario) : undefined);
+  const commitDraft = useCallback((change: TestingScenario | ((current: TestingScenario) => TestingScenario)) => setHistory(current => { if (!current) return current; const next = typeof change === 'function' ? change(current.present) : change; if (sameDraft(current.present, next)) return current; return { past: [...current.past, structuredClone(current.present)].slice(-HISTORY_LIMIT), present: next, future: [] }; }), []);
+  const keepCurrentRevision = (content: TestingScenario, current: TestingScenario) => ({ ...structuredClone(content), id: current.id, revision: current.revision, createdAt: current.createdAt, updatedAt: current.updatedAt });
+  const undo = () => setHistory(current => { if (!current?.past.length) return current; const present = keepCurrentRevision(current.past.at(-1)!, current.present); return { past: current.past.slice(0, -1), present, future: [structuredClone(current.present), ...current.future].slice(0, HISTORY_LIMIT) }; });
+  const redo = () => setHistory(current => { if (!current?.future.length) return current; const [next, ...future] = current.future; const present = keepCurrentRevision(next, current.present); return { past: [...current.past, structuredClone(current.present)].slice(-HISTORY_LIMIT), present, future }; });
+  useEffect(() => {
+    if (!source) return;
+    setHistory(current => {
+      if ((snapshot.proposed || isPreview) && current) return current;
+      if (!current || current.present.id !== source.id) {
+        base.current = snapshot.scenario?.id === source.id ? structuredClone(snapshot.scenario) : undefined;
+        return restoreDraftHistory(source);
+      }
+      if (snapshot.proposed || isPreview || source.revision <= current.present.revision || sameDraft(current.present, source)) return current;
+      if (sameWorkingContent(current.present, source)) {
+        setIncoming(undefined);
+        setConflict('');
+        base.current = structuredClone(source);
+        return { ...current, present: structuredClone(source) };
+      }
+      const locallyChanged = !!base.current && !sameWorkingContent(current.present, base.current);
+      if (locallyChanged) {
+        if (!saveDraftBackup(current.present)) setConflict('Deine Änderungen bleiben geöffnet, konnten aber nicht zusätzlich lokal gesichert werden.');
+        setStaleDraft(current.present);
+        setIncoming(structuredClone(source));
+        setConflict(`Der Agent hat Revision ${source.revision} geliefert. Deine offenen Änderungen bleiben der aktuelle Arbeitsstand.`);
+        return current;
+      }
+      setIncoming(undefined);
+      setConflict('');
+      base.current = structuredClone(source);
+      return { past: [...current.past, structuredClone(current.present)].slice(-HISTORY_LIMIT), present: structuredClone(source), future: [] };
+    });
+    setStaleDraft(current => current ?? readDraftBackups(source.id).at(-1));
+    setSelected(undefined);
+  }, [source?.id, source?.revision, snapshot.proposed?.jobId, preview?.jobId]);
+  useEffect(() => { if (!history || !source || snapshot.proposed || isPreview) return; const historySaved = writeLocal(draftHistoryKey(history.present.id), history); const changed = !sameWorkingContent(history.present, source); const draftSaved = !changed || writeLocal(draftKey(history.present.id), history.present); if (!changed) removeLocal(draftKey(history.present.id)); if (!historySaved || !draftSaved) setConflict('Der Arbeitsstand bleibt geöffnet, aber der Browser-Speicher ist voll. Speichere den Ablauf, bevor du die Seite schließt.'); }, [history, source, snapshot.proposed, isPreview]);
+  const draft = snapshot.proposed || isPreview ? source ?? workingDraft : workingDraft;
   const entries = useMemo(() => draft ? flattenBlocks(draft.blocks, effectiveCatalog) : [], [draft, effectiveCatalog]);
   const entry = entries.find(item => item.path === selected);
-  const agentOwns = !!snapshot.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status) || !!snapshot.proposed || isPreview || viewingStale;
-  const dirty = !!draft && !!snapshot.scenario && (JSON.stringify(draft.blocks) !== JSON.stringify(snapshot.scenario.blocks) || JSON.stringify(draft.matrix) !== JSON.stringify(snapshot.scenario.matrix));
-  const patchBlock = (change: (block: typeof entries[number]['block']) => typeof entries[number]['block'] | null) => { if (!draft || !selected) return; setDraft({ ...draft, blocks: updateBlockAtPath(draft.blocks, selected, catalog, change) }); };
-  const move = (direction: number) => { if (!draft || !selected || selected.includes('/')) return; const index = draft.blocks.findIndex(block => block.id === selected); const target = index + direction; if (index < 0 || target < 0 || target >= draft.blocks.length) return; const blocks = [...draft.blocks]; [blocks[index], blocks[target]] = [blocks[target], blocks[index]]; setDraft({ ...draft, blocks }); };
-  const duplicate = () => { if (!draft || !selected) return; const segments = selected.split('/'); const visit = (blocks: TestingBlockInstance[], depth = 0): TestingBlockInstance[] => blocks.flatMap(block => { if (block.id !== segments[depth]) return [block]; if (depth === segments.length - 1) return [block, { ...structuredClone(block), id: `${block.id}-${crypto.randomUUID().slice(0, 6)}` }]; return [{ ...block, children: visit(currentTestingChildren(block, effectiveCatalog), depth + 1) }]; }); setDraft({ ...draft, blocks: visit(draft.blocks) }); };
-  if (!draft) return <section className="tc-flow-pane"><div className="tc-empty"><Workflow size={28}/><h2>Noch kein Ablauf</h2><p>Beschreibe den Testfall. Der bestätigte Entwurf erscheint hier.</p></div><FlowComposer snapshot={snapshot} model={model} text={text} busy={busy} onText={onText} onModel={onModel} onSend={() => onSend()}/></section>;
+  const activeTask = snapshot.tasks?.find(task => task.id === snapshot.conversation.activeJobId);
+  const agentIsActive = !!snapshot.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status);
+  const agentOwns = agentIsActive || !!snapshot.proposed || isPreview;
+  const dirty = !!draft && !!snapshot.scenario && !sameWorkingContent(draft, snapshot.scenario);
+  const patchBlock = (change: (block: typeof entries[number]['block']) => typeof entries[number]['block'] | null) => { if (!draft || !selected) return; commitDraft({ ...draft, blocks: updateBlockAtPath(draft.blocks, selected, catalog, change) }); };
+  const move = (direction: number) => { if (!draft || !selected || selected.includes('/')) return; const index = draft.blocks.findIndex(block => block.id === selected); const target = index + direction; if (index < 0 || target < 0 || target >= draft.blocks.length) return; const blocks = [...draft.blocks]; [blocks[index], blocks[target]] = [blocks[target], blocks[index]]; commitDraft({ ...draft, blocks }); };
+  const duplicate = () => { if (!draft || !selected) return; const segments = selected.split('/'); const visit = (blocks: TestingBlockInstance[], depth = 0): TestingBlockInstance[] => blocks.flatMap(block => { if (block.id !== segments[depth]) return [block]; if (depth === segments.length - 1) return [block, { ...structuredClone(block), id: `${block.id}-${crypto.randomUUID().slice(0, 6)}` }]; return [{ ...block, children: visit(currentTestingChildren(block, effectiveCatalog), depth + 1) }]; }); commitDraft({ ...draft, blocks: visit(draft.blocks) }); };
+  if (!draft) return <section className="tc-flow-pane">{agentIsActive && <aside className="tc-agent-activity"><span className="tc-live-dot"/><div><strong>{activeTask?.agent.name ?? 'Folio'} arbeitet am ersten Ablauf</strong><small>{activeTask?.purpose ?? snapshot.lifecycle?.message ?? 'Änderungen werden vorbereitet'}</small></div><button onClick={() => navigate(snapshot.conversation.id, 'chat')}>Details öffnen</button></aside>}<div className="tc-empty"><Workflow size={28}/><h2>{agentIsActive ? 'Ablauf entsteht gerade' : 'Noch kein Ablauf'}</h2><p>{agentIsActive ? 'Du kannst die laufende Arbeit in der Unterhaltung verfolgen.' : 'Beschreibe den Testfall. Der bestätigte Entwurf erscheint hier.'}</p></div><FlowComposer snapshot={snapshot} model={model} text={text} busy={busy} onText={onText} onModel={onModel} onSend={() => onSend()}/></section>;
   return <section className="tc-flow-pane testing-app">
-    <header className="tc-pane-head"><div><small>{snapshot.proposed ? 'ÄNDERUNGSVORSCHLAG' : isPreview ? preview?.status === 'ready' ? 'VALIDIERTE VORSCHAU' : 'VORLÄUFIGE VORSCHAU' : 'BESTÄTIGTER ABLAUF'}</small><h2>{draft.title}</h2><p>{conflict || (isPreview ? `${draft.expectedOutcome}${draft.knowledgeRefs.length ? ` · ${draft.knowledgeRefs.length} fachliche Quellen` : ''}` : agentOwns ? snapshot.proposed ? 'Prüfe den Vorschlag in der Unterhaltung.' : viewingStale ? 'Die Sicherung ist schreibgeschützt.' : 'Der Agent bearbeitet diesen Entwurf. Die Arbeitsfläche ist vorübergehend schreibgeschützt.' : dirty ? 'Ungespeicherte manuelle Änderungen' : `Revision ${draft.revision}`)}</p>{staleDraft && <div className="tc-draft-recovery"><button disabled={!viewingStale} onClick={() => { setDraft(structuredClone(source!)); setViewingStale(false); setConflict(`Du siehst die aktuelle Revision ${source!.revision}. Der lokale Entwurf aus Revision ${staleDraft.revision} bleibt gesichert.`); }}>Aktuelle Revision anzeigen</button><button disabled={viewingStale || dirty} title={dirty ? 'Speichere zuerst deine aktuellen Änderungen.' : undefined} onClick={() => { setDraft(structuredClone(staleDraft)); setViewingStale(true); setConflict(`Du siehst deinen gesicherten lokalen Entwurf aus Revision ${staleDraft.revision} schreibgeschützt. Vergleiche ihn mit Revision ${source!.revision}.`); }}>Gesicherten Entwurf anzeigen</button></div>}</div><div>{dirty && !agentOwns && <button className="tc-primary" disabled={busy} onClick={() => onSave(draft)}><Save size={15}/>Revision speichern</button>}{snapshot.allowedCommands.includes('approve') && !dirty && <button className="tc-primary" disabled={busy} onClick={() => onCommand('approve')}><Check size={15}/>Freigeben</button>}</div></header>
-    <div className="tc-flow-grid"><div className="tc-scratch-card"><div className="tc-canvas-tools"><select aria-label="Baustein hinzufügen" value={definitionId} disabled={agentOwns} onChange={event => setDefinitionId(event.target.value)}><option value="">Baustein auswählen …</option>{effectiveCatalog.definitions.filter((definition, index, all) => !all.slice(index + 1).some(item => item.id === definition.id)).map(definition => <option key={`${definition.id}@${definition.version}`} value={definition.id}>{definition.name}</option>)}</select><button disabled={agentOwns || !definitionId} onClick={() => { const definition = effectiveCatalog.definitions.filter(item => item.id === definitionId).at(-1); if (!definition) return; setDraft({ ...draft, blocks: [...draft.blocks, newInstance(definition, draft.blocks, effectiveCatalog)] }); setDefinitionId(''); }}><Plus size={14}/>Hinzufügen</button><a href={`/testing/editor/${encodeURIComponent(draft.id)}`}>Erweiterte Bearbeitung <ExternalLink size={13}/></a></div><Suspense fallback={<p className="tc-loading">Arbeitsfläche wird geladen …</p>}><ScratchWorkspace ref={scratch} blocks={draft.blocks} catalog={effectiveCatalog} parameters={draft.parameters} layout={layout} selected={selected} readOnly={agentOwns} onChange={blocks => setDraft(current => current ? { ...current, blocks } : current)} onSelect={setSelected} onLayout={value => setLayout(current => { const next = { id: draft.id, scenarioId: draft.id, collapsed: [], ...current, ...value }; localStorage.setItem(layoutKey(draft.id), JSON.stringify(next)); return next; })}/></Suspense></div>
+    <header className="tc-pane-head"><div><small>{isPreview ? preview?.status === 'ready' ? 'VALIDIERTE VORSCHAU' : 'VORLÄUFIGE VORSCHAU' : snapshot.proposed ? 'ÄNDERUNGSVORSCHLAG' : 'AKTUELLER ARBEITSSTAND'}</small><h2>{draft.title}</h2><p>{isPreview ? `${draft.expectedOutcome}${draft.knowledgeRefs.length ? ` · ${draft.knowledgeRefs.length} fachliche Quellen` : ''}` : conflict || (agentIsActive ? 'Der Agent arbeitet am Ablauf. Die Arbeitsfläche ist vorübergehend schreibgeschützt.' : snapshot.proposed ? 'Der Agentenstand kann in der Unterhaltung geprüft werden.' : dirty ? 'Ungespeicherte Änderungen' : `Gespeicherter Stand · Revision ${draft.revision}`)}</p>{incoming && <div className="tc-draft-recovery"><span>Neuer Agentenstand: Revision {incoming.revision}</span><button disabled={agentOwns} onClick={() => { base.current = structuredClone(incoming); commitDraft(structuredClone(incoming)); setIncoming(undefined); setConflict('Der Agentenstand ist jetzt dein aktueller Arbeitsstand. Du kannst diese Änderung rückgängig machen.'); }}>Agentenstand übernehmen</button></div>}{staleDraft && !incoming && <div className="tc-draft-recovery"><span>Eine frühere lokale Sicherung ist verfügbar.</span><button disabled={agentOwns} onClick={() => { commitDraft(keepCurrentRevision(staleDraft, draft)); setStaleDraft(undefined); setConflict('Die lokale Sicherung ist jetzt dein aktueller Arbeitsstand. Du kannst diese Änderung rückgängig machen.'); }}>Sicherung wiederherstellen</button></div>}</div><div>{dirty && !agentOwns && <button className="tc-primary" disabled={busy} onClick={() => onSave(draft)}><Save size={15}/>Speichern</button>}{snapshot.allowedCommands.includes('approve') && !dirty && <button className="tc-primary" disabled={busy} onClick={() => onCommand('approve')}><Check size={15}/>Freigeben</button>}</div></header>
+    {agentIsActive && <aside className="tc-agent-activity"><span className="tc-live-dot"/><div><strong>{activeTask?.agent.name ?? 'Folio'} arbeitet am Ablauf</strong><small>{activeTask?.purpose ?? snapshot.lifecycle?.message ?? 'Änderungen werden vorbereitet'}</small></div><button onClick={() => navigate(snapshot.conversation.id, 'chat')}>Details öffnen</button></aside>}
+    <div className="tc-flow-grid"><div className="tc-scratch-card"><div className="tc-canvas-tools"><button aria-label="Rückgängig" title="Rückgängig" disabled={agentOwns || !history?.past.length} onClick={undo}><Undo2 size={14}/>Rückgängig</button><button aria-label="Wiederholen" title="Wiederholen" disabled={agentOwns || !history?.future.length} onClick={redo}><Redo2 size={14}/>Wiederholen</button><select aria-label="Baustein hinzufügen" value={definitionId} disabled={agentOwns} onChange={event => setDefinitionId(event.target.value)}><option value="">Baustein auswählen …</option>{effectiveCatalog.definitions.filter((definition, index, all) => !all.slice(index + 1).some(item => item.id === definition.id)).map(definition => <option key={`${definition.id}@${definition.version}`} value={definition.id}>{definition.name}</option>)}</select><button disabled={agentOwns || !definitionId} onClick={() => { const definition = effectiveCatalog.definitions.filter(item => item.id === definitionId).at(-1); if (!definition) return; commitDraft({ ...draft, blocks: [...draft.blocks, newInstance(definition, draft.blocks, effectiveCatalog)] }); setDefinitionId(''); }}><Plus size={14}/>Hinzufügen</button><a href={`/testing/editor/${encodeURIComponent(draft.id)}`}>Erweiterte Bearbeitung <ExternalLink size={13}/></a></div><Suspense fallback={<p className="tc-loading">Arbeitsfläche wird geladen …</p>}><ScratchWorkspace ref={scratch} blocks={draft.blocks} catalog={effectiveCatalog} parameters={draft.parameters} layout={layout} selected={selected} readOnly={agentOwns} onChange={blocks => commitDraft(current => ({ ...current, blocks }))} onSelect={setSelected} onLayout={value => setLayout(current => { const next = { id: draft.id, scenarioId: draft.id, collapsed: [], ...current, ...value }; writeLocal(layoutKey(draft.id), next); return next; })}/></Suspense></div>
       {entry && <Inspector entry={entry} entries={entries} catalog={effectiveCatalog} onClose={() => setSelected(undefined)} onChange={patchBlock} onValue={(key, value) => patchBlock(block => ({ ...block, inputs: { ...block.inputs, [key]: value } }))} onDefinition={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onKnowledge={() => { location.href = `/testing/editor/${encodeURIComponent(draft.id)}`; }} onOverride={text => { navigate(snapshot.conversation.id, 'chat'); sessionStorage.setItem(`folio-testing-chat-prefill:${snapshot.conversation.id}`, text); }} busy={agentOwns} onMove={move} onDuplicate={duplicate} scenarioParameters={draft.parameters}/>}</div>
-    <section className="tc-matrix"><header><div><small>VARIANTEN</small><h3>Testmatrix</h3></div><span>{draft.matrix?.rows.length ?? 0} Fälle</span></header><TestMatrix scenario={draft} catalog={effectiveCatalog} disabled={agentOwns} onChange={matrix => setDraft({ ...draft, matrix })}/></section>
-    <FlowComposer snapshot={snapshot} model={model} text={text} busy={busy || viewingStale} onText={onText} onModel={onModel} onSend={() => onSend(draft)}/>
+    <section className="tc-matrix"><header><div><small>VARIANTEN</small><h3>Testmatrix</h3></div><span>{draft.matrix?.rows.length ?? 0} Fälle</span></header><TestMatrix scenario={draft} catalog={effectiveCatalog} disabled={agentOwns} onChange={matrix => commitDraft({ ...draft, matrix })}/></section>
+    <FlowComposer snapshot={snapshot} model={model} text={text} busy={busy} onText={onText} onModel={onModel} onSend={() => onSend(draft)}/>
   </section>;
 }
 
@@ -336,6 +414,8 @@ export function TestingChatApp() {
   const [busy, setBusy] = useState(false);
   const [, setConnected] = useState(false);
   const [error, setError] = useState('');
+  const [catalogRefreshFailed, setCatalogRefreshFailed] = useState(false);
+  const [catalogRetry, setCatalogRetry] = useState(0);
   const revision = useRef(0);
   const streamSequence = useRef(0);
   const loadToken = useRef(0);
@@ -352,12 +432,37 @@ export function TestingChatApp() {
   useEffect(() => { if (!currentRoute.id) return; return subscribeConversation(currentRoute.id, { onConnection: setConnected, onEvent: event => { if (currentRoute.id !== route().id || !acceptClock(currentRoute.id, event.revision, event.sequence)) return; if (event.type === 'snapshot') setSnapshot(event.snapshot); else if (event.type === 'entry') setSnapshot(current => current ? { ...current, conversation: { ...current.conversation, revision: Math.max(current.conversation.revision, event.revision), eventSequence: Math.max(current.conversation.eventSequence, event.sequence) }, timeline: current.timeline.some(item => item.id === event.entry.id) ? current.timeline.map(item => item.id === event.entry.id ? event.entry : item) : [...current.timeline, event.entry] } : current); else void load(currentRoute.id).catch(() => {}); } }); }, [currentRoute.id, load, acceptClock]);
   useEffect(() => { if (!currentRoute.id || !snapshot?.latestRun || !['queued', 'running'].includes(snapshot.latestRun.status)) return; const timer = window.setInterval(() => void load(currentRoute.id).catch(() => {}), 1200); return () => clearInterval(timer); }, [currentRoute.id, snapshot?.latestRun?.id, snapshot?.latestRun?.status, load]);
   useEffect(() => { if (!snapshot?.scenario) return; setBootstrap(current => current ? { ...current, scenarios: [snapshot.scenario!, ...current.scenarios.filter(item => item.id !== snapshot.scenario!.id)] } : current); }, [snapshot?.scenario?.id, snapshot?.scenario?.revision]);
+  const flowCatalog = useMemo(() => {
+    if (!bootstrap) return undefined;
+    const definitions = new Map(bootstrap.catalog.definitions.map(definition => [`${definition.id}@${definition.version}`, definition]));
+    for (const definition of snapshot?.validatedFlowPreview?.newDefinitions ?? []) definitions.set(`${definition.id}@${definition.version}`, definition);
+    for (const definition of snapshot?.proposed?.newDefinitions ?? []) definitions.set(`${definition.id}@${definition.version}`, definition);
+    const knowledge = new Map(bootstrap.catalog.knowledge.map(document => [document.id, document]));
+    for (const document of snapshot?.validatedFlowPreview?.newKnowledge ?? []) knowledge.set(document.id, document);
+    for (const document of snapshot?.proposed?.newKnowledge ?? []) knowledge.set(document.id, document);
+    return { ...bootstrap.catalog, definitions: [...definitions.values()], knowledge: [...knowledge.values()] };
+  }, [bootstrap, snapshot?.proposed, snapshot?.validatedFlowPreview]);
+  const flowScenario = snapshot?.proposed?.scenario ?? (snapshot?.validatedFlowPreview ? { ...snapshot.scenario!, blocks: snapshot.validatedFlowPreview.blocks } : snapshot?.scenario);
+  const catalogReady = !!flowCatalog && catalogContainsScenario(flowCatalog, flowScenario);
+  const scenarioCatalogKey = snapshot?.scenario ? `${snapshot.scenario.id}@${snapshot.scenario.revision}` : '';
+  const catalogRefreshAttempt = useRef('');
+  useEffect(() => {
+    if (!bootstrap || !snapshot?.scenario || snapshot.proposed || catalogReady) return;
+    const key = `${scenarioCatalogKey}:${catalogRetry}`;
+    if (catalogRefreshAttempt.current === key) return;
+    catalogRefreshAttempt.current = key;
+    const controller = new AbortController();
+    let completed = false;
+    setCatalogRefreshFailed(false);
+    void chatApi.bootstrap(controller.signal).then(next => { completed = true; setBootstrap(next); setCatalogRefreshFailed(!catalogContainsScenario(next.catalog, snapshot.scenario)); }).catch(cause => { completed = true; if (!controller.signal.aborted) { setCatalogRefreshFailed(true); setError(messageOf(cause)); } });
+    return () => { controller.abort(); if (!completed && catalogRefreshAttempt.current === key) catalogRefreshAttempt.current = ''; };
+  }, [!!bootstrap, scenarioCatalogKey, !!snapshot?.proposed, catalogReady, catalogRetry]);
   async function mutate(command: TestingChatCommand, payload?: Record<string, unknown>) { if (!snapshot || busy || snapshot.conversation.id !== route().id) return false; const id = snapshot.conversation.id; ++loadToken.current; setBusy(true); setError(''); try { const guarded = snapshot.scenarioState ? { ...payload, expectedScenarioRevision: snapshot.scenarioState.revision, fingerprint: snapshot.scenarioState.fingerprint } : payload; const expectedRevision = conversationId.current === id ? revision.current : snapshot.conversation.revision; const next = await chatApi.command(id, command, expectedRevision, guarded); if (id === route().id && acceptClock(next.conversation.id, next.conversation.revision, next.conversation.eventSequence)) setSnapshot(next); return true; } catch (cause) { setError(messageOf(cause)); if ((cause as { status?: number }).status === 409 && id === route().id) await load(id); return false; } finally { setBusy(false); } }
   async function send() { const message = text.trim(); if (!message || !snapshot) return; const allowed = new Set(snapshot.allowedCommands); const command: TestingChatCommand = snapshot.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore'; setText(''); await mutate(command, { message, text: message, model }); }
   async function answerQuestions(answers: { questionId: string; answer: string }[]) { return mutate('answer', { answers, model }); }
   async function create(scenarioId: string) { ++loadToken.current; setBusy(true); setError(''); try { const next = await chatApi.create({ scenarioId, model, requestId: crypto.randomUUID() }); acceptClock(next.conversation.id, next.conversation.revision, next.conversation.eventSequence); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
   async function createFromMessage() { const message = text.trim(); if (!message || busy) return; ++loadToken.current; setBusy(true); setError(''); try { const next = await chatApi.create({ message, model, requestId: crypto.randomUUID() }); setText(''); acceptClock(next.conversation.id, next.conversation.revision, next.conversation.eventSequence); setSnapshot(next); navigate(next.conversation.id, 'chat'); } catch (cause) { setError(messageOf(cause)); } finally { setBusy(false); } }
-  async function save(scenario: TestingScenario) { if (!snapshot) return; if (await mutate('save', { scenario, expectedRevision: scenario.revision })) localStorage.removeItem(draftKey(scenario.id)); }
+  async function save(scenario: TestingScenario) { if (!snapshot) return; if (await mutate('save', { scenario, expectedRevision: scenario.revision })) removeLocal(draftKey(scenario.id)); }
   async function sendFromFlow(scenario?: TestingScenario) {
     const message = text.trim();
     if (!message || !snapshot || busy) return;
@@ -369,7 +474,7 @@ export function TestingChatApp() {
       const expectedRevision = conversationId.current === id ? revision.current : snapshot.conversation.revision;
       const saved = await chatApi.command(id, 'save', expectedRevision, { ...guard, scenario, expectedRevision: scenario!.revision });
       if (id !== route().id || !acceptClock(saved.conversation.id, saved.conversation.revision, saved.conversation.eventSequence)) { if (id === route().id) await load(id); return; }
-      localStorage.removeItem(draftKey(scenario!.id)); setSnapshot(saved);
+      removeLocal(draftKey(scenario!.id)); setSnapshot(saved);
       const allowed = new Set(saved.allowedCommands);
       const command: TestingChatCommand = saved.scenario && allowed.has('revise') ? 'revise' : allowed.has('message') ? 'message' : 'explore';
       const nextGuard = saved.scenarioState ? { expectedScenarioRevision: saved.scenarioState.revision, fingerprint: saved.scenarioState.fingerprint } : {};
@@ -379,7 +484,8 @@ export function TestingChatApp() {
     finally { setBusy(false); }
   }
   const scenarioId = snapshot?.scenario?.id;
+  const flowAgentActive = !!snapshot?.activeJob && ['queued', 'running'].includes(snapshot.activeJob.status);
   return <AgentSettingsContext.Provider value={settings}><main className="testing-chat-app"><aside className="tc-sidebar"><a className="tc-brand" href="/testing/chat" onClick={event => { event.preventDefault(); navigate(); }}><span>F</span><strong>Folio Studio</strong></a><button className="tc-new" disabled={busy} onClick={() => navigate()}><Plus size={16}/>Neuer Testfall</button><nav aria-label="Testfälle">{bootstrap?.scenarios.map(scenario => <button key={scenario.id} className={scenario.id === scenarioId ? 'active' : ''} onClick={() => void create(scenario.id)}><span>{scenario.title}</span><small>Revision {scenario.revision}</small><ChevronRight size={14}/></button>)}</nav><a className="tc-classic" href="/testing"><ArrowLeft size={14}/>Klassische Ansicht</a></aside>
-    <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
-      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })} onReviewFlow={() => navigate(snapshot.conversation.id, 'flow')}/> : currentRoute.tab === 'flow' && bootstrap ? <FlowEditor snapshot={snapshot} catalog={bootstrap.catalog} model={model} text={text} busy={busy} onText={setText} onModel={setModel} onSend={scenario => void sendFromFlow(scenario)} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
+    <section className="tc-main">{error && <div className="tc-error" role="alert">{error}<button onClick={() => setError('')}>Schließen</button></div>}{snapshot ? <><header className="tc-topbar"><div><small>TESTFALL</small><strong>{snapshot.scenario?.title ?? 'Neuer Testfall'}</strong></div><nav aria-label="Ansichten">{(Object.keys(tabLabels) as Tab[]).map(tab => <button aria-label={tabLabels[tab]} aria-current={currentRoute.tab === tab ? 'page' : undefined} onClick={() => navigate(snapshot.conversation.id, tab)} key={tab}>{tabLabels[tab]}{tab === 'flow' && flowAgentActive && <span className="tc-tab-live" title="Agent arbeitet" aria-hidden="true"/>}</button>)}</nav>{snapshot.allowedCommands.includes('cancel') ? <button className="tc-cancel" disabled={busy} onClick={() => void mutate('cancel')}><CircleStop size={15}/>Abbrechen</button> : <span className={`tc-state is-${snapshot.lifecycle?.status ?? 'idle'}`}>{snapshot.lifecycle?.message ?? 'Bereit'}</span>}</header>
+      {currentRoute.tab === 'chat' ? <Conversation snapshot={snapshot} model={model} busy={busy} text={text} onText={setText} onModel={setModel} onSend={() => void send()} onAnswers={answerQuestions} onCommand={command => void mutate(command, { model })} onReviewFlow={() => navigate(snapshot.conversation.id, 'flow')}/> : currentRoute.tab === 'flow' ? catalogReady ? <FlowEditor snapshot={snapshot} catalog={flowCatalog!} model={model} text={text} busy={busy} onText={setText} onModel={setModel} onSend={scenario => void sendFromFlow(scenario)} onSave={scenario => void save(scenario)} onCommand={command => void mutate(command, { model })}/> : <section className="tc-flow-pane"><p className="tc-loading">Ablaufbausteine werden geladen …</p>{(catalogRefreshFailed || !!snapshot.proposed) && <button className="tc-primary" onClick={() => snapshot.proposed ? void load(snapshot.conversation.id) : setCatalogRetry(value => value + 1)}>Erneut laden</button>}</section> : <BrowserRun snapshot={snapshot} busy={busy} onCommand={command => void mutate(command, { model })}/>}</> : <section className="tc-welcome"><span className="tc-mark">F</span><h1>Tests im Gespräch entwickeln.</h1><p>Beschreibe den gewünschten Ablauf. Erst mit deiner Anforderung startet Folio die Erkundung und erstellt einen Testfall.</p><div className="tc-first-composer"><textarea rows={4} value={text} onChange={event => setText(event.target.value)} placeholder="Zum Beispiel: Erstelle eine Kuhlebensversicherung über 15.000 Euro und prüfe die Direktionsanfrage …" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void createFromMessage(); } }}/><div><ModelSelect value={model} onChange={setModel} disabled={busy} label="Modell"/><button className="tc-primary" disabled={busy || text.trim().length < 5} onClick={() => void createFromMessage()}><Send size={16}/>Erkundung starten</button></div></div></section>}</section></main></AgentSettingsContext.Provider>;
 }

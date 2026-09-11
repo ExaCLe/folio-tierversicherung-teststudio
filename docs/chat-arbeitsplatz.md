@@ -24,13 +24,17 @@ Offene Rückfragen stehen gemeinsam in einem hervorgehobenen Eingabebereich. Sie
 
 Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Eigene Entscheidungen wie eine Freigabe erscheinen als grüne Aktion mit "Du hast ..." und werden nicht Folio zugeschrieben. Der Agent streamt keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
 
+Aufgabenkarten zeigen, sofern der Anbieter sie liefert, Dauer, Modellaufrufe sowie Eingabe-, Cache-, Ausgabe- und Gesamttokens. Cache-Tokens sind ein Teil der Eingabe und werden deshalb separat ausgewiesen; sie werden nicht zusätzlich zur Gesamtsumme addiert. Fehlt ein Wert, bleibt er leer. Eine angezeigte Null ist ein gemessener Wert.
+
 ### Ablauf
 
-Die Scratch-Arbeitsfläche zeigt den bestätigten Ablauf. Liegt bereits ein strukturell gültiger vorläufiger Stand vor, zeigt sie diesen als schreibgeschützte Vorschau mit Ziel und fachlichen Quellen. Dieser Stand ist noch nicht fachlich freigegeben. Während der Agent den Entwurf bearbeitet, ist sie schreibgeschützt. Ein Änderungsvorschlag erscheint ebenfalls schreibgeschützt, bis du ihn in der Unterhaltung übernimmst oder verwirfst.
+Die Scratch-Arbeitsfläche zeigt den aktuellen Arbeitsstand. Ein Aktivitätsbadge und eine Aufgabenkarte machen laufende Agentenarbeit sichtbar; währenddessen bleibt die Fläche schreibgeschützt. Vorläufige Vorschauen und Änderungsvorschläge bleiben schreibgeschützt, bis du sie in der Unterhaltung prüfst und übernimmst oder verwirfst. Die Arbeitsfläche bewahrt dabei deine lokale Kopie.
 
-Ohne laufenden Auftrag kannst du Blöcke verschieben, hinzufügen, duplizieren oder löschen. Ein Klick auf einen Block öffnet den Inspector für Werte und Verknüpfungen. Unter der Arbeitsfläche liegt die typisierte Testmatrix. "Revision speichern" schreibt Scratch-Ablauf und Matrix gemeinsam als neue Revision.
+Ohne laufenden Auftrag kannst du Blöcke verschieben, hinzufügen, duplizieren oder löschen; bis zu 30 Schritte lassen sich über „Rückgängig“ und „Wiederholen“ auch nach einem Neuladen lokal bearbeiten. „Speichern“ schreibt Ablauf und Matrix gemeinsam als neue Revision. Einen neu eingegangenen Agentenstand übernimmst du bewusst, damit deine Änderungen erhalten bleiben; ältere Backend-Revisionen bleiben für Freigaben und Nachweise verfügbar.
 
 Der Browser speichert manuelle Entwürfe pro Testfall. Sie bleiben bei einem Tabwechsel, einem Neuladen und nach einem fehlgeschlagenen Speicherversuch erhalten. Wenn die klassische Ansicht zwischenzeitlich eine neuere Revision speichert, überschreibt der Chat-Arbeitsplatz den lokalen Entwurf nicht. Er meldet den Konflikt und verhindert das Speichern gegen den veralteten Stand.
+
+Der Ablauf-Chat bleibt kompakt, solange keine Eingabe aktiv ist. Beim Fokussieren oder Schreiben wird er im Inhaltsbereich zentriert und wächst mit dem Text bis zu einer begrenzten Höhe. Lange Antworten des letzten Arbeitsschritts umbrechen innerhalb des Bereichs, damit Modellwahl und Senden auf kleinen Bildschirmen erreichbar bleiben.
 
 Definitionen, Wissensquellen und weitere technische Details bearbeitest du über "Erweiterte Bearbeitung" in der klassischen Ansicht. Der Link öffnet dort denselben Testfall.
 

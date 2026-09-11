@@ -118,7 +118,7 @@ export function initializeTestingChat(){if(subscribed)return;subscribed=true;sub
 function proposal(job:TestingAgentJob|undefined){
   const value=job?.result as TestingScenarioEditProposal|undefined;
   if(!job||job.phase!=='business'||job.status!=='completed'||value?.scope!=='scenario'||value.reviewStatus!=='pending'||!job.fingerprint||!job.scenarioRevision)return undefined;
-  return {jobId:job.id,fingerprint:job.fingerprint,expectedRevision:job.scenarioRevision,scenario:value.scenario,changes:value.changes};
+  return {jobId:job.id,fingerprint:job.fingerprint,expectedRevision:job.scenarioRevision,scenario:value.scenario,changes:value.changes,newDefinitions:value.draft?.newDefinitions??[],newKnowledge:value.draft?.newKnowledge??[]};
 }
 function validatedFlowPreview(job:TestingAgentJob|undefined):TestingChatSnapshot['validatedFlowPreview']{
   if(!job)return undefined;const result=job.result as {scenario?:TestingScenario;compiled?:{valid?:boolean};attempts?:{valid:boolean}[]|number;validatedFlowPreview?:{scenario:TestingScenario;newDefinitions?:NonNullable<TestingChatSnapshot['validatedFlowPreview']>['newDefinitions'];newKnowledge?:NonNullable<TestingChatSnapshot['validatedFlowPreview']>['newKnowledge'];validation:'structural'|'business'}}|undefined;

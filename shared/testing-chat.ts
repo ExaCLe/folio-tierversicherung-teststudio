@@ -35,6 +35,7 @@ export interface TestingChatTask {
 export interface TestingChatProposal {
   jobId:string; fingerprint:string; expectedRevision:number; scenario:TestingScenario;
   changes:{kind:string;path:string;label:string;before?:unknown;after?:unknown}[];
+  newDefinitions?:TestingBlockDefinition[]; newKnowledge?:TestingKnowledgeDocument[];
 }
 export interface TestingChatSnapshot {
   conversation:TestingChatConversation; timeline:TestingChatEntry[];

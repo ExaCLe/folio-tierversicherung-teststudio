@@ -207,6 +207,15 @@ test('Neuerer verworfener Auftrag lässt keinen alten Änderungsvorschlag wieder
   assert.equal(chat.getTestingChatSnapshot('proposal-chat').proposed,undefined);
 });
 
+test('Änderungsvorschlag projiziert seine noch unveröffentlichten Definitionen und Fachquellen',()=>{
+  const scenarioId='proposal-assets',current=scenario(scenarioId,[]),catalog=getTestingCatalog();db.upsert('testingScenarios',current);conversation('proposal-assets-chat',scenarioId);
+  const definition={...catalog.definitions[0],id:'proposal.neuer-baustein',version:'1.0.0'},knowledge={...catalog.knowledge[0],id:'proposal.neue-quelle'};
+  const proposedScenario={...current,blocks:[{id:'neu',definition:{id:definition.id,version:definition.version},inputs:{}}]};
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:'proposal-assets-job',phase:'business',model:'luna',status:'completed',prompt:'Fixture',scenarioId,scenarioRevision:1,fingerprint:'proposal-assets',startedAt:at,finishedAt:at,events:[],result:{scope:'scenario',applied:false,reviewStatus:'pending',before:current,scenario:proposedScenario,changes:[],draft:{explanation:'Fixture',newDefinitions:[definition],newKnowledge:[knowledge],assumptions:[],openQuestions:[]}}});
+  const projected=chat.getTestingChatSnapshot('proposal-assets-chat').proposed;
+  assert.equal(projected?.newDefinitions?.[0].id,definition.id);assert.equal(projected?.newKnowledge?.[0].id,knowledge.id);
+});
+
 test('Neustart markiert eine nicht dispatchte Routing-Nachricht als retryfähig',()=>{
   const scenarioId='recovery-scenario';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation('recovery-chat',scenarioId);
   db.upsert('testingChatEntries',{id:'pending-route',at,kind:'user',message:'Diese Nachricht muss erhalten bleiben.',delivery:{state:'routing'}});const stored=db.find<any>('testingChatConversations','recovery-chat');db.upsert('testingChatConversations',{...stored,entryIds:['pending-route']});

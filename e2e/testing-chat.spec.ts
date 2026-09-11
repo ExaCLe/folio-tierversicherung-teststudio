@@ -250,6 +250,7 @@ test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne intern
   await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
   const composer = page.getByRole('textbox', { name: 'Separate Nachricht', exact: true });
   await expect(composer).toBeEnabled();
+  await page.getByLabel('Modell').selectOption('luna');
   await composer.fill('Prüfe zusätzlich den Ablehnungsgrund.');
   await page.getByRole('button', { name: 'Separate Nachricht senden', exact: true }).click();
   expect(commands[2]?.command).toBe('message');
@@ -296,7 +297,7 @@ test('Ablauf sperrt Agentenarbeit, dupliziert wirklich und behält einen abgewie
   await page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first().click();
   await page.getByRole('button', { name: 'Block duplizieren', exact: true }).click();
   await expect.poll(() => page.evaluate(storageKey => JSON.parse(localStorage.getItem(storageKey)!).blocks.length, key)).toBe(existing.blocks.length + 2);
-  await page.getByRole('button', { name: 'Revision speichern', exact: true }).click();
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Synthetischer Revisionskonflikt');
   await page.getByRole('button', { name: 'Unterhaltung', exact: true }).click();
   await page.getByRole('button', { name: 'Ablauf', exact: true }).click();
@@ -304,26 +305,50 @@ test('Ablauf sperrt Agentenarbeit, dupliziert wirklich und behält einen abgewie
   await page.screenshot({ path: '.local/verification/chat/flow.png', fullPage: true });
 });
 
-test('ein älterer lokaler Entwurf verdeckt die aktuelle gespeicherte Revision nicht und bleibt wiederherstellbar', async ({ page, request }) => {
+test('behält einen älteren lokalen Arbeitsstand, übernimmt den Agentenstand bewusst und kann ihn rückgängig machen', async ({ page, request }) => {
   const current = await scenario(request);
   const stale = { ...structuredClone(current), revision: current.revision - 1, blocks: [] };
-  await page.addInitScript(({ key, value }: { key: string; value: string }) => localStorage.setItem(key, value), { key: `folio-testing-chat-draft:${current.id}`, value: JSON.stringify(stale) });
+  await page.addInitScript(({ key, marker, value }: { key: string; marker: string; value: string }) => { if (!localStorage.getItem(marker)) { localStorage.setItem(key, value); localStorage.setItem(marker, '1'); } }, { key: `folio-testing-chat-draft:${current.id}`, marker: `folio-testing-chat-seeded:${current.id}`, value: JSON.stringify(stale) });
   await staticChat(page, conversation(current));
   await page.goto('/testing/chat/chat-browser-contract/flow');
 
-  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
-  await expect(page.getByText(`Revision ${current.revision} ist aktuell. Dein lokaler Entwurf aus Revision ${stale.revision} wurde gesichert.`)).toBeVisible();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' })).toHaveCount(0);
+  await expect(page.getByText(`Der Agent hat Revision ${current.revision} geliefert. Deine offenen Änderungen bleiben der aktuelle Arbeitsstand.`)).toBeVisible();
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).at(-1).blocks, `folio-testing-chat-draft-backup:${current.id}`)).toEqual([]);
 
-  await page.getByRole('button', { name: 'Gesicherten Entwurf anzeigen' }).click();
+  await page.getByRole('button', { name: 'Agentenstand übernehmen' }).click();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Rückgängig', exact: true }).click();
   await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' })).toHaveCount(0);
-  await expect(page.getByLabel('Baustein hinzufügen')).toBeDisabled();
-  await expect(page.getByRole('textbox', { name: 'Nachricht zum Ablauf' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Aktuelle Revision anzeigen' }).click();
+  await page.getByRole('button', { name: 'Wiederholen', exact: true }).click();
   await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Gesicherten Entwurf anzeigen' })).toBeVisible();
   await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Rückgängig', exact: true })).toBeEnabled();
+});
+
+test('behält nach Speichern und Rückgängig die neue Revisionsbasis', async ({ page, request }) => {
+  let current = await scenario(request);
+  const initialRevision = current.revision;
+  let snapshot = conversation(current);
+  const expectedScenarioRevisions: number[] = [];
+  await staticChat(page, snapshot);
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => {
+    const input = route.request().postDataJSON() as { command: string; payload: { scenario: TestingScenario; expectedRevision: number } };
+    expect(input.command).toBe('save');
+    expectedScenarioRevisions.push(input.payload.expectedRevision);
+    current = { ...input.payload.scenario, revision: current.revision + 1, updatedAt: new Date().toISOString() };
+    snapshot = { ...conversation(current), conversation: { ...snapshot.conversation, revision: snapshot.conversation.revision + 1, eventSequence: snapshot.conversation.eventSequence + 1, scenarioId: current.id }, scenarioState: { revision: current.revision, fingerprint: `saved-${current.revision}` } };
+    await route.fulfill({ json: snapshot });
+  });
+  await page.goto('/testing/chat/chat-browser-contract/flow');
+  await page.getByLabel('Baustein hinzufügen').selectOption({ label: 'Als Benutzerrolle' });
+  await page.getByRole('button', { name: 'Hinzufügen', exact: true }).click();
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
+  await expect(page.getByText(`Gespeicherter Stand · Revision ${current.revision}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Rückgängig', exact: true }).click();
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
+  expect(expectedScenarioRevisions).toEqual([initialRevision, initialRevision + 1]);
 });
 
 test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zur Freigabe über den Ablauf', async ({ page, request }) => {
@@ -432,7 +457,7 @@ test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespei
   await expect.poll(async () => {
     const response = await request.get(`/api/testing/chat/conversations/${liveConversationId}`);
     const current = await response.json() as TestingChatSnapshot;
-    liveTaskId = current.tasks.find(task => task.publicDetails.some(item => item.message === 'Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.'))?.id ?? '';
+    liveTaskId = current.tasks.find(task => task.purpose === 'Technisch vorbereiten' && task.status === 'running' && task.activityState === 'working' && task.publicDetails.some(item => item.message === 'Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.'))?.id ?? '';
     return liveTaskId;
   }, { timeout: 15_000 }).not.toBe('');
   await expect(page.locator(`[data-task-id="${liveTaskId}"]`)).toHaveAttribute('data-status', 'running');

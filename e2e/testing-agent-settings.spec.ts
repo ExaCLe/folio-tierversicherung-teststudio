@@ -140,7 +140,7 @@ test('Einstellungen speichern eigene Claude-Modelle und Argumente und erhalten s
     await expect.poll(async () => (await (await request.get(`/api/testing/runs/${queued.id}`)).json()).status, { timeout: 70000 }).toBe('passed');
     await page.goto('/testing/runs');
     await expect(page.getByLabel('Modell für Wiederverwendung', { exact: true })).toHaveValue(saved.models.at(-1).id);
-    await page.goto(`/testing/editor/${scenario.id}`);
+    await page.goto(`/testing/editor/${scenario.id}?step=3`);
     await editWorkflow(page);
     await expect(page.getByLabel('Modell für die Änderung')).toHaveValue(saved.models.at(-1).id);
     await page.getByLabel('Anweisung für den gesamten Ablauf').fill('Ergänze eine Statusprüfung.');
