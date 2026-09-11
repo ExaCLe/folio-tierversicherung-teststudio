@@ -4,7 +4,7 @@ import type { TestingBlockDefinition, TestingCatalog, TestingCompiledScenario } 
 import { BUSINESS_SCHEMA, decodeBusinessDraft, decodeTechnicalPlan, DUPLICATES_SCHEMA, duplicateSchemaFor, REUSE_SCHEMA, reuseSchemaFor, TECHNICAL_SCHEMA, validateTestingCaseDesign } from './schemas';
 import { validateDuplicateReview } from './reviews';
 import { duplicateReviewContext } from './duplicate-context';
-import { duplicatePrompt } from './prompts';
+import { businessPrompt, duplicatePrompt } from './prompts';
 
 const definition = (id: string, version: string, origin: TestingBlockDefinition['origin'] = 'human'): TestingBlockDefinition => ({
   id, version, origin, name: 'Freigabeberechtigung prüfen', description: 'Prüft eine fachliche Berechtigung.', kind: 'assertion', category: 'Prüfungen',
@@ -118,4 +118,24 @@ test('Fallplanung unterscheidet lineare Rollenwechsel von Varianten und erhält 
   }};
   const errors=validateTestingCaseDesign(draft);
   assert.equal(errors.length,1);assert.match(errors[0],/CASE_DESIGN_CONFLICTING_EXPECTATIONS/);assert.match(errors[0],/Sachbearbeitung.*Direktion/);assert.match(errors[0],/entferne keine Erwartung stillschweigend/);
+});
+
+test('Lineare Rollenprüfungen bleiben ein Fall und eine echte Einspalten-Matrix bleibt gültig',()=>{
+  const raw:any={
+    title:'Lineare Rollenprüfung',expectedOutcome:'A und B dürfen nicht, C darf entscheiden.',blocks:[],knowledgeRefs:[],
+    caseDesign:{mode:'single',dimensions:['Rolle'],expectedCaseCount:3,expectedResults:['A abgelehnt','B abgelehnt','C erlaubt'],rationale:'Drei Rollen werden nacheinander geprüft.'},
+    newDefinitions:[],newKnowledge:[],explanation:'',assumptions:[],openQuestions:[],matrix:null,
+  };
+  const single=decodeBusinessDraft(raw);
+  assert.equal(single.caseDesign?.expectedCaseCount,1);
+  assert.deepEqual(single.caseDesign?.dimensions,[]);
+  assert.deepEqual(single.caseDesign?.expectedResults,raw.caseDesign.expectedResults);
+  assert.deepEqual(validateTestingCaseDesign(single),[]);
+  assert.match(businessPrompt('Prüfe A, B und C nacheinander.'),/expectedCaseCount zählt ausschließlich die unabhängig ausführbaren Datenkombinationen/);
+
+  const oneColumn:any={caseDesign:{mode:'matrix',dimensions:['Rolle'],expectedCaseCount:2,expectedResults:['abgelehnt','erlaubt'],rationale:'Zwei unabhängig ausführbare Rollenwerte.'},matrix:{
+    columns:[{id:'rolle',label:'Rolle',target:{blockPath:'kontext',inputPath:'role'},role:'input',type:'choice'}],
+    rows:[{id:'a',label:'A',enabled:true,values:{rolle:'A'}},{id:'c',label:'C',enabled:true,values:{rolle:'C'}}],
+  }};
+  assert.deepEqual(validateTestingCaseDesign(oneColumn),[]);
 });

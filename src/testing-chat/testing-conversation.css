@@ -58,6 +58,7 @@
 .tc-task-copy small { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #717c75; }
 .tc-task-metrics { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; color: #7a857e; font-size: 10px; font-variant-numeric: tabular-nums; }
 .tc-task-metrics > span + span::before { content: '·'; margin-right: 10px; color: #b1b9b4; }
+.tc-task-metrics b { color: #59665e; font-weight: 680; }
 .tc-task-copy i, .tc-questions em i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--agent-color, #507662); }
 .tc-task-card > svg { color: #9aa39d; }
 .tc-task-events { list-style: none; padding: 0; margin: 0; }

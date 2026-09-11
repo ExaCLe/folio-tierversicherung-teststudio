@@ -219,7 +219,7 @@ test('Fallplanung erzwingt eine fehlende Matrix per Korrektur und übernimmt ers
 });
 
 test('Zwei inkonsistente Fallplanungen scheitern und übernehmen keinen fachlichen Entwurf',async()=>{
-  const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),base=JSON.parse(previous),invalid={...base,caseDesign:{mode:'single',dimensions:['Bundesland'],expectedCaseCount:2,expectedResults:['Freigegeben','Direktionsprüfung'],rationale:'Absichtlich widersprüchliches Fixture.'},matrix:null};
+  const previous=await readFile(process.env.FOLIO_BUSINESS_FIXTURE!,'utf8'),base=JSON.parse(previous),invalid={...base,caseDesign:{mode:'single',dimensions:['Bundesland','Versicherungssumme'],expectedCaseCount:2,expectedResults:['Freigegeben','Direktionsprüfung'],rationale:'Absichtlich widersprüchliches Fixture.'},matrix:null};
   await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,JSON.stringify({initial:invalid,correction:invalid}));
   try{const job=orchestrator.startBusinessJob({request:'Synthetische dauerhaft inkonsistente Fallplanung.',model:'luna'}),done=await orchestrator.waitTestingJob(job.id);assert.equal(done.status,'failed');assert.match(done.error!,/CASE_DESIGN_SINGLE_COUNT/);const scenario=repository.getTestingScenario(job.scenarioId!);assert.deepEqual(scenario.blocks,[]);assert.equal(scenario.revision,2,'Nur die unabhängige Benennung darf vor der fehlgeschlagenen Fachplanung gespeichert sein.');assert.equal(repository.getTestingApproval(scenario.id),undefined);}
   finally{await writeFile(process.env.FOLIO_BUSINESS_FIXTURE!,previous);}

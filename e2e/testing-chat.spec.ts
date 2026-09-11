@@ -92,7 +92,9 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
   await expect(page.getByRole('dialog')).toContainText('Noch keine Ausgabe.');
   await expect(running).toContainText('2 Modellaufrufe');
-  await expect(running).toContainText('1.540 Tokens');
+  await expect(running).toContainText('Eingabe 1.200');
+  await expect(running).toContainText('Ausgabe 340');
+  await expect(running).toContainText('Gesamt 1.540');
   await page.getByRole('button', { name: 'Aufgabendetails schließen' }).click();
 
   const assertBottomReachable = async () => {
@@ -110,6 +112,35 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   await page.setViewportSize({ width: 390, height: 520 });
   await assertBottomReachable();
   await page.screenshot({ path: '.local/verification/chat/queue-short-mobile.png' });
+});
+
+test('zeigt Eingabe und Ausgabe providerübergreifend getrennt und bewahrt Null und unbekannt', async ({ page }) => {
+  const snapshot = conversation(undefined, {
+    conversation: { id: 'chat-browser-contract', revision: 9, eventSequence: 9, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:09:00.000Z', model: 'luna', activeJobId: 'job-codex', entryIds: [] },
+    tasks: [
+      { id: 'job-codex', purpose: 'Codex-Metriken', agent: { name: 'Sol', modelId: 'sol', provider: 'codex', color: '#635bff' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:07:00.000Z', metrics: { elapsedMs: 1000, requestCount: 1, inputTokens: 332939, cachedInputTokens: 252416, outputTokens: 6574, totalTokens: 339513 }, publicDetails: [] },
+      { id: 'job-claude', purpose: 'Claude-Metriken', agent: { name: 'Luna', modelId: 'luna', provider: 'claude', color: '#e56b25' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:07:00.000Z', metrics: { elapsedMs: 1000, requestCount: 1, inputTokens: 120, cachedInputTokens: 20, outputTokens: 3, totalTokens: 143 }, publicDetails: [] },
+      { id: 'job-zero', purpose: 'Null-Metriken', agent: { name: 'Sol', modelId: 'sol', color: '#0f9f8f' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:07:00.000Z', metrics: { elapsedMs: 1000, requestCount: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }, publicDetails: [] },
+      { id: 'job-unknown', purpose: 'Unbekannte Metriken', agent: { name: 'Luna', modelId: 'luna', color: '#7656a4' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:07:00.000Z', metrics: { elapsedMs: 1000, requestCount: 1 }, publicDetails: [] },
+    ],
+  });
+  await staticChat(page, snapshot);
+  await page.goto('/testing/chat/chat-browser-contract/chat');
+  const codex = page.getByRole('button', { name: /Codex-Metriken/ });
+  await expect(codex).toContainText('Eingabe 332.939');
+  await expect(codex).toContainText('Ausgabe 6.574');
+  await expect(codex).toContainText('Gesamt 339.513');
+  const claude = page.getByRole('button', { name: /Claude-Metriken/ });
+  await expect(claude).toContainText('Eingabe 140');
+  await expect(claude).toContainText('Ausgabe 3');
+  const zero = page.getByRole('button', { name: /Null-Metriken/ });
+  await expect(zero).toContainText('Eingabe 0');
+  await expect(zero).toContainText('Ausgabe 0');
+  await expect(zero).toContainText('Gesamt 0');
+  const unknown = page.getByRole('button', { name: /Unbekannte Metriken/ });
+  await expect(unknown).not.toContainText('Eingabe');
+  await expect(unknown).not.toContainText('Ausgabe');
+  await expect(unknown).not.toContainText('Gesamt');
 });
 
 test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne internen Statuslärm', async ({ page, request }) => {
@@ -148,7 +179,7 @@ test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne intern
     streamConnections += 1;
     const body = streamConnections === 1
       ? `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: 5, revision: 7, snapshot: running })}\n\n`
-      : `event: entry\ndata: ${JSON.stringify({ type: 'entry', sequence: 6, revision: 7, entry: routedEntry })}\n\n`;
+      : `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: current.conversation.eventSequence, revision: current.conversation.revision, snapshot: current })}\n\nevent: entry\ndata: ${JSON.stringify({ type: 'entry', sequence: current.conversation.eventSequence + 1, revision: current.conversation.revision, entry: routedEntry })}\n\n`;
     return route.fulfill({ contentType: 'text/event-stream', body });
   });
   await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => {
@@ -159,14 +190,14 @@ test('zeigt Antworten, Aufgaben und einzeln speicherbare Rückfragen ohne intern
       expect(submitted).toHaveLength(1);
       const questions = current.questions.map(question => { const answer = submitted.find(item => item.questionId === question.id); return answer ? { ...question, status: 'answered' as const, answer: answer.answer } : question; });
       const allAnswered = questions.every(question => question.status === 'answered');
-      current = { ...current, conversation: { ...current.conversation, revision: current.conversation.revision + 1 }, questions, tasks: current.tasks.map(task => task.id === 'job-plan' && allAnswered ? { ...task, activityState: 'working' as const, publicDetails: [...task.publicDetails, { id: 'plan-resumed', at: '2026-09-10T08:04:00.000Z', kind: 'progress' as const, message: 'Die Antworten sind übernommen. Der Ablaufentwurf wird fertiggestellt.' }] } : task) };
+      current = { ...current, conversation: { ...current.conversation, revision: current.conversation.revision + 1, eventSequence: current.conversation.eventSequence + 1 }, questions, tasks: current.tasks.map(task => task.id === 'job-plan' && allAnswered ? { ...task, activityState: 'working' as const, publicDetails: [...task.publicDetails, { id: 'plan-resumed', at: '2026-09-10T08:04:00.000Z', kind: 'progress' as const, message: 'Die Antworten sind übernommen. Der Ablaufentwurf wird fertiggestellt.' }] } : task) };
       await route.fulfill({ json: current });
       return;
     }
     expect(input.command).toBe('message');
     expect(input.payload?.message).toBe('Prüfe zusätzlich den Ablehnungsgrund.');
     const message = input.payload?.message ?? '';
-    current = { ...current, conversation: { ...current.conversation, revision: 9 }, timeline: [...current.timeline, { id: 'steering-new', at: '2026-09-10T08:03:00.000Z', kind: 'user', message, delivery: { state: 'routing', targetLabel: 'Planungsauftrag' } }] };
+    current = { ...current, conversation: { ...current.conversation, revision: current.conversation.revision + 1, eventSequence: current.conversation.eventSequence + 1 }, timeline: [...current.timeline, { id: 'steering-new', at: '2026-09-10T08:03:00.000Z', kind: 'user', message, delivery: { state: 'routing', targetLabel: 'Planungsauftrag' } }] };
     await route.fulfill({ json: current });
   });
   await page.goto('/testing/chat/chat-browser-contract/chat');
@@ -273,6 +304,28 @@ test('Ablauf sperrt Agentenarbeit, dupliziert wirklich und behält einen abgewie
   await page.screenshot({ path: '.local/verification/chat/flow.png', fullPage: true });
 });
 
+test('ein älterer lokaler Entwurf verdeckt die aktuelle gespeicherte Revision nicht und bleibt wiederherstellbar', async ({ page, request }) => {
+  const current = await scenario(request);
+  const stale = { ...structuredClone(current), revision: current.revision - 1, blocks: [] };
+  await page.addInitScript(({ key, value }: { key: string; value: string }) => localStorage.setItem(key, value), { key: `folio-testing-chat-draft:${current.id}`, value: JSON.stringify(stale) });
+  await staticChat(page, conversation(current));
+  await page.goto('/testing/chat/chat-browser-contract/flow');
+
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
+  await expect(page.getByText(`Revision ${current.revision} ist aktuell. Dein lokaler Entwurf aus Revision ${stale.revision} wurde gesichert.`)).toBeVisible();
+  expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key)!).at(-1).blocks, `folio-testing-chat-draft-backup:${current.id}`)).toEqual([]);
+
+  await page.getByRole('button', { name: 'Gesicherten Entwurf anzeigen' }).click();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' })).toHaveCount(0);
+  await expect(page.getByLabel('Baustein hinzufügen')).toBeDisabled();
+  await expect(page.getByRole('textbox', { name: 'Nachricht zum Ablauf' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Aktuelle Revision anzeigen' }).click();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Gesicherten Entwurf anzeigen' })).toBeVisible();
+  await expect(page.locator('.blocklyText').filter({ hasText: 'Angebot berechnen' }).first()).toBeVisible();
+});
+
 test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zur Freigabe über den Ablauf', async ({ page, request }) => {
   mkdirSync('.local/verification/chat/details', { recursive: true });
   const seed = await scenario(request);
@@ -345,6 +398,19 @@ test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zu
   await expect(page.locator('.tc-entry.is-user-action')).toContainText('Du hast');
   await expect(page.getByRole('button', { name: 'Freigeben', exact: true })).toHaveCount(0);
   await page.screenshot({ path: '.local/verification/chat/details/causal-chat-approved.png', fullPage: true });
+});
+
+test('sendet nach einem Stream-Zustand die neueste Unterhaltungsrevision', async ({ page, request }) => {
+  const seed = await scenario(request);
+  const initial = conversation(seed, { conversation: { id: 'chat-browser-contract', revision: 10, eventSequence: 10, createdAt: '2026-09-10T08:00:00.000Z', updatedAt: '2026-09-10T08:10:00.000Z', model: 'luna', scenarioId: seed.id, entryIds: [] }, allowedCommands: ['message', 'prepare'] });
+  let postedRevision = 0;
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract', route => route.fulfill({ json: initial }));
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: 10, revision: 10, snapshot: initial })}\n\nevent: state\ndata: ${JSON.stringify({ type: 'state', sequence: 11, revision: 11 })}\n\n` }));
+  await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => { const input = route.request().postDataJSON() as { expectedRevision: number }; postedRevision = input.expectedRevision; await route.fulfill({ json: { ...initial, conversation: { ...initial.conversation, revision: 12, eventSequence: 12 } } }); });
+  await page.goto('/testing/chat/chat-browser-contract/chat');
+  await page.getByRole('button', { name: 'Technisch vorbereiten', exact: true }).click();
+  await expect.poll(() => postedRevision).toBe(11);
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
 test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespeicherten Nachweise', async ({ page, request }) => {

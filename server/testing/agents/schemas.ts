@@ -31,7 +31,7 @@ const matrix = object({ columns: array(object({ id: identifier, label: string, b
 
 /** Strict schema uses key/value rows for extensible maps, then validates decoded domain data. */
 export const BUSINESS_SCHEMA = { ...object({ title: string, expectedOutcome: string, blocks: array({ $ref: '#/$defs/instance' }), knowledgeRefs: strings,
-  caseDesign: object({ mode: { enum: ['single', 'matrix'] }, dimensions: strings, expectedCaseCount: { type: 'integer', minimum: 1, maximum: 100 }, expectedResults: strings, rationale: string }),
+  caseDesign: object({ mode: { enum: ['single', 'matrix'] }, dimensions: strings, expectedCaseCount: { type: 'integer', minimum: 1, maximum: 100, description: 'Anzahl unabhängig ausführbarer Datenkombinationen. Bei mode single immer 1; mehrere Assertions oder lineare Rollenwechsel erhöhen sie nicht.' }, expectedResults: strings, rationale: string }),
   newDefinitions: array(definition), newKnowledge: array(knowledge), explanation: string, assumptions: strings, openQuestions: strings }), $defs: { instance } };
 BUSINESS_SCHEMA.properties.matrix = nullable({ ...matrix, description: 'Explizite Testmatrix oder null. Nur verwenden, wenn die Anforderung mehrere Datenkombinationen verlangt. blockPath und inputPath müssen exakt auf ein Eingabefeld im vorgeschlagenen Ablauf zeigen.' });
 BUSINESS_SCHEMA.required.push('matrix');
@@ -133,13 +133,16 @@ export function decodeBusinessDraft(raw: unknown): TestingBusinessDraft {
     relatedKnowledge: z.array(id).parse(row.relatedKnowledge), requiredFields: z.array(text).parse(row.requiredFields), preconditions: z.array(text).parse(row.preconditions), postconditions: z.array(text).parse(row.postconditions), origin: 'agent',
   }));
   const { matrix: rawMatrix, ...draft } = value;
-  return { ...draft, blocks: value.blocks.map(block => decodeInstance(block)), newDefinitions, newKnowledge,
+  const caseDesign = draft.caseDesign?.mode === 'single' && draft.caseDesign.dimensions.length <= 1 && !rawMatrix
+    ? { ...draft.caseDesign, dimensions: [], expectedCaseCount: 1 }
+    : draft.caseDesign;
+  return { ...draft, ...(caseDesign ? { caseDesign } : {}), blocks: value.blocks.map(block => decodeInstance(block)), newDefinitions, newKnowledge,
     ...(rawMatrix ? { matrix: { columns: rawMatrix.columns.map(({ blockPath, inputPath, ...column }) => ({ ...column, target: { blockPath, inputPath } })), rows: rawMatrix.rows.map(row => ({ ...row, values: decodedPairs(row.values) })) } } : {}) };
 }
 export function validateTestingCaseDesign(draft:TestingBusinessDraft,matrix=draft.matrix,scenario?:TestingScenario,catalog?:TestingCatalog):string[]{
   const design=draft.caseDesign;if(!design)return [];
   const errors:string[]=[];
-  if(design.mode==='single'&&(design.expectedCaseCount!==1||design.dimensions.length))errors.push('CASE_DESIGN_SINGLE_COUNT: Ein Einzelfall muss genau einen erwarteten Fall und keine variierte Dimension ausweisen. Verwende für mehrere Fälle eine Matrix.');
+  if(design.mode==='single'&&design.dimensions.length>=2)errors.push('CASE_DESIGN_SINGLE_COUNT: Ein Einzelfall weist mehrere unabhängig variierte Eingabedimensionen aus. Verwende dafür eine Matrix. Eine einzelne Rollenangabe, mehrere Assertions oder lineare Rollenwechsel innerhalb eines Ablaufs bleiben ein Fall.');
   if(design.mode==='matrix'&&!design.dimensions.length)errors.push('CASE_DESIGN_DIMENSIONS_MISSING: Eine Matrixplanung muss mindestens eine variierte Eingabedimension benennen.');
   if(design.mode==='matrix'&&!matrix)errors.push('CASE_DESIGN_MATRIX_MISSING: caseDesign beschreibt mehrere Fälle, aber der Entwurf enthält keine Testmatrix. Lege die genannten Dimensionen als Eingabespalten und die Zielergebnisse als zeilenweise Sollwertspalten an.');
   if(design.mode==='single'&&matrix)errors.push('CASE_DESIGN_SINGLE_MISMATCH: caseDesign beschreibt einen Einzelfall, der Entwurf enthält aber eine Testmatrix. Korrigiere die Planungsentscheidung oder entferne die Matrix.');
