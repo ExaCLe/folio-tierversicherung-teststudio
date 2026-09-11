@@ -14,7 +14,7 @@ Die linke Liste enthält die vorhandenen Testfälle. Ein Klick öffnet den Testf
 
 Hier stehen deine Anforderungen, geprüfte Antworten und Änderungsvorschläge in einer schmalen Lesespalte. Laufende und abgeschlossene Arbeiten erscheinen an dem Zeitpunkt, an dem der Agent sie tatsächlich bearbeitet oder abgeschlossen hat. Die Karten nennen ihren Zweck und den Agentennamen. Ein laufender Auftrag zeigt einen Spinner, ein abgeschlossener ein Häkchen. Wartende und noch nicht gestartete Aufträge stehen getrennt unter "Als Nächstes". Hat eine technische Vorbereitung bereits gearbeitet und ein Hindernis gemeldet, bleibt sie mit ihrem Ergebnis chronologisch im Verlauf. Nach einer fachlichen Korrektur sperrt dieser historische Bericht keine neue Vorbereitung. Dadurch erscheinen geplante technische Arbeiten nicht vor der fachlichen Freigabe, die sie erst auslöst. Wartet ein Auftrag auf einen Teilauftrag, führt ein Link direkt zu dessen Details.
 
-Ein Klick auf eine Aufgabe öffnet ihre öffentlichen Meldungen. Der Detaildialog trennt die öffentliche Zusammenfassung der Bearbeitung, die tatsächliche Agentenausgabe, strukturierte Ergebnisse und automatische Vertragsprüfungen. Eine automatische Schema- oder Compilerprüfung heißt ausdrücklich "Automatisierte Prüfung". Die Oberfläche nennt nur dann eine KI-Prüfung, wenn der Server dafür einen eigenen belegten Bericht liefert. Quellen bleiben am Bericht verlinkt. Neue Meldungen erscheinen während eines laufenden Auftrags im geöffneten Dialog. Interne Überlegungen, Tool-Aufrufe und Sitzungskennungen erscheinen nicht.
+Ein Klick auf eine Aufgabe öffnet ihre öffentlichen Meldungen. Der breite Detaildialog zeigt in „Ausgaben“ die tatsächlichen öffentlichen Agentenmeldungen, Begründungen, Fehler und Ergebnisse. Verschachtelte technische Strukturen stehen vollständig in der separaten Ansicht „Technische Daten“. Sie verengen keine Textspalten der lesbaren Ausgabe. Eine automatische Schema- oder Compilerprüfung heißt ausdrücklich "Automatisierte Prüfung". Die Oberfläche nennt nur dann eine KI-Prüfung, wenn der Server dafür einen eigenen belegten Bericht liefert. Quellen bleiben am Bericht verlinkt. Neue Meldungen erscheinen während eines laufenden Auftrags im geöffneten Dialog. Interne Überlegungen, Tool-Aufrufe und Sitzungskennungen erscheinen nicht.
 
 Neue Aufträge speichern die vom Anbieter ausgegebenen Reasoning-Zusammenfassungen. Provider-Zusammenfassungen, die eine ältere Version bereits verworfen hat, lassen sich durch das Update nicht rekonstruieren. Vorhandene gespeicherte Ergebnisse und Prüfberichte bleiben erhalten; bei älteren Aufträgen zeigt der Dialog ehrlich, wenn keine Reasoning-Zusammenfassung vorliegt.
 
@@ -24,7 +24,7 @@ Offene Rückfragen stehen gemeinsam in einem hervorgehobenen Eingabebereich. Sie
 
 Die Unterhaltung zeigt zusammengefasste, dauerhaft gespeicherte Ereignisse. Eigene Entscheidungen wie eine Freigabe erscheinen als grüne Aktion mit "Du hast ..." und werden nicht Folio zugeschrieben. Der Agent streamt keine Tokens und schreibt keine Blöcke einzeln sichtbar in die Arbeitsfläche. Nach einem abgeschlossenen Arbeitsschritt liefert der Server einen neuen prüfbaren Stand oder einen Änderungsvorschlag.
 
-Aufgabenkarten zeigen, sofern der Anbieter sie liefert, Dauer, belegte API-Anfragen sowie Eingabe-, Cache-, Ausgabe- und Gesamttokens. Cache-Tokens sind ein Teil der Eingabe und werden deshalb separat ausgewiesen; sie werden nicht zusätzlich zur Gesamtsumme addiert. Neue Codex-Aufträge zählen einzelne API-Anfragen über die lokale Telemetrie der CLI, einschließlich erneuter Versuche. Dafür wird je Auftrag kurzzeitig ein eigener Empfänger auf dem lokalen Rechner geöffnet; seine Nachrichten werden nicht gespeichert. Bei älteren Sitzungen oder Anbietern ohne genaue Anfragezahl steht „API-Anfragen unbekannt“; CLI-Sitzungen und Modellrunden werden nicht als API-Anfragen gezählt. Fehlende Tokenwerte bleiben leer. Eine angezeigte Null ist ein gemessener Wert.
+Aufgabenkarten zeigen, sofern der Anbieter sie liefert, Dauer, belegte API-Anfragen sowie Eingabe-, Cache-, Ausgabe- und Gesamttokens. Cache-Tokens sind ein Teil der Eingabe und werden deshalb separat ausgewiesen; sie werden nicht zusätzlich zur Gesamtsumme addiert. Neue Codex-Aufträge zählen einzelne API-Anfragen über die lokale Telemetrie der CLI, einschließlich erneuter Versuche. Dafür wird je Auftrag kurzzeitig ein eigener Empfänger auf dem lokalen Rechner geöffnet; seine Nachrichten werden nicht gespeichert. Fehlende API-Zahlen werden nicht angezeigt. Die Karte zählt stattdessen die tatsächlich übermittelten Nachrichten und öffentlichen Reasoning-Zusammenfassungen als „Agentenausgaben“. Von Claude gemeldete Modellrunden erscheinen separat. CLI-Sitzungen und Modellrunden werden nicht als API-Anfragen gezählt. Fehlende Tokenwerte bleiben leer. Eine angezeigte Null ist ein gemessener Wert.
 
 ### Ablauf
 
@@ -40,7 +40,9 @@ Definitionen, Wissensquellen und weitere technische Details bearbeitest du über
 
 ### Browser
 
-Vor dem ersten Lauf zeigt die Ansicht eine Übersicht und den Knopf "Test starten". Der Start ist ausdrücklich und erfolgt getrennt von der technischen Vorbereitung.
+Die Browseransicht unterscheidet „Erkundung“ und „Testlauf“. Während der Erkundung zeigt sie die letzte echte Browserbeobachtung mit Zeitpunkt und Seitenpfad. Das sind gespeicherte Bilder nach Aktionen, kein durchgehender Videostream. Solange nur vorhandenes Fachwissen geprüft wird, steht dort ausdrücklich, dass der Browser noch nicht geöffnet wurde. Ein fehlgeschlagenes Laden des Bilds wird sichtbar und kann wiederholt werden.
+
+Vor dem ersten Testlauf zeigt die Ansicht eine Übersicht und den Knopf "Test starten". Der Start ist ausdrücklich und erfolgt getrennt von der technischen Vorbereitung.
 
 Während eines echten Playwright-Laufs zeigt die Ansicht ungefähr einmal pro Sekunde das zuletzt aufgenommene Browserbild. Das Bild stammt aus dem laufenden Browser und ist schreibgeschützt. Nach dem Lauf zeigt die Ansicht die gespeicherten Screenshots der Testschritte als Nachweise. Nachweise einer älteren Testfallrevision sind als historisch markiert.
 
@@ -51,6 +53,8 @@ Die drei Aktionen bleiben getrennt. Die Unterhaltung bietet für eine noch nicht
 1. "Freigeben" bestätigt die fachliche Revision.
 2. "Technisch vorbereiten" prüft und erstellt die technische Bindung für genau diese Revision.
 3. "Test starten" führt den vorbereiteten Stand im echten Browser aus.
+
+Fehlgeschlagene Agentenaufträge zeigen ihre Fehlermeldung und eine Wiederholungsaktion. Der neue Versuch übernimmt den gespeicherten Auftrag; der alte Versuch bleibt im Verlauf. Bei fehlgeschlagenem Senden bleibt dein Text im Eingabefeld. Lade- und Verbindungsfehler werden sichtbar, statt nur im Hintergrund protokolliert zu werden.
 
 Der Server bestimmt, welche Aktion im aktuellen Zustand erlaubt ist. Ein laufender Auftrag kann abgebrochen werden. Die Oberfläche behauptet keinen Abbruch, bevor der Server ihn bestätigt hat.
 

@@ -33,7 +33,7 @@ test('zeigt Cache-Metrik getrennt, inklusive Null, und lässt unbekannte Werte w
   await page.goto(`/testing/chat/${id}/chat`);
   await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('Eingabe 40');
   await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('Cache 0');
-  await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('API-Anfragen unbekannt');
+  await expect(page.getByRole('button', { name: /Cache mit Null/ })).not.toContainText('API-Anfragen unbekannt');
   await expect(page.getByRole('button', { name: /Cache mit Null/ })).not.toContainText('1 API-Anfragen');
   await expect(page.getByRole('button', { name: /Cache unbekannt/ }).locator('.tc-task-metrics')).not.toContainText('Cache');
 });
@@ -136,4 +136,102 @@ test('behält die technische Blockierung an ihrem Zeitpunkt und erlaubt Vorberei
   expect(contents.indexOf('Technisch vorbereiten')).toBeLessThan(contents.indexOf('Das sichtbare Formular'));
   expect(contents.indexOf('Das sichtbare Formular')).toBeLessThan(contents.indexOf('Bitte prüfe deaktiviert'));
   expect(contents.indexOf('Bitte prüfe deaktiviert')).toBeLessThan(contents.indexOf('Fachlichen Ablauf planen'));
+});
+
+test('zeigt echte Agentenausgaben und breite lesbare Details statt unbekannter API-Zahlen', async ({ page }) => {
+  const current = snapshot(undefined, [{ id: 'public-output', purpose: 'Anwendung erkunden', workStages: [{ stage: 'knowledge', status: 'completed' }, { stage: 'exploring', status: 'running' }], agent: { name: 'Luna', modelId: 'luna', color: '#635bff' }, status: 'running', activityState: 'working', startedAt: new Date().toISOString(), metrics: { elapsedMs: 1000, requestCount: 1, modelTurnCount: 3 }, publicDetails: [
+    { id: 'reasoning-1', at: new Date().toISOString(), kind: 'progress', message: '**Ich prüfe die Rollen im Formular.**', detail: { type: 'reasoning', label: 'Öffentliche Überlegung' } },
+    { id: 'response-1', at: new Date().toISOString(), kind: 'progress', message: 'Das Formular ist sichtbar.', detail: { type: 'message', label: 'Antwort', data: { summary: 'Das Formular ist sichtbar.', scenario: { blocks: [{ technicalKey: 'only-in-original' }] } } } },
+  ] }]);
+  await mockChat(page, current);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(`/testing/chat/${id}/chat`);
+  const card = page.locator('[data-task-id=public-output]');
+  await expect(card).toContainText('2 Agentenausgaben');
+  await expect(card).toContainText('3 Modellrunden');
+  await expect(card).not.toContainText('API-Anfragen');
+  await card.click();
+  const dialog = page.getByRole('dialog');
+  expect((await dialog.boundingBox())!.width).toBeGreaterThan(1000);
+  await expect(dialog.getByRole('list', { name: 'Erkundungsschritte' })).toContainText(/Fachwissen prüfen\s*Abgeschlossen/);
+  await expect(dialog.getByRole('list', { name: 'Erkundungsschritte' })).toContainText(/Anwendung erkunden\s*In Arbeit/);
+  await expect(dialog.getByText('Ich prüfe die Rollen im Formular.', { exact: true })).toBeVisible();
+  await expect(dialog).not.toContainText('only-in-original');
+  await expect(dialog.locator('details')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Technische Daten', exact: true }).click();
+  await expect(dialog).toContainText('only-in-original');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('behält eine Nachricht nach einem Sendefehler und zeigt den Grund', async ({ page }) => {
+  await mockChat(page, snapshot());
+  await page.route(`**/api/testing/chat/conversations/${id}/commands`, route => route.fulfill({ status: 503, json: { error: 'Die Modellverbindung ist momentan nicht erreichbar.' } }));
+  await page.goto(`/testing/chat/${id}/chat`);
+  const input = page.getByRole('textbox', { name: 'Separate Nachricht', exact: true });
+  await input.fill('Bitte eine Kuhversicherung erstellen.');
+  await page.getByRole('button', { name: 'Separate Nachricht senden', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Die Modellverbindung ist momentan nicht erreichbar.');
+  await expect(input).toHaveValue('Bitte eine Kuhversicherung erstellen.');
+  await expect(page.getByRole('button', { name: 'Separate Nachricht senden', exact: true })).toBeEnabled();
+});
+
+test('zeigt fehlgeschlagenes Laden und stellt den Testfall per Wiederholung wieder her', async ({ page }) => {
+  let unavailable = true;
+  await page.route(`**/api/testing/chat/conversations/${id}`, route => unavailable ? route.fulfill({ status: 503, json: { error: 'Testdaten vorübergehend nicht erreichbar.' } }) : route.fulfill({ json: snapshot() }));
+  await page.route(`**/api/testing/chat/conversations/${id}/events`, route => route.fulfill({ status: 503, body: 'offline' }));
+  await page.goto(`/testing/chat/${id}/chat`);
+  await expect(page.getByRole('alert')).toContainText('Testdaten vorübergehend nicht erreichbar.');
+  await expect(page.getByText('Der Testfall konnte nicht geladen werden. Dein gespeicherter Stand bleibt erhalten.')).toBeVisible();
+  unavailable = false;
+  await page.getByRole('button', { name: 'Stand erneut laden', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Separate Nachricht', exact: true })).toBeVisible();
+});
+
+test('zeigt Wissenserkundung getrennt vom Testlauf und aktualisiert echte Browsernachweise', async ({ page }) => {
+  const current = { ...snapshot(), explorationObservation: { jobId: 'explore-job', stage: 'knowledge', status: 'waiting-model', summary: 'Der Agent prüft die vorhandenen Rollenregeln.', observationCount: 0 } };
+  await mockChat(page, current as TestingChatSnapshot);
+  await page.goto(`/testing/chat/${id}/browser`);
+  await expect(page.getByRole('heading', { name: 'Fachwissen prüfen' })).toBeVisible();
+  await expect(page.getByText('Der Agent prüft zuerst vorhandenes Fachwissen. Der Browser wurde noch nicht geöffnet.')).toBeVisible();
+  await expect(page.locator('.tc-live-frame img')).toHaveCount(0);
+  const observed = { ...current, explorationObservation: { ...current.explorationObservation, stage: 'exploring', status: 'observed', observationCount: 1, summary: 'Das Antragsformular wurde geöffnet.', latest: { sequence: 1, path: '/portal/antrag', action: 'open', screenshot: '/api/testing/jobs/explore-job/artifacts/browser.png', observedAt: '2026-09-11T10:00:00.000Z' } } };
+  await page.route('**/api/testing/jobs/explore-job/artifacts/browser.png*', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="blue"/></svg>' }));
+  await mockChat(page, observed as TestingChatSnapshot);
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Anwendung erkunden' })).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Browserbeobachtung: /portal/antrag' })).toBeVisible();
+  await expect(page.getByText(/Letzte Browserbeobachtung/)).toContainText('/portal/antrag');
+  await page.getByRole('button', { name: 'Testlauf', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Test starten', exact: true })).toBeVisible();
+});
+
+test('macht den Fehler samt Wiederholung in allen Ansichten sichtbar und sendet einen bewachten Chat-Befehl', async ({ page }) => {
+  const current = snapshot(undefined, [{ id: 'failed-root', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Luna', modelId: 'luna', color: '#635bff' }, status: 'failed', activityState: 'failed', startedAt: '2026-09-10T08:00:00.000Z', publicDetails: [{ id: 'error', at: '2026-09-10T08:01:00.000Z', kind: 'error', message: 'Codex konnte das ausgewählte Modell nicht erreichen.' }] }]);
+  current.retry = { jobId: 'failed-root', label: 'Auftrag erneut versuchen' };
+  current.allowedCommands.push('retry');
+  await mockChat(page, current);
+  let calls = 0;
+  await page.route(`**/api/testing/chat/conversations/${id}/commands`, async route => {
+    calls += 1;
+    expect(route.request().postDataJSON()).toMatchObject({ command: 'retry', expectedRevision: 1 });
+    await route.fulfill({ json: { ...current, retry: undefined, allowedCommands: ['cancel'], conversation: { ...current.conversation, revision: 2, eventSequence: 2 } } });
+  });
+  await page.goto(`/testing/chat/${id}/chat`);
+  await expect(page.getByRole('alert')).toContainText('Codex konnte das ausgewählte Modell nicht erreichen.');
+  await page.getByRole('button', { name: 'Browser', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Codex konnte das ausgewählte Modell nicht erreichen.');
+  await page.getByRole('button', { name: 'Auftrag erneut versuchen', exact: true }).click();
+  expect(calls).toBe(1);
+  await expect(page.locator('.tc-recovery-notice')).toHaveCount(0);
+});
+
+test('zeigt auch bei einem Darstellungsfehler den konkreten Hinweis und einen Neustart', async ({ page }) => {
+  const current = snapshot();
+  current.timeline = [{ id: 'bad-time', kind: 'agent_summary', at: 'invalid-date', message: 'Antwort mit fehlerhaftem Zeitpunkt' }];
+  await mockChat(page, current);
+  await page.goto(`/testing/chat/${id}/chat`);
+  await expect(page.getByRole('heading', { name: 'Die Ansicht konnte nicht angezeigt werden.' })).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('Invalid time value');
+  await expect(page.getByRole('button', { name: 'Seite neu laden', exact: true })).toBeVisible();
 });

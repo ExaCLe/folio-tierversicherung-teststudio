@@ -2,10 +2,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import type { TestingAgentConfiguration, TestingAgentSettings, TestingModel, TestingProvider } from '../../../shared/testing';
-import { db } from '../../store';
+import { settingsDb } from '../../settings-store';
 import { TestingModelError } from '../repository';
 
-const collection = 'testingAgentSettings';
 const context = new AsyncLocalStorage<TestingAgentConfiguration>();
 export const DEFAULT_CODEX_MODELS = { luna: 'gpt-5.6-luna', sol: 'gpt-5.6-sol' };
 export function defaultAgentSettings(): TestingAgentSettings {
@@ -14,7 +13,7 @@ export function defaultAgentSettings(): TestingAgentSettings {
     { id: 'sol', label: 'Sol', provider: 'codex', slug: DEFAULT_CODEX_MODELS.sol, extraArgs: [] },
   ], providers: { codex: { executable: '', extraArgs: [] }, claude: { executable: '', extraArgs: [] } } };
 }
-export function getTestingAgentSettings(): TestingAgentSettings { return structuredClone(db.find<TestingAgentSettings>(collection, 'local') ?? defaultAgentSettings()); }
+export function getTestingAgentSettings(): TestingAgentSettings { return structuredClone(settingsDb.find<TestingAgentSettings>('local') ?? defaultAgentSettings()); }
 export function providerExecutable(provider: TestingProvider): string {
   const command = provider === 'codex' ? process.env.FOLIO_CODEX_EXECUTABLE : process.env.FOLIO_CLAUDE_EXECUTABLE;
   return command || (existsSync(`/opt/homebrew/bin/${provider}`) ? `/opt/homebrew/bin/${provider}` : provider);
@@ -81,7 +80,7 @@ export function saveTestingAgentSettings(raw: unknown): TestingAgentSettings {
     models: value.models.map(model => ({ ...model, extraArgs: validateExtraArgs(model.provider, model.extraArgs) })),
     providers: { codex: { ...value.providers.codex, extraArgs: validateExtraArgs('codex', value.providers.codex.extraArgs) }, claude: { ...value.providers.claude, extraArgs: validateExtraArgs('claude', value.providers.claude.extraArgs) } },
   };
-  return db.upsert(collection, settings);
+  return settingsDb.upsert(settings);
 }
 export function resolveAgentConfiguration(modelId?: TestingModel): TestingAgentConfiguration {
   const inherited = context.getStore();

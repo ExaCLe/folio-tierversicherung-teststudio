@@ -90,7 +90,7 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   expect(await queued.first().evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(await running.evaluate(element => element.getBoundingClientRect().height));
   await queued.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
-  await expect(page.getByRole('dialog')).toContainText('Noch keine Ausgabe.');
+  await expect(page.getByRole('dialog')).toContainText('Der Agent hat noch keine Ausgabe übermittelt.');
   await expect(running).toContainText('7 API-Anfragen');
   await expect(running).toContainText('Eingabe 1.200');
   await expect(running).toContainText('Ausgabe 340');
@@ -402,7 +402,7 @@ test('zeigt belegte Agentendetails live, ordnet Ausführung kausal und führt zu
   await expect(dialog.getByText('Agentenausgabe', { exact: true })).toHaveCount(0);
   await expect(dialog.getByText('Korrigierte Agentenantwort, noch nicht geprüft.', { exact: true })).toHaveCount(0);
   await expect(dialog.getByText('Antrag, Grenzprüfung und Statusprüfung sind vollständig.', { exact: true })).toHaveCount(1);
-  await expect(dialog.getByText('Alle ursprünglichen Ereignisse anzeigen', { exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Technische Daten', exact: true })).toBeVisible();
   await expect(dialog.getByText('KI-Prüfer', { exact: false })).toHaveCount(0);
   await expect(dialog.getByText('Der korrigierte Ablauf verwendet den erzeugten Status und ist strukturell gültig.', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(dialog.getByText('Die Statusprüfung liest jetzt proposal.status.', { exact: true })).toBeVisible();
@@ -433,6 +433,7 @@ test('sendet nach einem Stream-Zustand die neueste Unterhaltungsrevision', async
   await page.route('**/api/testing/chat/conversations/chat-browser-contract/events', route => route.fulfill({ contentType: 'text/event-stream', body: `event: snapshot\ndata: ${JSON.stringify({ type: 'snapshot', sequence: 10, revision: 10, snapshot: initial })}\n\nevent: state\ndata: ${JSON.stringify({ type: 'state', sequence: 11, revision: 11 })}\n\n` }));
   await page.route('**/api/testing/chat/conversations/chat-browser-contract/commands', async route => { const input = route.request().postDataJSON() as { expectedRevision: number }; postedRevision = input.expectedRevision; await route.fulfill({ json: { ...initial, conversation: { ...initial.conversation, revision: 12, eventSequence: 12 } } }); });
   await page.goto('/testing/chat/chat-browser-contract/chat');
+  await page.getByRole('combobox', { name: 'Modell', exact: true }).selectOption('luna');
   await page.getByRole('button', { name: 'Technisch vorbereiten', exact: true }).click();
   await expect.poll(() => postedRevision).toBe(11);
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -448,6 +449,7 @@ test('Browser-Tab zeigt ein echtes Live-Bild vor Abschluss und danach die gespei
   await page.getByRole('button', { name: 'Ablauf', exact: true }).click();
   await page.getByRole('button', { name: 'Freigeben', exact: true }).click();
   await page.getByRole('button', { name: 'Unterhaltung', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Modell', exact: true }).selectOption('luna');
   await page.getByRole('button', { name: 'Technisch vorbereiten', exact: true }).click();
   await expect(page.locator('.tc-feed')).not.toContainText('Ich prüfe den geforderten Ablauf gegen die vorhandenen Bausteine und fachlichen Quellen.');
   await expect(page.locator('.tc-feed')).not.toContainText('Technischer Agentenplan, noch nicht geprüft');

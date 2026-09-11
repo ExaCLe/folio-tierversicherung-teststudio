@@ -43,7 +43,7 @@ npx playwright install chromium
 npm run dev:stable
 ```
 
-Danach die Browserseite neu laden. Die vorhandene Datei `.local/folio.json` bleibt erhalten, einschließlich eigener Testfälle und KI-Einstellungen. Änderungen am API-Code werden bei `dev:stable` erst durch den Neustart geladen.
+Danach die Browserseite neu laden. Die vorhandenen Dateien `.local/folio.json` und `.local/folio.settings.json` bleiben erhalten. Änderungen am API-Code werden bei `dev:stable` erst durch den Neustart geladen.
 
 ## Entwicklung und getrennte Prozesse
 
@@ -229,7 +229,7 @@ Danach sind [Portal](http://127.0.0.1:3001/portal) und [Teststudio](http://127.0
 | `docs/` | Fachmethode, Schnittstellen, Speicherung und KI-Anbindung |
 | `.local/` | Lokale Daten, Testberichte sowie Agenten- und Browsernachweise |
 
-Die gemeinsame lokale Datei ist `.local/folio.json`. Neue Versicherungsobjekte liegen ausschließlich in `agriculture.*`-Kollektionen. `FOLIO_DATA_FILE` wählt bei Bedarf eine andere Datei. Ein Speichervorgang erhält andere Kollektionen und schreibt über eine temporäre Datei mit anschließendem atomarem Umbenennen. Pro Datendatei soll ein Serverprozess laufen. Der Prototyp enthält keine verteilte Produktionsdatenbank.
+Die lokalen Szenario- und Versicherungsdaten liegen in `.local/folio.json`. `FOLIO_DATA_FILE` wählt bei Bedarf eine andere Datendatei. Modell- und Providerprofile liegen getrennt in `.local/folio.settings.json`; `FOLIO_SETTINGS_FILE` kann diesen Pfad überschreiben. Beim ersten Start nach der Trennung werden vorhandene Einstellungen automatisch in die neue Datei kopiert. Die alte Datendatei bleibt dabei unverändert. Deshalb behalten auch ein Zurücksetzen oder Ersetzen der Szenariodaten und isolierte E2E-Datendateien die persönlichen KI-Einstellungen, sofern für den Test nicht zusätzlich `FOLIO_SETTINGS_FILE` gesetzt wird. Jeder Speichervorgang schreibt über eine temporäre Datei mit anschließendem atomarem Umbenennen.
 
 Der vollständige [Portalvertrag](docs/agriculture-api.md) dokumentiert `/api/agriculture`, Rollen, Statuswechsel und zugängliche Feldbeschriftungen. Das Teststudio verwendet `/api/testing`. Die Oberflächen teilen keine Sidebar.
 

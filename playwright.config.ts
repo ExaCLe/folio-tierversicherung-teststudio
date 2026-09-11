@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 const appURL = process.env.FOLIO_E2E_APP_URL ?? 'http://127.0.0.1:5174';
 const apiURL = 'http://127.0.0.1:3002';
+const testDataFile = resolve(`.local/e2e/folio-${randomUUID()}.json`);
 
 export default defineConfig({
   testDir: process.env.FOLIO_REPLAY === '1' ? './.local/testing/runs' : './e2e',
@@ -27,7 +28,7 @@ export default defineConfig({
     {
       command: 'node --import tsx server/index.ts', url: `${apiURL}/api/health`, reuseExistingServer: false,
       timeout: 30_000,
-      env: { PORT: '3002', FOLIO_APP_URL: appURL, FOLIO_DATA_FILE: resolve(`.local/e2e/folio-${randomUUID()}.json`), FOLIO_AUTO_REUSE: '0', FOLIO_CODEX_EXECUTABLE: resolve('e2e/helpers/fake-chat-cli.mjs'), NODE_ENV: 'test' },
+      env: { PORT: '3002', FOLIO_APP_URL: appURL, FOLIO_DATA_FILE: testDataFile, FOLIO_SETTINGS_FILE: `${testDataFile}.settings.json`, FOLIO_AUTO_REUSE: '0', FOLIO_CODEX_EXECUTABLE: resolve('e2e/helpers/fake-chat-cli.mjs'), NODE_ENV: 'test' },
     },
     {
       command: 'npm run dev:client -- --port 5174 --strictPort', url: appURL,

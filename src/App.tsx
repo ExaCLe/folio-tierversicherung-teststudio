@@ -4,11 +4,11 @@ const PortalApp = lazy(() => import('./portal/PortalApp').then(module => ({ defa
 const TestingApp = lazy(() => import('./testing/TestingApp').then(module => ({ default: module.TestingApp })));
 const TestingChatApp = lazy(() => import('./testing-chat/TestingChatApp').then(module => ({ default: module.TestingChatApp })));
 
-class AppBoundary extends Component<{ children: ReactNode }, { error: boolean }> {
-  state = { error: false };
-  static getDerivedStateFromError() { return { error: true }; }
+class AppBoundary extends Component<{ children: ReactNode }, { error: string }> {
+  state = { error: '' };
+  static getDerivedStateFromError(error: unknown) { return { error: error instanceof Error && error.message ? error.message : typeof error === 'string' && error ? error : 'Die Oberfläche konnte einen gespeicherten Wert nicht darstellen.' }; }
   render() {
-    if (this.state.error) return <main className="app-fallback"><h1>Die Anwendung konnte nicht geöffnet werden.</h1><p>Ihre gespeicherten Vorgänge bleiben erhalten. Laden Sie die Seite erneut.</p><button onClick={() => location.reload()}>Seite neu laden</button></main>;
+    if (this.state.error) return <main className="app-fallback" role="alert"><h1>Die Ansicht konnte nicht angezeigt werden.</h1><p>Deine gespeicherten Vorgänge bleiben erhalten. Du kannst die Seite erneut laden. Falls der Fehler wiederkehrt, hilft dieser Hinweis bei der Diagnose.</p><section className="app-failure-detail"><strong>Fehlerhinweis</strong><pre>{this.state.error}</pre><small>{location.pathname}</small></section><button onClick={() => location.reload()}>Seite neu laden</button></main>;
     return this.props.children;
   }
 }

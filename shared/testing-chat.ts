@@ -1,6 +1,6 @@
 import type { TestingAgentJob, TestingAgentMetrics, TestingAgentPublicDetail, TestingAgentStage, TestingBlockDefinition, TestingKnowledgeDocument, TestingModel, TestingRun, TestingScenario, TestingScenarioLifecycle } from './testing';
 
-export type TestingChatCommand = 'message'|'explore'|'resume'|'answer'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel';
+export type TestingChatCommand = 'message'|'explore'|'resume'|'answer'|'revise'|'save'|'apply'|'reject'|'approve'|'prepare'|'run'|'cancel'|'retry';
 export type TestingChatEntryKind = 'user'|'user_action'|'agent_summary'|'question'|'status'|'change'|'approval'|'evidence'|'error';
 
 export interface TestingChatEntry {
@@ -28,7 +28,7 @@ export interface TestingChatTask {
   agent:{name:string;modelId:string;provider?:'codex'|'claude';color:string};
   status:'not_started'|'queued'|'running'|'completed'|'failed'|'blocked'|'cancelled'; stage?:TestingAgentStage;
   activityState:'not_started'|'working'|'waiting'|'attention'|'done'|'failed'|'blocked'|'cancelled';
-  startedAt:string; executionAt?:string; finishedAt?:string; metrics?:TestingAgentMetrics;
+  startedAt:string; executionAt?:string; finishedAt?:string; metrics?:TestingAgentMetrics; workStages?:TestingAgentJob['workStages'];
   /** detail is absent only on snapshots persisted by older versions. */
   publicDetails:{id:string;at:string;kind:'progress'|'result'|'error';message:string;detail?:TestingAgentPublicDetail;sources?:TestingChatEntry['sources'];context?:TestingChatEntry['context']}[];
 }
@@ -49,6 +49,9 @@ export interface TestingChatSnapshot {
   confirmedFlow:{scenarioRevision:number;blocks:TestingScenario['blocks']}|null;
   validatedFlowPreview?:{jobId:string;scenarioRevision:number;title:string;expectedOutcome:string;blocks:TestingScenario['blocks'];knowledgeRefs:string[];newDefinitions?:TestingBlockDefinition[];newKnowledge?:TestingKnowledgeDocument[];status:'ready'|'provisional';readonly:true};
   runningStage?:TestingAgentStage;
+  /** Latest persisted exploration frame. These are discrete post-action observations, not a video stream. */
+  retry?:{jobId:string;label:string;errorJobId?:string;message?:string};
+  explorationObservation?:{jobId:string;stage:'knowledge'|'exploring';status:'waiting-model'|'acting'|'observed'|'finished'|'failed'|'cancelled';summary:string;observationCount:number;latest?:{sequence:number;path:string;action:string;screenshot:string;observedAt:string;error?:string}};
 }
 export interface TestingChatCommandRequest { command:TestingChatCommand; expectedRevision:number; payload?:Record<string,unknown> }
 export type TestingChatStreamEvent =

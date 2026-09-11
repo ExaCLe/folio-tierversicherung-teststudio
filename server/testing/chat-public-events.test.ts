@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { TestingAgentJob, TestingScenario } from '../../shared/testing';
@@ -51,6 +51,39 @@ test('persistierte Unterauftragsfehler bleiben nach Reload dem verursachenden Au
   assert.equal(parent.status,'blocked');assert.equal(parent.activityState,'blocked');assert.equal(parent.blockedByJobId,child.id);assert.equal(parent.publicDetails.some(detail=>detail.kind==='error'),false);
   assert.equal(child.status,'failed');assert.equal(child.activityState,'failed');assert.deepEqual(child.publicDetails.filter(detail=>detail.kind==='error').map(detail=>detail.message),['Die Wissensprüfung konnte kein verlässliches Ergebnis erstellen. Starte sie erneut.']);
   assert.deepEqual(snapshot.timeline.filter(entry=>entry.kind==='error').map(entry=>[entry.jobId,entry.message]),[['failed-exploration','Die Wissensprüfung konnte kein verlässliches Ergebnis erstellen. Starte sie erneut.']]);
+  assert.equal(snapshot.retry?.jobId,'failed-parent');assert.equal(snapshot.retry?.errorJobId,'failed-exploration');assert.equal(snapshot.retry?.message,'Die Wissensprüfung konnte kein verlässliches Ergebnis erstellen. Starte sie erneut.');assert(snapshot.allowedCommands.includes('retry'));
+});
+
+test('nur der neueste fehlgeschlagene Root-Auftrag bleibt retryfähig',()=>{
+  const scenarioId='retry-freshness-scenario',chatId='retry-freshness-chat',current=scenario(scenarioId,[]);db.upsert('testingScenarios',current);
+  const failed:TestingAgentJob={id:'retry-old-failed',phase:'business',model:'luna',status:'failed',prompt:'Ursprüngliche gespeicherte Anforderung.',scenarioId,scenarioRevision:1,startedAt:'2026-09-10T12:00:00.000Z',finishedAt:'2026-09-10T12:00:01.000Z',events:[],error:'Der Modellaufruf ist fehlgeschlagen.'};
+  db.upsert('testingAgentJobs',failed);db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:at,updatedAt:at,model:'luna',scenarioId,entryIds:[],handledRequests:[],jobIds:[failed.id]});
+  assert.equal(chat.getTestingChatSnapshot(chatId).retry?.jobId,failed.id);
+  const completed:TestingAgentJob={...failed,id:'retry-new-completed',status:'completed',startedAt:'2026-09-10T12:01:00.000Z',finishedAt:'2026-09-10T12:01:01.000Z',error:undefined,result:{needsKnowledge:true,openQuestions:['Fixture']}};
+  db.upsert('testingAgentJobs',completed);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),jobIds:[failed.id,completed.id]});
+  const snapshot=chat.getTestingChatSnapshot(chatId);assert.equal(snapshot.retry,undefined);assert(!snapshot.allowedCommands.includes('retry'));
+});
+
+test('Retry-Command ist idempotent und verknüpft genau einen Nachfolgeauftrag mit dem Chat',async()=>{
+  const scenarioId='retry-command-scenario',chatId='retry-command-chat',current=scenario(scenarioId,[{id:'kunde',definition:{id:'kunde.anlegen',version:'1.0.0'},inputs:{}}]);db.upsert('testingScenarios',current);
+  const failed:TestingAgentJob={id:'retry-command-failed',phase:'business',model:'luna',status:'failed',prompt:'Ändere den gespeicherten fachlichen Ablauf.',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[],error:'Synthetischer Modellfehler.'};
+  db.upsert('testingAgentJobs',failed);db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:at,updatedAt:at,model:'luna',scenarioId,entryIds:[],handledRequests:[],jobIds:[failed.id]});
+  const before=db.read<TestingAgentJob>('testingAgentJobs').length;
+  const first=chat.commandTestingChat(chatId,{command:'retry',expectedRevision:1,requestId:'retry-command-1'});const successor=first.activeJob!;
+  assert.equal(db.read<TestingAgentJob>('testingAgentJobs').length,before+1);assert(first.conversation.jobIds?.includes(successor.id));assert.equal(orchestrator.getTestingJob(successor.id).prompt,failed.prompt);
+  const repeated=chat.commandTestingChat(chatId,{command:'retry',expectedRevision:1,requestId:'retry-command-1'});
+  assert.equal(repeated.activeJob?.id,successor.id);assert.equal(db.read<TestingAgentJob>('testingAgentJobs').length,before+1);
+  orchestrator.cancelTestingJob(successor.id);await orchestrator.waitTestingJob(successor.id);
+});
+
+test('eine manuelle Szenariorevision und vorrangige Zustände unterdrücken Retry ohne normale Aktionen zu sperren',()=>{
+  const scenarioId='retry-guard-scenario',chatId='retry-guard-chat',current=scenario(scenarioId,[{id:'kunde',definition:{id:'kunde.anlegen',version:'1.0.0'},inputs:{}}]);db.upsert('testingScenarios',current);
+  const failed:TestingAgentJob={id:'retry-stale-failed',phase:'business',model:'luna',status:'failed',prompt:'Gespeicherte Änderung.',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[],error:'Fehlerfixture'};
+  db.upsert('testingAgentJobs',failed);db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:at,updatedAt:at,model:'luna',scenarioId,entryIds:[],handledRequests:[],jobIds:[failed.id]});
+  db.upsert('testingScenarios',{...current,revision:2,updatedAt:'2026-09-10T13:00:00.000Z'});
+  let snapshot=chat.getTestingChatSnapshot(chatId);assert.equal(snapshot.retry,undefined);assert(!snapshot.allowedCommands.includes('retry'));assert(snapshot.allowedCommands.includes('revise'));assert(snapshot.allowedCommands.includes('save'));
+  db.upsert('testingScenarios',current);db.upsert('testingChatQuestions',{id:`${chatId}:offen`,questionId:'offen',conversationId:chatId,jobId:failed.id,kind:'clarification',text:'Offene fachliche Frage?',why:'Fixture',status:'open'});
+  snapshot=chat.getTestingChatSnapshot(chatId);assert(snapshot.allowedCommands.includes('answer'));assert(!snapshot.allowedCommands.includes('retry'));
 });
 
 test('Wartezustand, noch nicht gestarteter Auftrag und unabhängiger Elternfehler bleiben unterscheidbar',()=>{
@@ -238,4 +271,20 @@ test('Neustart markiert eine nicht dispatchte Routing-Nachricht als retryfähig'
   const scenarioId='recovery-scenario';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation('recovery-chat',scenarioId);
   db.upsert('testingChatEntries',{id:'pending-route',at,kind:'user',message:'Diese Nachricht muss erhalten bleiben.',delivery:{state:'routing'}});const stored=db.find<any>('testingChatConversations','recovery-chat');db.upsert('testingChatConversations',{...stored,entryIds:['pending-route']});
   chat.recoverTestingChatDeliveries();const entry=chat.getTestingChatSnapshot('recovery-chat').timeline[0];assert.equal(entry.message,'Diese Nachricht muss erhalten bleiben.');assert.equal(entry.delivery?.state,'rejected');assert.match(entry.delivery?.detail??'',/erneut gesendet/);
+});
+
+
+test('abgeschlossene Browsererkundung behält ihren letzten Nachweis und bleibt nicht in Arbeit',()=>{
+  const scenarioId='exploration-evidence-scenario',chatId='exploration-evidence-chat',rootId='exploration-evidence-root',childId='exploration-evidence-child';
+  db.upsert('testingScenarios',scenario(scenarioId,[]));
+  db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:at,updatedAt:at,model:'luna',scenarioId,activeJobId:rootId,jobIds:[rootId],entryIds:[]});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:rootId,phase:'business',status:'completed',model:'luna',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[]});
+  db.upsert<TestingAgentJob>('testingAgentJobs',{id:childId,parentJobId:rootId,phase:'exploration',stage:'exploring',status:'completed',model:'luna',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,finishedAt:at,events:[],progress:{stage:'exploring',status:'observed',round:1,observationCount:1,actionLimit:5,startedAt:at,deadlineAt:at,summary:'Das Formular wurde geöffnet.'},workStages:[{stage:'knowledge',status:'completed'},{stage:'exploring',status:'completed'}]});
+  const folder=join(temporary,'agents',childId);mkdirSync(folder,{recursive:true});
+  const evidence={path:'/portal/antrag',action:'open',screenshot:`/api/testing/jobs/${childId}/artifacts/exploration-1.png`,observedAt:at};
+  writeFileSync(join(folder,'exploration-1.json'),JSON.stringify(evidence));
+  const snapshot=chat.getTestingChatSnapshot(chatId);
+  assert.equal(snapshot.explorationObservation?.status,'finished');
+  assert.deepEqual(snapshot.explorationObservation?.latest,{sequence:1,...evidence});
+  assert.equal(snapshot.tasks.find(task=>task.id===childId)?.workStages?.length,2);
 });

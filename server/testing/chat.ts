@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { TestingAgentJob, TestingModel, TestingScenario, TestingScenarioEditProposal } from '../../shared/testing';
 import type { TestingChatCommandRequest, TestingChatConversation, TestingChatEntry, TestingChatQuestion, TestingChatSnapshot, TestingChatStreamEvent, TestingChatTask } from '../../shared/testing-chat';
 import { db } from '../store';
 import { compileTestingScenario } from './compiler';
 import { deriveTestingLifecycle } from './lifecycle';
 import { approveTestingScenario, getTestingApproval, getTestingScenario, listTestingRuns, saveTestingScenario, subscribeTestingRuns, TestingModelError } from './repository';
-import { applyScenarioEditJob, cancelTestingJob, dismissScenarioEditJob, listTestingJobs, startBusinessJob, startPreparedRun, startScenarioEditJob, startTechnicalJob, steerTestingJob, subscribeTestingJobs } from './agents/orchestrator';
+import { applyScenarioEditJob, cancelTestingJob, dismissScenarioEditJob, listTestingJobs, retryTestingJob, startBusinessJob, startPreparedRun, startScenarioEditJob, startTechnicalJob, steerTestingJob, subscribeTestingJobs } from './agents/orchestrator';
 import { getTestingCatalog } from './catalog';
+import { AGENT_ARTIFACTS_ROOT } from './agents/cli';
 
 const conversations='testingChatConversations',entries='testingChatEntries',questions='testingChatQuestions';
 const listeners=new Map<string,Set<(event:TestingChatStreamEvent)=>void>>();
@@ -69,7 +72,7 @@ function task(job:TestingAgentJob,jobs:TestingAgentJob[],chatQuestions:TestingCh
   // historical result that needs attention, not future work in the queue.
   const activityState:TestingChatTask['activityState']=blockedBy?'blocked':technicalBlocked?'attention':job.status==='failed'?'failed':job.status==='cancelled'?'cancelled':needsAnswer?'attention':job.status==='completed'?'done':activeChild?'waiting':job.status==='queued'?'not_started':'working';
   const details=publicDetails(job,!!blockedBy),executionAt=details[0]?.at??job.workStages?.find(stage=>stage.startedAt&&stage.stage!=='knowledge'&&stage.stage!=='naming')?.startedAt;
-  return {id:job.id,...(job.parentJobId?{parentJobId:job.parentJobId}:{}),...(activeChild?{waitingForJobId:activeChild.id}:{}),...(blockedBy?{blockedByJobId:blockedBy.id}:{}),purpose:context.taskLabel,agent:{name:job.agentConfig?.modelLabel??(job.model==='luna'?'Luna':'Sol'),modelId:job.model,...(job.agentConfig?.provider?{provider:job.agentConfig.provider}:{}),color:agentColors[job.phase]},status,activityState,...(job.stage?{stage:job.stage}:{}),startedAt:job.startedAt,...(executionAt?{executionAt}:{}),...(job.finishedAt?{finishedAt:job.finishedAt}:{}),...(job.metrics?{metrics:job.metrics}:{}),publicDetails:details};
+  return {id:job.id,...(job.parentJobId?{parentJobId:job.parentJobId}:{}),...(activeChild?{waitingForJobId:activeChild.id}:{}),...(blockedBy?{blockedByJobId:blockedBy.id}:{}),purpose:context.taskLabel,agent:{name:job.agentConfig?.modelLabel??(job.model==='luna'?'Luna':'Sol'),modelId:job.model,...(job.agentConfig?.provider?{provider:job.agentConfig.provider}:{}),color:agentColors[job.phase]},status,activityState,...(job.stage?{stage:job.stage}:{}),startedAt:job.startedAt,...(executionAt?{executionAt}:{}),...(job.finishedAt?{finishedAt:job.finishedAt}:{}),...(job.metrics?{metrics:job.metrics}:{}),...(job.workStages?{workStages:job.workStages}:{}),publicDetails:details};
 }
 function rootJobId(job:TestingAgentJob,jobs:TestingAgentJob[]){let current=job,seen=new Set<string>();while(current.parentJobId&&!seen.has(current.id)){seen.add(current.id);const parent=jobs.find(candidate=>candidate.id===current.parentJobId);if(!parent)break;current=parent;}return current.id;}
 function conversationJobs(conversation:TestingChatConversation,jobs:TestingAgentJob[],currentRootId?:string){const entryJobIds=conversation.entryIds.map(id=>db.find<TestingChatEntry>(entries,id)?.jobId).filter((id):id is string=>!!id),roots=new Set([...(conversation.jobIds??[]),...(conversation.activeJobId?[conversation.activeJobId]:[]),...entryJobIds,...(currentRootId?[currentRootId]:[])]);return jobs.filter(job=>roots.has(rootJobId(job,jobs))).sort((a,b)=>a.startedAt.localeCompare(b.startedAt));}
@@ -138,6 +141,19 @@ function withoutLinkedDuplicateExplanation(entry:TestingChatEntry,jobs:TestingAg
   const data=entry.detail?.data&&typeof entry.detail.data==='object'&&!Array.isArray(entry.detail.data)&&(entry.detail.data as {summary?:unknown}).summary===entry.message?{...(entry.detail.data as Record<string,unknown>),summary}:entry.detail?.data;
   return {...entry,message:summary,...(content?{content}:{}),...(entry.detail?{detail:{...entry.detail,...(data!==undefined?{data}:{})}}:{})};
 }
+function explorationObservation(jobs:TestingAgentJob[]):TestingChatSnapshot['explorationObservation']{
+  const job=[...jobs].filter(candidate=>candidate.phase==='exploration').sort((a,b)=>b.startedAt.localeCompare(a.startedAt))[0];
+  if(!job)return undefined;
+  const progress=job.progress,observationCount=progress?.observationCount??0;
+  let latest:NonNullable<TestingChatSnapshot['explorationObservation']>['latest'];
+  if(observationCount>0){
+    const path=resolve(AGENT_ARTIFACTS_ROOT,job.id,`exploration-${observationCount}.json`);
+    try{if(existsSync(path)){const value=JSON.parse(readFileSync(path,'utf8')) as {path?:unknown;action?:unknown;screenshot?:unknown;observedAt?:unknown;error?:unknown};if(typeof value.path==='string'&&typeof value.action==='string'&&typeof value.screenshot==='string'&&typeof value.observedAt==='string')latest={sequence:observationCount,path:value.path,action:value.action,screenshot:value.screenshot,observedAt:value.observedAt,...(typeof value.error==='string'?{error:value.error}:{})};}}catch{/* A partially written optional projection must not break the chat snapshot. */}
+  }
+  const status=job.status==='failed'?'failed':job.status==='cancelled'?'cancelled':job.status==='completed'?'finished':progress?.status??'waiting-model';
+  const summary=job.status==='failed'?(job.error??'Die Wissensprüfung ist fehlgeschlagen.'):job.status==='cancelled'?(job.error??'Die Wissensprüfung wurde abgebrochen.'):progress?.summary??(job.stage==='exploring'?'Die isolierte Anwendung wird erkundet.':'Fachwissen wird geprüft; der Browser wurde noch nicht geöffnet.');
+  return {jobId:job.id,stage:progress?.stage??(job.stage==='exploring'?'exploring':'knowledge'),status,summary,observationCount,...(latest?{latest}:{})};
+}
 export function getTestingChatSnapshot(id:string):TestingChatSnapshot{
   const conversation=readConversation(id),scenario=conversation.scenarioId?getTestingScenario(conversation.scenarioId):undefined;
   const jobs=listTestingJobs(),scenarioFingerprint=scenario?compileTestingScenario(scenario,getTestingCatalog()).fingerprint:undefined;
@@ -156,6 +172,8 @@ export function getTestingChatSnapshot(id:string):TestingChatSnapshot{
   }).filter((entry,index,all)=>entry.kind!=='error'||all.findIndex(candidate=>candidate.kind==='error'&&candidate.jobId===entry.jobId&&candidate.message===entry.message)===index);
   const chatQuestions=conversationQuestions(id,conversation);
   const allowed:TestingChatSnapshot['allowedCommands']=[];
+  const latestRoot=[...linkedJobs].filter(job=>!job.parentJobId).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||b.id.localeCompare(a.id))[0];
+  const retryable=latestRoot&&['failed','cancelled'].includes(latestRoot.status)&&['business','technical'].includes(latestRoot.phase)&&(latestRoot.scenarioRevision===undefined||latestRoot.scenarioRevision===scenario?.revision)?latestRoot:undefined;
   if(activeJob&&['queued','running'].includes(activeJob.status))allowed.push('cancel','message');
   else if(currentRun&&latestRun&&['queued','running'].includes(latestRun.status))allowed.push('message');
   else if(proposed)allowed.push('apply','reject','revise','message');
@@ -166,13 +184,15 @@ export function getTestingChatSnapshot(id:string):TestingChatSnapshot{
     if(!compiled.approval||compiled.approval.scenarioRevision!==scenario.revision||compiled.approval.fingerprint!==compiled.fingerprint)allowed.push('approve');
     else {const prepared=jobs.find(job=>job.phase==='technical'&&job.status==='completed'&&job.scenarioId===scenario.id&&job.scenarioRevision===scenario.revision&&job.fingerprint===compiled.fingerprint&&(job.result as {prepared?:boolean}|undefined)?.prepared);if(prepared)allowed.push('run');else allowed.push('prepare');}
   }
+  if(retryable&&!activeJob&&!(currentRun&&latestRun&&['queued','running'].includes(latestRun.status))&&!proposed&&!chatQuestions.some(question=>question.status==='open')&&!allowed.includes('retry'))allowed.push('retry');
   const latestTechnical=scenario?jobs.filter(job=>job.phase==='technical'&&job.status==='completed'&&job.scenarioId===scenario.id&&job.scenarioRevision===scenario.revision&&job.fingerprint===scenarioFingerprint).sort((a,b)=>b.startedAt.localeCompare(a.startedAt)||b.id.localeCompare(a.id))[0]:undefined;
   const technicalAttention=latestTechnical&&Array.isArray((latestTechnical.result as any)?.repairContext?.issues)?latestTechnical:undefined;
   const tasks=linkedJobs.map(job=>task(job,linkedJobs,chatQuestions)).sort((a,b)=>a.executionAt&&b.executionAt?a.executionAt.localeCompare(b.executionAt):a.executionAt?-1:b.executionAt?1:a.startedAt.localeCompare(b.startedAt));
+  const observed=explorationObservation(linkedJobs);
   return {conversation:clone(conversation),timeline,tasks,questions:chatQuestions,scenario,proposed,lifecycle,
     ...(activeJob?{activeJob:{id:activeJob.id,phase:activeJob.phase,status:activeJob.status,stage:activeJob.stage,startedAt:activeJob.startedAt,finishedAt:activeJob.finishedAt,error:activeJob.error,progress:activeJob.progress,workStages:activeJob.workStages,runId:activeJob.runId}}:{}),
     ...(latestRun?{latestRun:{id:latestRun.id,status:latestRun.status,startedAt:latestRun.startedAt,finishedAt:latestRun.finishedAt,error:latestRun.error,steps:latestRun.steps,artifacts:latestRun.artifacts,summary:latestRun.summary,matrixRows:latestRun.matrixRows,scenarioRevision:latestRun.scenarioRevision,fingerprint:latestRun.compiled.fingerprint,isCurrent:!!currentRun}}:{}),
-    allowedCommands:allowed,confirmedFlow:scenario?{scenarioRevision:scenario.revision,blocks:scenario.blocks}:null,...(validatedFlowPreview(previewCandidate)?{validatedFlowPreview:validatedFlowPreview(previewCandidate)}:{}),...(scenario&&scenarioFingerprint?{scenarioState:{revision:scenario.revision,fingerprint:scenarioFingerprint}}:{}),...(technicalAttention?{technicalReview:{jobId:technicalAttention.id,issues:(technicalAttention.result as any).repairContext.issues,needsBusinessReview:!!(technicalAttention.result as any).needsBusinessReview}}:{}),...(activeJob?.stage?{runningStage:activeJob.stage}:{})};
+    allowedCommands:allowed,confirmedFlow:scenario?{scenarioRevision:scenario.revision,blocks:scenario.blocks}:null,...(retryable?(()=>{const failedChild=blockingChild(retryable,linkedJobs);return {retry:{jobId:retryable.id,label:retryable.phase==='business'?'Fachliche Bearbeitung erneut starten':'Technische Bearbeitung erneut starten',...(failedChild?{errorJobId:failedChild.id,message:publicJobError(failedChild,failedChild.error!)}:retryable.error?{message:publicJobError(retryable,retryable.error)}:{})}};})():{}),...(validatedFlowPreview(previewCandidate)?{validatedFlowPreview:validatedFlowPreview(previewCandidate)}:{}),...(scenario&&scenarioFingerprint?{scenarioState:{revision:scenario.revision,fingerprint:scenarioFingerprint}}:{}),...(technicalAttention?{technicalReview:{jobId:technicalAttention.id,issues:(technicalAttention.result as any).repairContext.issues,needsBusinessReview:!!(technicalAttention.result as any).needsBusinessReview}}:{}),...(activeJob?.stage?{runningStage:activeJob.stage}:{}),...(observed?{explorationObservation:observed}:{})};
 }
 
 function text(payload:Record<string,unknown>|undefined){const value=payload?.text;if(typeof value!=='string'||value.trim().length<5||value.length>15_000)throw new TestingModelError('Die Nachricht muss zwischen 5 und 15.000 Zeichen lang sein.');return value.trim();}
@@ -236,6 +256,7 @@ export function commandTestingChat(id:string,input:TestingChatCommandRequest & {
   else if(input.command==='reject'){dismissScenarioEditJob(snapshot.proposed!.jobId);append(id,{kind:'user_action',message:'Du hast den Änderungsvorschlag verworfen.',jobId:snapshot.proposed!.jobId});conversation=readConversation(id);}
   else if(input.command==='approve'){approveTestingScenario(scenario!.id,scenario!.revision,'Fachliche Prüfung im Chat',typeof input.payload?.comment==='string'?input.payload.comment:undefined);append(id,{kind:'user_action',message:'Du hast die aktuelle fachliche Fassung freigegeben.',scenarioRevision:scenario!.revision});conversation=readConversation(id);}
   else if(input.command==='prepare')job=startTechnicalJob({scenarioId:scenario!.id,revision:scenario!.revision,model:selectedModel,prepareOnly:true});
+  else if(input.command==='retry'){job=retryTestingJob(snapshot.retry!.jobId,selectedModel);append(id,{kind:'user_action',message:'Du hast den fehlgeschlagenen Arbeitsschritt erneut gestartet.',jobId:job.id,...(job.scenarioRevision?{scenarioRevision:job.scenarioRevision}:{})});conversation=readConversation(id);}
   else if(input.command==='run'){const prepared=listTestingJobs().find(candidate=>candidate.phase==='technical'&&candidate.status==='completed'&&candidate.scenarioId===scenario!.id&&candidate.scenarioRevision===scenario!.revision&&(candidate.result as {prepared?:boolean}|undefined)?.prepared);if(!prepared)throw new TestingModelError('Bitte diese Fassung zuerst technisch vorbereiten.',409,'TECHNICAL_PREPARATION_MISSING');const run=startPreparedRun({jobId:prepared.id,scenarioId:scenario!.id,revision:scenario!.revision,model:selectedModel});append(id,{kind:'evidence',message:'Der echte Browserlauf wurde gestartet.',runId:run.id,scenarioRevision:scenario!.revision});conversation=readConversation(id);}
   else if(input.command==='cancel'){cancelTestingJob(snapshot.activeJob!.id);append(id,{kind:'status',message:'Der laufende Auftrag wurde abgebrochen.',jobId:snapshot.activeJob!.id});conversation=readConversation(id);}
   if(job)conversation={...conversation,model:selectedModel,jobIds:[...new Set([...(conversation.jobIds??[]),job.id])]};updateAfterCommand(conversation,input.requestId,job);return getTestingChatSnapshot(id);

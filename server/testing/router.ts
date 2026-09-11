@@ -12,7 +12,7 @@ import { applyTestingDefinitionChange, approveTestingScenario, getTestingApprova
 import { createStarterBindings } from './bindings/seed';
 import { validateTestingBinding } from './bindings/validation';
 import { AGENT_ARTIFACTS_ROOT, codexConfiguration } from './agents/cli';
-import { applyScenarioEditJob, dismissScenarioEditJob, startScenarioEditJob, cancelTestingJob, getTestingJob, initializeTestingPipeline, listTestingJobs, startBusinessJob, startDirectRun, startReuseJob, startTechnicalJob } from './agents/orchestrator';
+import { applyScenarioEditJob, dismissScenarioEditJob, startScenarioEditJob, cancelTestingJob, getTestingJob, initializeTestingPipeline, listTestingJobs, retryTestingJob, startBusinessJob, startDirectRun, startReuseJob, startTechnicalJob } from './agents/orchestrator';
 import { deriveTestingLifecycle } from './lifecycle';
 import { TESTING_RUN_ROOT } from './runner';
 import { getTestingAgentSettings, resolveAgentConfiguration, saveTestingAgentSettings } from './agents/settings';
@@ -49,7 +49,7 @@ export function createTestingRouter(): Router {
   registerTestingObservationRoutes(router);
   router.post('/chat/conversations',guard((req,res)=>{const input=body(req);res.status(input.message?202:200).json(createTestingChatConversation({message:z.string().trim().min(5).max(15_000).optional().parse(input.message),model:model(input.model),scenarioId:z.string().optional().parse(input.scenarioId),requestId:z.string().min(1).max(200).parse(input.requestId)}));}));
   router.get('/chat/conversations/:id',guard((req,res)=>res.json(getTestingChatSnapshot(req.params.id))));
-  router.post('/chat/conversations/:id/commands',guard((req,res)=>{const input=body(req);res.status(202).json(commandTestingChat(req.params.id,{command:z.enum(['message','explore','resume','answer','revise','save','apply','reject','approve','prepare','run','cancel']).parse(input.command) as TestingChatCommand,expectedRevision:z.number().int().positive().parse(input.expectedRevision),requestId:z.string().min(1).max(200).parse(input.requestId),payload:z.record(z.unknown()).optional().parse(input.payload)}));}));
+  router.post('/chat/conversations/:id/commands',guard((req,res)=>{const input=body(req);res.status(202).json(commandTestingChat(req.params.id,{command:z.enum(['message','explore','resume','answer','revise','save','apply','reject','approve','prepare','run','cancel','retry']).parse(input.command) as TestingChatCommand,expectedRevision:z.number().int().positive().parse(input.expectedRevision),requestId:z.string().min(1).max(200).parse(input.requestId),payload:z.record(z.unknown()).optional().parse(input.payload)}));}));
   router.get('/chat/conversations/:id/events',guard((req,res)=>{
     const snapshot=getTestingChatSnapshot(req.params.id);res.status(200);res.setHeader('Content-Type','text/event-stream');res.setHeader('Cache-Control','no-cache, no-transform');res.setHeader('Connection','keep-alive');res.flushHeaders();
     const send=(event:TestingChatStreamEvent)=>{res.write(`id: ${event.sequence}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);};
@@ -152,6 +152,7 @@ export function createTestingRouter(): Router {
   }));
   router.post('/jobs/business', guard((req, res) => { const input = body(req); res.status(202).json(startBusinessJob({ request: input.request, model: model(input.model) })); }));
   router.post('/jobs/technical', guard((req, res) => { const input = body(req); res.status(202).json(startTechnicalJob({ scenarioId: z.string().parse(input.scenarioId), revision: revision(input.revision), model: model(input.model), ...(input.repairBindingId ? { repairBindingId: z.string().parse(input.repairBindingId) } : {}) })); }));
+  router.post('/jobs/:id/retry', guard((req,res)=>{const input=body(req);res.status(202).json(retryTestingJob(req.params.id,input.model===undefined?undefined:model(input.model)));}));
   router.get('/jobs/:id/artifacts/:filename', guard((req, res) => { getTestingJob(req.params.id); sendArtifact(AGENT_ARTIFACTS_ROOT, req.params.id, req.params.filename, res); }));
   router.get('/jobs/:id/attempts', guard((req, res) => { getTestingJob(req.params.id); res.json(['original', 'correction'].filter(attempt => existsSync(resolve(AGENT_ARTIFACTS_ROOT, `${req.params.id}${attempt === 'correction' ? '-korrektur' : ''}`, 'manifest.json'))).map(attempt => ({ attempt, manifest: `/api/testing/jobs/${req.params.id}/attempts/${attempt}/artifacts/manifest.json`, prompt: `/api/testing/jobs/${req.params.id}/attempts/${attempt}/artifacts/prompt.md`, result: `/api/testing/jobs/${req.params.id}/attempts/${attempt}/artifacts/result.json` }))); }));
   router.get('/jobs/:id/attempts/:attempt/artifacts/:filename', guard((req, res) => { getTestingJob(req.params.id); const attempt = z.enum(['original', 'correction']).parse(req.params.attempt); sendArtifact(AGENT_ARTIFACTS_ROOT, `${req.params.id}${attempt === 'correction' ? '-korrektur' : ''}`, req.params.filename, res); }));

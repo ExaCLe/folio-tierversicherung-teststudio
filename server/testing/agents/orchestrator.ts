@@ -40,6 +40,28 @@ const saveJob = (job: TestingAgentJob) => { const saved=db.upsert(jobs, structur
 export function subscribeTestingJobs(listener:(job:TestingAgentJob)=>void){jobListeners.add(listener);return()=>jobListeners.delete(listener);}
 export function listTestingJobs(): TestingAgentJob[] { return db.read<TestingAgentJob>(jobs).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export function getTestingJob(id: string): TestingAgentJob { const job = db.find<TestingAgentJob>(jobs, id); if (!job) throw new TestingModelError('Der Agentenlauf wurde nicht gefunden.', 404); return job; }
+/** Repeat a terminal root job from its persisted request and current scenario state. */
+export function retryTestingJob(id:string, model?:TestingModel):TestingAgentJob {
+  const job=getTestingJob(id);
+  if(job.parentJobId)throw new TestingModelError('Bitte den übergeordneten Auftrag erneut starten; der fehlgeschlagene Arbeitsschritt wird darin automatisch wiederholt.',409,'AGENT_RETRY_PARENT_REQUIRED');
+  if(!['failed','cancelled'].includes(job.status))throw new TestingModelError('Nur ein fehlgeschlagener oder abgebrochener Auftrag kann erneut gestartet werden.',409,'AGENT_RETRY_NOT_TERMINAL');
+  const selected=model??job.model;
+  if(job.phase==='business'){
+    if(!job.scenarioId)return startBusinessJob({request:job.prompt,model:selected});
+    const scenario=getTestingScenario(job.scenarioId);
+    return scenario.blocks.length
+      ? startScenarioEditJob({scenarioId:scenario.id,revision:scenario.revision,text:job.prompt,model:selected})
+      : startBusinessJob({scenarioId:scenario.id,revision:scenario.revision,request:job.prompt,model:selected,preserveIntent:true});
+  }
+  if(job.phase==='technical'){
+    if(!job.scenarioId)throw new TestingModelError('Der gespeicherte technische Auftrag enthält keinen Testfall und kann nicht wiederholt werden.',409,'AGENT_RETRY_CONTEXT_MISSING');
+    const scenario=getTestingScenario(job.scenarioId);
+    const retry=(job.result as {retry?:{prepareOnly?:boolean;repairBindingId?:string}}|undefined)?.retry;
+    const repairBindingId=retry?.repairBindingId??/^Technische Bindung (.+) anhand des kleinsten fehlgeschlagenen Blocks reparieren\.$/.exec(job.prompt)?.[1];
+    return startTechnicalJob({scenarioId:scenario.id,revision:scenario.revision,model:selected,...(repairBindingId?{repairBindingId}:{}),prepareOnly:retry?.prepareOnly??true});
+  }
+  throw new TestingModelError('Dieser Auftragstyp kann nicht direkt wiederholt werden. Starte den zugehörigen fachlichen oder technischen Auftrag erneut.',409,'AGENT_RETRY_UNSUPPORTED');
+}
 export function cancelTestingJob(id: string,cause:'user_cancelled'|'parent_cancelled'|'interrupted'='user_cancelled'): TestingAgentJob {
   const job = getTestingJob(id);
   if (!['queued', 'running'].includes(job.status)) return job;
@@ -385,7 +407,7 @@ export function startTechnicalJob(input: { scenarioId: string; revision: number;
     status(job.id, 'Die freigegebene Fassung ist verdrahtet. Die echte Portalprüfung startet jetzt in Chromium.');
     const execution = await runCompiled(wired, input.model, signal, job.id);
     return { plan, duplicateJobId: duplicate.job.id, ...execution };
-  }, scenario, compiled.fingerprint, undefined, {stage:'wiring'}).job;
+  }, scenario, compiled.fingerprint, {retry:{prepareOnly:!!input.prepareOnly,...(input.repairBindingId?{repairBindingId:input.repairBindingId}:{})}}, {stage:'wiring'}).job;
 }
 export function startPreparedRun(input:{jobId:string;scenarioId:string;revision:number;model:TestingModel}){
   const prepared=getTestingJob(input.jobId),result=prepared.result as {prepared?:boolean;preparedBindingRefs?:{id:string;revision:number}[]}|undefined;

@@ -31,6 +31,7 @@ export const chatApi = {
 export function subscribeConversation(id: string, handlers: {
   onEvent: (event: TestingChatStreamEvent) => void;
   onConnection: (connected: boolean) => void;
+  onError?: (message: string) => void;
 }) {
   const source = new EventSource(`/api/testing/chat/conversations/${encodeURIComponent(id)}/events`);
   source.onopen = () => handlers.onConnection(true);
@@ -38,7 +39,7 @@ export function subscribeConversation(id: string, handlers: {
   for (const type of ['snapshot', 'entry', 'state'] as const) {
     source.addEventListener(type, event => {
       try { handlers.onEvent(JSON.parse((event as MessageEvent).data) as TestingChatStreamEvent); }
-      catch (cause) { console.warn('Unlesbares Chat-Ereignis', cause); }
+      catch { handlers.onError?.('Eine Aktualisierung konnte nicht gelesen werden. Bitte lade den aktuellen Stand erneut.'); }
     });
   }
   return () => source.close();
@@ -52,11 +53,13 @@ export interface RunnerObservation {
 export function subscribeObservations(runId: string, handlers: {
   onObservation: (value: RunnerObservation) => void;
   onEnd: () => void;
+  onError?: (message: string) => void;
 }) {
   const source = new EventSource(`/api/testing/observations/events?runId=${encodeURIComponent(runId)}`);
+  source.onerror = () => handlers.onError?.('Die Verbindung zum Browserbild wurde unterbrochen. Die Verbindung wird erneut aufgebaut.');
   const receive = (event: Event) => {
     try { const value = JSON.parse((event as MessageEvent).data) as RunnerObservation | null; if (value && typeof value.frameUrl === 'string') handlers.onObservation(value); }
-    catch (cause) { console.warn('Unlesbare Browserbeobachtung', cause); }
+    catch { handlers.onError?.('Das letzte Browserbild konnte nicht gelesen werden.'); }
   };
   source.addEventListener('snapshot', receive);
   source.addEventListener('observation', receive);
