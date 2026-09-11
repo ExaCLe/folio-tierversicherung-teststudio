@@ -70,7 +70,7 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
     tasks: [
       { id: 'job-parent', waitingForJobId: 'job-child', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Sol', modelId: 'sol', color: '#635bff' }, status: 'queued', activityState: 'waiting', stage: 'planning', startedAt: '2026-09-10T08:07:00.000Z', publicDetails: [] },
       { id: 'job-next', purpose: 'Technische Vorbereitung', agent: { name: 'Luna', modelId: 'luna', color: '#e56b25' }, status: 'not_started', activityState: 'not_started', stage: 'wiring', startedAt: '2026-09-10T08:08:00.000Z', publicDetails: [] },
-      { id: 'job-child', parentJobId: 'job-parent', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'running', activityState: 'working', stage: 'knowledge', startedAt: new Date(Date.now() - 4_000).toISOString(), metrics: { elapsedMs: 4_000, requestCount: 2, inputTokens: 1200, outputTokens: 340, totalTokens: 1540 }, publicDetails: [] },
+      { id: 'job-child', parentJobId: 'job-parent', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'running', activityState: 'working', stage: 'knowledge', startedAt: new Date(Date.now() - 4_000).toISOString(), metrics: { elapsedMs: 4_000, requestCount: 2, apiRequestCount: 7, inputTokens: 1200, outputTokens: 340, totalTokens: 1540 }, publicDetails: [] },
     ],
     allowedCommands: ['message', 'cancel'],
   });
@@ -91,7 +91,7 @@ test('hält den letzten laufenden Auftrag erreichbar und zeigt wartende Aufträg
   await queued.getByRole('button', { name: /Fachwissen prüfen, vorausgesetzte Aufgabe öffnen/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Fachwissen prüfen');
   await expect(page.getByRole('dialog')).toContainText('Noch keine Ausgabe.');
-  await expect(running).toContainText('2 Modellaufrufe');
+  await expect(running).toContainText('7 API-Anfragen');
   await expect(running).toContainText('Eingabe 1.200');
   await expect(running).toContainText('Ausgabe 340');
   await expect(running).toContainText('Gesamt 1.540');

@@ -146,6 +146,20 @@ test('Chat zeigt nur Hinweise des neuesten exakt passenden Technikauftrags und k
   assert.equal(chat.testingChatPublicJobEntry({...base,id:'tool-job',startedAt:'2026-09-10T12:00:00.000Z'} as TestingAgentJob,{id:'tool-event',at:'2026-09-10T12:00:00.000Z',kind:'tool',message:'raw call'}),undefined);
 });
 
+test('Übernommene und freigegebene Überarbeitung kann nach altem Technikproblem neu vorbereitet werden',async()=>{
+  const scenario=scenarioFixture('chat-rework-prepare'),fingerprint=testingFingerprint(scenario,getTestingCatalog()),chatId='chat-rework-prepare';
+  const issue={kind:'business-contract' as const,summary:'Die Rollenprüfung braucht eine fachliche Überarbeitung.',affectedDefinitionRefs:[],affectedInputKeys:[],blockPaths:[],suggestedBusinessRevision:'Direktionsaktion für alle Rollen sichtbar beschreiben.'};
+  const blocked:TestingAgentJob={id:'old-blocked-technical',phase:'technical',model:'luna',status:'completed',prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,startedAt:'2026-09-10T10:00:00.000Z',finishedAt:'2026-09-10T10:01:00.000Z',events:[],result:{technicalStatus:'blocked',plan:{unsupported:[issue]},repairContext:{issues:[issue]}}};
+  const revised={...scenario,title:`${scenario.title} – Rollenregel`},draft={title:revised.title,expectedOutcome:revised.expectedOutcome,blocks:revised.blocks,knowledgeRefs:revised.knowledgeRefs,newDefinitions:[],newKnowledge:[],explanation:'Die Rollenregel wurde fachlich präzisiert.',assumptions:[],openQuestions:[]};
+  const business:TestingAgentJob={id:'business-rework',phase:'business',model:'luna',status:'completed',prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,startedAt:'2026-09-10T10:03:00.000Z',finishedAt:'2026-09-10T10:04:00.000Z',events:[],result:{scope:'scenario',applied:false,reviewStatus:'pending',before:scenario,scenario:revised,draft,compiled:compileTestingScenario(revised,getTestingCatalog()),changes:[{kind:'metadata',path:'title',label:'Titel',before:scenario.title,after:revised.title}],contextHash:'fixture',attempts:1}};
+  db.upsert('testingAgentJobs',blocked);db.upsert('testingAgentJobs',business);db.upsert('testingChatConversations',{id:chatId,revision:1,eventSequence:0,createdAt:blocked.startedAt,updatedAt:business.finishedAt!,model:'luna',scenarioId:scenario.id,entryIds:[],handledRequests:[],jobIds:[blocked.id,business.id]});
+  const opened=chat.getTestingChatSnapshot(chatId);assert(opened.allowedCommands.includes('apply'));
+  const applied=chat.commandTestingChat(chatId,{command:'apply',expectedRevision:opened.conversation.revision,requestId:'apply-rework'});assert.equal(applied.scenario?.revision,scenario.revision+1);assert.equal(applied.technicalReview,undefined);assert(applied.allowedCommands.includes('approve'));
+  const approved=chat.commandTestingChat(chatId,{command:'approve',expectedRevision:applied.conversation.revision,requestId:'approve-rework',payload:{expectedScenarioRevision:applied.scenarioState!.revision,fingerprint:applied.scenarioState!.fingerprint}});assert(approved.allowedCommands.includes('prepare'));
+  const preparing=chat.commandTestingChat(chatId,{command:'prepare',expectedRevision:approved.conversation.revision,requestId:'prepare-rework',payload:{expectedScenarioRevision:approved.scenarioState!.revision,fingerprint:approved.scenarioState!.fingerprint}});assert.equal(preparing.activeJob?.phase,'technical');assert.notEqual(preparing.activeJob?.id,blocked.id);
+  orchestrator.cancelTestingJob(preparing.activeJob!.id);await orchestrator.waitTestingJob(preparing.activeJob!.id);
+});
+
 test('Ein klassisch gestarteter Auftrag sperrt denselben Chat-Fachstand', () => {
   const scenario=scenarioFixture('chat-classic-active'),fingerprint=testingFingerprint(scenario,getTestingCatalog());
   db.upsert<TestingAgentJob>('testingAgentJobs',{id:'classic-active-job',phase:'business',model:'luna',status:'running',prompt:'Fixture',scenarioId:scenario.id,scenarioRevision:scenario.revision,fingerprint,startedAt:'2026-09-10T12:00:00.000Z',events:[]});

@@ -8,6 +8,7 @@ import type { TestingAgentConfiguration, TestingAgentEvent, TestingAgentMetrics,
 import { DEFAULT_CODEX_MODELS, providerExecutable, resolveAgentConfiguration, validateExtraArgs } from './settings';
 import { resolveAgentProcessEnvironment, resolveAgentProcessLaunch } from './process-launch';
 import { AgentTerminationError, agentAbortError } from './termination';
+import { startCodexMetricsReceiver } from './metrics-receiver';
 
 export const CODEX_MODELS = DEFAULT_CODEX_MODELS;
 export const AGENT_ARTIFACTS_ROOT = resolve(process.env.FOLIO_AGENT_ARTIFACTS_ROOT ?? '.local/testing/agents');
@@ -37,16 +38,17 @@ export function providerInvocationMetrics(event: any): InvocationMetrics | undef
   if (event?.type === 'result') {
     const usage = event.usage;
     const requestCount=1;
-    if (!usage || typeof usage !== 'object') return { requestCount };
+    const modelTurnCount=finiteMetric(event.num_turns);
+    if (!usage || typeof usage !== 'object') return { requestCount,...(modelTurnCount!==undefined?{modelTurnCount}:{}) };
     const inputTokens=finiteMetric(usage.input_tokens),cacheRead=finiteMetric(usage.cache_read_input_tokens),cacheCreation=finiteMetric(usage.cache_creation_input_tokens),cachedInputTokens=cacheRead!==undefined||cacheCreation!==undefined?(cacheRead??0)+(cacheCreation??0):undefined,outputTokens=finiteMetric(usage.output_tokens),reportedTotal=finiteMetric(usage.total_tokens);
     const totalTokens=reportedTotal ?? (inputTokens !== undefined && outputTokens !== undefined ? inputTokens + (cachedInputTokens??0) + outputTokens : undefined);
-    return {requestCount,...(inputTokens!==undefined?{inputTokens}:{}),...(cachedInputTokens!==undefined?{cachedInputTokens}:{}),...(outputTokens!==undefined?{outputTokens}:{}),...(totalTokens!==undefined?{totalTokens}:{})};
+    return {requestCount,...(modelTurnCount!==undefined?{modelTurnCount}:{}),...(inputTokens!==undefined?{inputTokens}:{}),...(cachedInputTokens!==undefined?{cachedInputTokens}:{}),...(outputTokens!==undefined?{outputTokens}:{}),...(totalTokens!==undefined?{totalTokens}:{})};
   }
 }
 
 function mergeInvocationMetrics(current: InvocationMetrics | undefined, next: InvocationMetrics): InvocationMetrics {
   const merged: InvocationMetrics = { requestCount: Math.max(current?.requestCount ?? 0, next.requestCount) };
-  for (const key of ['inputTokens','cachedInputTokens','outputTokens','totalTokens'] as const) { const value=next[key] ?? current?.[key]; if(value!==undefined)merged[key]=value; }
+  for (const key of ['apiRequestCount','modelTurnCount','inputTokens','cachedInputTokens','outputTokens','totalTokens'] as const) { const value=next[key] ?? current?.[key]; if(value!==undefined)merged[key]=value; }
   return merged;
 }
 
@@ -128,10 +130,10 @@ export function codexPublicEvents(event: any, scope = 'codex'): PublicProviderEv
   return [];
 }
 
-export function buildAgentArguments(configuration: TestingAgentConfiguration, directory: string, schema: Record<string, unknown>, sessionId: string): string[] {
+export function buildAgentArguments(configuration: TestingAgentConfiguration, directory: string, schema: Record<string, unknown>, sessionId: string,otelEndpoint?:string): string[] {
   const extraArgs = validateExtraArgs(configuration.provider, configuration.args);
   if (configuration.provider === 'codex') return ['exec', ...extraArgs, '--ignore-user-config', '--ephemeral', '--json', '--color', 'never', '--sandbox', 'read-only',
-    '-c', 'approval_policy="never"', '-c', 'hide_agent_reasoning=false', '-c', 'model_reasoning_summary="auto"', '--skip-git-repo-check', '--output-schema', resolve(directory, 'schema.json'), '-o', resolve(directory, 'result.json'), '-m', configuration.modelSlug, '-C', directory, '-'];
+    '-c', 'approval_policy="never"', '-c', 'hide_agent_reasoning=false', '-c', 'model_reasoning_summary="auto"',...(otelEndpoint?['-c',`otel.exporter={ otlp-http = { endpoint = "${otelEndpoint}", protocol = "json" } }`,'-c','otel.log_user_prompt=false']:[]), '--skip-git-repo-check', '--output-schema', resolve(directory, 'schema.json'), '-o', resolve(directory, 'result.json'), '-m', configuration.modelSlug, '-C', directory, '-'];
   return [...extraArgs, '--print', '--output-format', 'stream-json', '--verbose', '--input-format', 'text', '--json-schema', JSON.stringify(schema), '--model', configuration.modelSlug,
     '--safe-mode', '--permission-mode', 'dontAsk', '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
     '--setting-sources', '', '--no-session-persistence', '--no-chrome', '--disable-slash-commands', '--session-id', sessionId];
@@ -199,13 +201,16 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
   await writeFile(resolve(directory, 'prompt.md'), input.prompt, { mode: 0o600 });
   await writeFile(resolve(directory, 'schema.json'), JSON.stringify(input.schema, null, 2), { mode: 0o600 });
   const sessionId = randomUUID();
-  const args = buildAgentArguments(configuration, directory, input.schema, sessionId);
+  const baseArgs=buildAgentArguments(configuration,directory,input.schema,sessionId);
+  const metricsReceiver=configuration.provider==='codex'?await startCodexMetricsReceiver():undefined;
+  const args = metricsReceiver?buildAgentArguments(configuration,directory,input.schema,sessionId,metricsReceiver.endpoint):baseArgs;
   let launch;
   try { launch = resolveAgentProcessLaunch(configuration.executable, args); }
-  catch (cause) { throw new Error(`${providerName} konnte nicht gestartet werden: ${cause instanceof Error ? cause.message : String(cause)}`); }
-  await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ id: input.id, model: configuration.modelSlug, provider: configuration.provider, modelId: configuration.modelId,
-    modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, launchExecutable: launch.executable, args,
-    contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs: codexTimeout() }, null, 2), { mode: 0o600 });
+  catch (cause) { await metricsReceiver?.close();throw new Error(`${providerName} konnte nicht gestartet werden: ${cause instanceof Error ? cause.message : String(cause)}`); }
+  const persistedArgs=args.map(value=>metricsReceiver&&value.includes(metricsReceiver.endpoint)?value.replace(metricsReceiver.endpoint,'http://127.0.0.1:[LOKALER-METRIKEMPFÄNGER]'):value);
+  try{await writeFile(resolve(directory, 'manifest.json'), JSON.stringify({ id: input.id, model: configuration.modelSlug, provider: configuration.provider, modelId: configuration.modelId,
+    modelLabel: configuration.modelLabel, settingsRevision: configuration.settingsRevision, executable: configuration.executable, launchExecutable: launch.executable, args:persistedArgs,
+    contextHash, files: names, createdAt: new Date().toISOString(), sandbox: configuration.provider === 'codex' ? 'read-only' : 'read-tools-only', timeoutMs: codexTimeout() }, null, 2), { mode: 0o600 });}catch(error){await metricsReceiver?.close();throw error;}
   let queuedWrites = Promise.resolve();
   function publish(value: PublicProviderEvent) {
     const event = { id: value.id ?? randomUUID(), at: new Date().toISOString(), ...value } as TestingAgentEvent;
@@ -230,7 +235,7 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       if (!(event.type === 'result' && resultError)) for (const message of claudePublicEvents(event, `${input.id}:claude`)) { publicReasoningSeen ||= message.publicDetail?.type === 'reasoning'; publicMessageSeen ||= message.publicDetail?.type === 'message'; publish(message); }
     } else for (const message of codexPublicEvents(event, `${input.id}:codex`)) { publicReasoningSeen ||= message.publicDetail?.type === 'reasoning'; publicMessageSeen ||= message.publicDetail?.type === 'message'; publish(message); }
   };
-  if (input.signal?.aborted) throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');
+  if (input.signal?.aborted){await metricsReceiver?.close();throw agentAbortError(input.signal,'Der Agentenlauf wurde vor dem CLI-Start abgebrochen; der Auslöser ist nicht bekannt.');}
   const invocationStarted=Date.now();
   publish({id:`${input.id}:metrics`,kind:'metrics',message:'Modellaufruf gestartet.',metrics:invocationMetrics});
   await new Promise<void>((done, reject) => {
@@ -266,7 +271,9 @@ async function invokeCodexAcquired(input: CodexInvocation): Promise<CodexResult>
       else if (code !== 0) reject(new Error(`${providerName} ist mit Fehlercode ${code ?? 'unbekannt'} beendet worden. ${resultError?.message || stderr.slice(-2500).trim() || 'Prüfen Sie die lokale Anmeldung und den Zugang zum gewählten Modell.'}`));
       else done();
     });
-  }).finally(()=>{
+  }).finally(async()=>{
+    const apiRequestCount=await metricsReceiver?.close();
+    if(apiRequestCount!==undefined)invocationMetrics={...invocationMetrics,apiRequestCount};
     invocationMetrics={...invocationMetrics,elapsedMs:Date.now()-invocationStarted};
     publish({id:`${input.id}:metrics`,kind:'metrics',message:'Modellaufruf beendet.',metrics:invocationMetrics});
   });

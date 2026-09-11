@@ -33,6 +33,8 @@ test('zeigt Cache-Metrik getrennt, inklusive Null, und lässt unbekannte Werte w
   await page.goto(`/testing/chat/${id}/chat`);
   await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('Eingabe 40');
   await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('Cache 0');
+  await expect(page.getByRole('button', { name: /Cache mit Null/ })).toContainText('API-Anfragen unbekannt');
+  await expect(page.getByRole('button', { name: /Cache mit Null/ })).not.toContainText('1 API-Anfragen');
   await expect(page.getByRole('button', { name: /Cache unbekannt/ }).locator('.tc-task-metrics')).not.toContainText('Cache');
 });
 
@@ -71,4 +73,67 @@ test('zentriert den erweiterten Composer, wächst mit Text und sendet auf schmal
   const send = page.getByRole('button', { name: 'Nachricht zum Ablauf senden' });
   await expect(send).toBeVisible();
   await Promise.all([page.waitForRequest(`**/api/testing/chat/conversations/${id}/commands`), send.click()]);
+});
+
+test('letzte Matrixzeile bleibt oberhalb des kompakten und geöffneten Eingabefensters erreichbar', async ({ page, request }) => {
+  await mockChat(page, snapshot(await scenario(request)));
+  await page.setViewportSize({ width: 681, height: 930 });
+  await page.goto(`/testing/chat/${id}/flow`);
+  const pane = page.locator('.tc-flow-pane');
+  const clearBottom = async () => {
+    await pane.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    await expect.poll(async () => page.locator('.tc-matrix').evaluate(element => {
+      const composer = document.querySelector('.tc-flow-composer')!;
+      return element.getBoundingClientRect().bottom <= composer.getBoundingClientRect().top - 8;
+    })).toBe(true);
+  };
+  await expect(page.locator('.blocklySvg').first()).toBeVisible();
+  await clearBottom();
+  await page.getByRole('textbox', { name: 'Nachricht zum Ablauf' }).fill('Ändere den Ablauf.\nPrüfe die erste Rolle.\nPrüfe die zweite Rolle.\nPrüfe die Direktion.');
+  await expect(page.locator('.tc-flow-composer')).toHaveClass(/is-expanded/);
+  await clearBottom();
+});
+
+test('zeigt laufende Arbeit kompakt über den Blöcken mit Laufzeit, Schritt und Link zur Unterhaltung', async ({ page, request }) => {
+  const startedAt = new Date(Date.now() - 12_000).toISOString();
+  const task: TestingChatSnapshot['tasks'][number] = { id: 'working', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Luna', modelId: 'luna', provider: 'codex', color: '#635bff' }, status: 'running', activityState: 'working', stage: 'planning', startedAt, executionAt: startedAt, publicDetails: [] };
+  const current = snapshot(await scenario(request), [task]);
+  current.activeJob = { id: task.id, phase: 'business', status: 'running', stage: 'planning', startedAt };
+  current.conversation.activeJobId = task.id;
+  await mockChat(page, current);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto(`/testing/chat/${id}/flow`);
+  const indicator = page.locator('.tc-flow-activity');
+  await expect(indicator).toContainText('Luna · Ablaufplanung');
+  await expect(indicator.locator('time')).toContainText(/\d+ s/);
+  await expect(page.locator('.tc-agent-activity')).toHaveCount(0);
+  const initial = await indicator.locator('svg').first().evaluate(element => getComputedStyle(element).transform);
+  await expect.poll(() => indicator.locator('svg').first().evaluate(element => getComputedStyle(element).transform)).not.toBe(initial);
+  expect(await indicator.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(40);
+  await indicator.click();
+  await expect(page).toHaveURL(new RegExp(`/testing/chat/${id}/chat$`));
+  await expect(page.getByRole('button', { name: /Fachlichen Ablauf planen, In Arbeit/ })).toBeVisible();
+});
+
+test('behält die technische Blockierung an ihrem Zeitpunkt und erlaubt Vorbereitung nach freigegebener Korrektur', async ({ page, request }) => {
+  const current = snapshot(await scenario(request), [
+    { id: 'old-technical', purpose: 'Technisch vorbereiten', agent: { name: 'Luna', modelId: 'luna', color: '#e56b25' }, status: 'blocked', activityState: 'attention', startedAt: '2026-09-10T08:00:00.000Z', executionAt: '2026-09-10T08:00:01.000Z', finishedAt: '2026-09-10T08:01:00.000Z', publicDetails: [{ id: 'old-problem', at: '2026-09-10T08:01:00.000Z', kind: 'result', message: 'Das sichtbare Formular muss auf deaktiviert geprüft werden.', detail: { type: 'result', label: 'Ergebnis', data: { technicalStatus: 'blocked', nextAction: { kind: 'revise-business', instruction: 'Prüfe deaktiviert statt unsichtbar.' } } } }] },
+    { id: 'business-rework', purpose: 'Fachlichen Ablauf planen', agent: { name: 'Luna', modelId: 'luna', color: '#635bff' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:03:00.000Z', executionAt: '2026-09-10T08:03:00.000Z', publicDetails: [] },
+  ]);
+  current.allowedCommands.push('prepare');
+  current.timeline = [
+    { id: 'problem', kind: 'agent_summary', at: '2026-09-10T08:01:00.000Z', jobId: 'old-technical', message: 'Das sichtbare Formular muss auf deaktiviert geprüft werden.' },
+    { id: 'revision-request', kind: 'user', at: '2026-09-10T08:02:00.000Z', message: 'Bitte prüfe deaktiviert statt unsichtbar.' },
+    { id: 'approved', kind: 'user_action', at: '2026-09-10T08:04:00.000Z', message: 'Du hast die korrigierte Fassung freigegeben.' },
+  ];
+  await mockChat(page, current);
+  await page.goto(`/testing/chat/${id}/chat`);
+  await expect(page.getByRole('button', { name: 'Technisch vorbereiten', exact: true })).toBeEnabled();
+  await expect(page.locator('.tc-queue')).toHaveCount(0);
+  await expect(page.locator('.tc-technical-blocked')).toHaveCount(0);
+  await expect(page.locator('[data-task-id=old-technical]')).toContainText('Fachliche Korrektur angefordert');
+  const contents = await page.locator('.tc-feed').innerText();
+  expect(contents.indexOf('Technisch vorbereiten')).toBeLessThan(contents.indexOf('Das sichtbare Formular'));
+  expect(contents.indexOf('Das sichtbare Formular')).toBeLessThan(contents.indexOf('Bitte prüfe deaktiviert'));
+  expect(contents.indexOf('Bitte prüfe deaktiviert')).toBeLessThan(contents.indexOf('Fachlichen Ablauf planen'));
 });

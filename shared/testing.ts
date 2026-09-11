@@ -196,7 +196,14 @@ export interface TestingAgentPublicDetail {
   type:'reasoning'|'message'|'validation'|'result'; label:string; data?:unknown;
 }
 export interface TestingAgentMetrics {
-  elapsedMs:number; requestCount:number; inputTokens?:number; cachedInputTokens?:number; outputTokens?:number; totalTokens?:number;
+  elapsedMs:number;
+  /** Number of provider CLI invocations. Kept for persisted legacy data. */
+  requestCount:number;
+  /** Model API requests, only when the provider reports this count. */
+  apiRequestCount?:number;
+  /** Provider-reported agent/model turns; not equivalent to HTTP requests. */
+  modelTurnCount?:number;
+  inputTokens?:number; cachedInputTokens?:number; outputTokens?:number; totalTokens?:number;
 }
 export interface TestingAgentJob {
   id: string; phase: TestingAgentPhase; model: TestingModel; status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';

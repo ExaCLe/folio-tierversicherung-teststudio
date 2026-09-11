@@ -38,6 +38,7 @@ process.env.FOLIO_CODEX_EXECUTABLE = fixture;
 process.env.FOLIO_CLAUDE_EXECUTABLE = fixture;
 const settings = await import('./settings');
 const cli = await import('./cli');
+const metricsReceiver = await import('./metrics-receiver');
 const processLaunch = await import('./process-launch');
 after(() => { cli.stopCodexProcesses(); rmSync(directory, { recursive: true, force: true }); });
 const input = (id: string, model: string, prompt = 'Isolierter Adaptertest.') => ({ id, model, prompt, schema: { type: 'object' }, files: { 'context.json': '{"fixture":true}' } });
@@ -55,6 +56,8 @@ test('Lokale Defaults und Codex-Aufruf bleiben mit Luna/Sol kompatibel', async (
   assert.equal(manifest.provider, 'codex');
   assert.equal(manifest.args[manifest.args.indexOf('--sandbox') + 1], 'read-only');
   assert.equal(manifest.args.includes('--ignore-user-config'), true);
+  assert(manifest.args.some((value:string)=>value.includes('LOKALER-METRIKEMPFÄNGER')));
+  assert(!JSON.stringify(manifest).includes('/v1/logs/'));
   assert.equal(manifest.args.at(-1), '-');
 });
 
@@ -101,7 +104,15 @@ test('Provider-Metriken stammen nur aus abgeschlossenen Aufrufen und lassen unbe
   assert.equal(cli.providerInvocationMetrics({type:'item.updated',usage:{input_tokens:999}}),undefined);
   assert.deepEqual(cli.providerInvocationMetrics({type:'turn.completed',usage:{input_tokens:120,cached_input_tokens:20,output_tokens:30}}),{requestCount:1,inputTokens:120,cachedInputTokens:20,outputTokens:30,totalTokens:150});
   assert.deepEqual(cli.providerInvocationMetrics({type:'turn.completed'}),{requestCount:1});
-  assert.deepEqual(cli.providerInvocationMetrics({type:'result',num_turns:3,usage:{input_tokens:50,cache_read_input_tokens:10,cache_creation_input_tokens:5,output_tokens:12}}),{requestCount:1,inputTokens:50,cachedInputTokens:15,outputTokens:12,totalTokens:77});
+  assert.deepEqual(cli.providerInvocationMetrics({type:'result',num_turns:3,usage:{input_tokens:50,cache_read_input_tokens:10,cache_creation_input_tokens:5,output_tokens:12}}),{requestCount:1,modelTurnCount:3,inputTokens:50,cachedInputTokens:15,outputTokens:12,totalTokens:77});
+  assert.deepEqual(cli.providerInvocationMetrics({type:'result',num_turns:2}),{requestCount:1,modelTurnCount:2});
+});
+
+test('Lokaler OTel-Empfänger zählt nur API-Anfragen und verwirft den Inhalt',async()=>{
+  const receiver=await metricsReceiver.startCodexMetricsReceiver();
+  const requestRecord={body:{stringValue:'codex.api_request'},timeUnixNano:'123',attributes:[{key:'success',value:{boolValue:true}}]},payload={resourceLogs:[{scopeLogs:[{logRecords:[requestRecord,{body:{stringValue:'codex.tool_result'}},{attributes:[{key:'event.name',value:{stringValue:'codex.api_request'}}]}]}]}]};
+  const response=await fetch(receiver.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});assert.equal(response.status,200);const retry=await fetch(receiver.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({resourceLogs:[{scopeLogs:[{logRecords:[requestRecord]}]}]})});assert.equal(retry.status,200);assert.equal(await receiver.close(),2);
+  assert.equal(metricsReceiver.countCodexApiRequestRecords({resourceLogs:[]}),0);
 });
 
 test('Windows startet PATH-, CMD- und PowerShell-Shims ohne Shell', { skip: process.platform !== 'win32' }, async () => {

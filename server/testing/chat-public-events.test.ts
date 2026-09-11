@@ -156,11 +156,19 @@ test('Aufrufmetriken bleiben trotz gekürzter Aktivität vollständig und ersche
   const scenarioId='metrics-scenario',chatId='metrics-chat';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation(chatId,scenarioId);
   const job:TestingAgentJob={id:'metrics-job',phase:'technical',model:'luna',status:'running',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,events:[],metrics:{elapsedMs:0,requestCount:0}};
   db.upsert('testingAgentJobs',job);db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),activeJobId:job.id,jobIds:[job.id]});
-  orchestrator.addTestingAgentEvent(job.id,{id:'call-1:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,inputTokens:10,outputTokens:2,totalTokens:12}});
+  orchestrator.addTestingAgentEvent(job.id,{id:'call-1:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,apiRequestCount:3,inputTokens:10,outputTokens:2,totalTokens:12}});
   for(let index=0;index<305;index++)orchestrator.addTestingAgentEvent(job.id,{id:`tool-${index}`,at,kind:'tool',message:`Werkzeug ${index}`});
-  orchestrator.addTestingAgentEvent(job.id,{id:'call-2:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,inputTokens:20,cachedInputTokens:5,outputTokens:3,totalTokens:23}});
+  orchestrator.addTestingAgentEvent(job.id,{id:'call-2:metrics',at,kind:'metrics',message:'Modellaufruf beendet.',metrics:{requestCount:1,apiRequestCount:2,inputTokens:20,cachedInputTokens:5,outputTokens:3,totalTokens:23}});
   const saved=orchestrator.getTestingJob(job.id),task=chat.getTestingChatSnapshot(chatId).tasks.find(item=>item.id===job.id)!;
-  assert.equal(saved.events.filter(event=>event.kind==='metrics').length,2);assert.deepEqual(saved.metrics,{elapsedMs:0,requestCount:2,inputTokens:30,cachedInputTokens:5,outputTokens:5,totalTokens:35});assert.deepEqual(task.metrics,saved.metrics);
+  assert.equal(saved.events.filter(event=>event.kind==='metrics').length,2);assert.deepEqual(saved.metrics,{elapsedMs:0,requestCount:2,apiRequestCount:5,inputTokens:30,cachedInputTokens:5,outputTokens:5,totalTokens:35});assert.deepEqual(task.metrics,saved.metrics);
+});
+
+test('Unbekannte Teilmessung wird nicht als vollständige API-Anzahl ausgegeben',()=>{
+  const scenarioId='partial-metrics-scenario',chatId='partial-metrics-chat';db.upsert('testingScenarios',scenario(scenarioId,[]));conversation(chatId,scenarioId);
+  const job:TestingAgentJob={id:'partial-metrics-job',phase:'technical',model:'luna',status:'running',prompt:'Fixture',scenarioId,scenarioRevision:1,startedAt:at,events:[],metrics:{elapsedMs:0,requestCount:0}};db.upsert('testingAgentJobs',job);
+  orchestrator.addTestingAgentEvent(job.id,{id:'known-call',at,kind:'metrics',message:'Gemessen.',metrics:{requestCount:1,apiRequestCount:2}});
+  orchestrator.addTestingAgentEvent(job.id,{id:'legacy-call',at,kind:'metrics',message:'Ohne API-Messung.',metrics:{requestCount:1}});
+  const metrics=orchestrator.getTestingJob(job.id).metrics!;assert.equal(metrics.requestCount,2);assert.equal(metrics.apiRequestCount,undefined);
 });
 
 test('Nur der neueste technische Versuch bestimmt den offenen Prüfbedarf',()=>{
@@ -170,6 +178,16 @@ test('Nur der neueste technische Versuch bestimmt den offenen Prüfbedarf',()=>{
   db.upsert<TestingAgentJob>('testingAgentJobs',{...common,id:'technical-new-prepared',startedAt:'2026-09-10T13:00:01.000Z',result:{prepared:true}});
   db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),jobIds:['technical-old-blocked','technical-new-prepared']});
   assert.equal(chat.getTestingChatSnapshot(chatId).technicalReview,undefined);
+});
+
+test('Abgeschlossener technischer Prüfbedarf bleibt als Ergebnis an seiner chronologischen Stelle',()=>{
+  const scenarioId='technical-history-scenario',chatId='technical-history-chat',current=scenario(scenarioId,[]),fingerprint=testingFingerprint(current,getTestingCatalog());db.upsert('testingScenarios',current);conversation(chatId,scenarioId);
+  const problem='Die Direktionsaktion kann für Vermittler noch nicht zuverlässig als deaktiviert geprüft werden.';
+  const technical:TestingAgentJob={id:'technical-history',phase:'technical',model:'luna',status:'completed',prompt:'Fixture',scenarioId,scenarioRevision:1,fingerprint,startedAt:'2026-09-10T12:01:00.000Z',finishedAt:'2026-09-10T12:02:00.000Z',events:[{id:'problem',at:'2026-09-10T12:02:00.000Z',kind:'message',message:problem,publicDetail:{type:'result',label:'Technisches Ergebnis',data:{summary:problem}}}],result:{technicalStatus:'blocked',plan:{unsupported:[{summary:problem}]},repairContext:{issues:[{summary:problem}]}}};
+  db.upsert('testingAgentJobs',technical);db.upsert('testingChatEntries',{id:'human-revision',at:'2026-09-10T12:03:00.000Z',kind:'user',message:'Bitte passe die fachliche Rollenregel entsprechend an.'});db.upsert('testingChatConversations',{...db.find<any>('testingChatConversations',chatId),activeJobId:undefined,jobIds:[technical.id],entryIds:['human-revision']});
+  const snapshot=chat.getTestingChatSnapshot(chatId),task=snapshot.tasks.find(item=>item.id===technical.id)!;
+  assert.equal(task.status,'blocked');assert.equal(task.activityState,'attention');assert.equal(task.publicDetails.at(-1)?.message,problem);
+  assert(new Date(task.executionAt!).getTime()<new Date(snapshot.timeline[0].at).getTime());
 });
 
 test('Historische Fehler und exakt kopierte Dublettenbegründungen werden nur in der Ansicht bereinigt',()=>{
