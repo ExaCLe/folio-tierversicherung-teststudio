@@ -156,10 +156,16 @@ export function explorationPromptContext(request: string, catalog: TestingCatalo
     preconditions: definition.preconditions, postconditions: definition.postconditions,
   })), 25_000);
   const previous = evidence.slice(0, -1), historyPerObservation = Math.min(6000, Math.floor(HISTORY_BUDGET / Math.max(1, previous.length)));
-  return { request, clarificationPolicy: {
+  return { request, runtimeCapabilities: {
+      actions: ['goto', 'click', 'fill', 'select', 'check', 'readSnapshot'],
+      observableEvidence: ['sichtbarer Accessibility-Zustand', 'sichtbar aktiviert oder deaktiviert', 'sichtbarer Text und sichtbare Auswahl'],
+      unavailableEvidence: ['HTTP-Status, Response-Body oder Netzwerkereignis', 'serverinterner Zustand ohne sichtbare Portalwirkung', 'allgemeine Berechtigung allein aus einem fehlenden Element'],
+      rule: 'Fachliches Soll und beobachtbarer Beleg sind getrennt. Behaupte nur Belege, die eine angebotene Aktion tatsächlich beobachten kann.' },
+    clarificationPolicy: {
       expectedTruth: 'Ausdrücklich gesetzte Regeln, Rollen, Berechtigungen, Sperren und Erwartungen sind das Soll. Als kind requirement und status answered erfassen; nicht beim Menschen bestätigen lassen. requestQuote ist optional und darf nur als wörtlicher Auszug aus request gesetzt werden.',
       userQuestionGate: 'kind clarification und status open ausschließlich für eine wichtige fachliche Entscheidung, die weder request, beantworteter Kontext noch Wissen festlegt. why benennt die fehlende Entscheidung konkret.',
       researchBoundary: 'kind research ist interne Wissens- oder UI-Prüfung und wird nie als Nutzerfrage ausgegeben. Das Portal bestimmt Umsetzbarkeit und Beobachtbarkeit, nicht die fachliche Absicht.',
+      evidenceBoundary: 'Prüfe je Assertion den konkreten erwarteten Beleg gegen runtimeCapabilities. Fehlt er, erkunde die UI. Bleiben mehrere fachlich verschiedene Beweisarten möglich, frage gezielt, was als beobachtbarer Nachweis gelten soll; rate weder unsichtbar statt deaktiviert noch schwäche die Forderung still ab.',
       fixtures: 'Für fachlich irrelevante Pflichtdaten plausible sichere synthetische Demowerte selbst wählen.' },
     round, browserOpen: evidence.length > 0, remainingActions: Math.max(0, LIMIT_ACTIONS - round), remainingMs, gaps, questions,
     completion: explorationCompletion(evidence, gaps, round, remainingMs),

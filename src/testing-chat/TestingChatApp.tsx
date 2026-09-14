@@ -12,6 +12,7 @@ import '../testing/testing.css';
 import '../testing/canvas-workspace.css';
 import './testing-chat.css';
 import './testing-conversation.css';
+import { StructuredAgentReport } from './StructuredAgentReport';
 
 const ScratchWorkspace = lazy(() => import('../testing/ScratchWorkspace').then(module => ({ default: module.ScratchWorkspace })));
 type Tab = 'chat' | 'flow' | 'browser';
@@ -106,11 +107,10 @@ function TimelineEntry({ entry, onDetails }: { entry: PublicChatEntry; onDetails
 
 const taskStatusLabels: Record<PublicTask['status'], string> = { not_started: 'Eingereiht', queued: 'Wartet', running: 'In Arbeit', completed: 'Abgeschlossen', failed: 'Fehlgeschlagen', blocked: 'Blockiert', cancelled: 'Abgebrochen' };
 function taskStateLabel(task: PublicTask, awaitsAnswer = false) { return task.activityState === 'waiting' ? awaitsAnswer ? 'Wartet auf Antwort' : 'Wartet auf Unterauftrag' : task.activityState === 'attention' ? task.finishedAt && task.status === 'blocked' ? 'Fachliche Korrektur angefordert' : 'Eingabe nötig' : taskStatusLabels[task.status]; }
-const detailKeyLabels: Record<string, string> = { summary: 'Zusammenfassung', valid: 'Gültig', errors: 'Fehler', correction: 'Korrektur', attempt: 'Versuch', facts: 'Fakten', title: 'Titel', explanation: 'Begründung', status: 'Status', changes: 'Änderungen', result: 'Resultat' };
-function detailKeyLabel(key: string) { return detailKeyLabels[key] ?? key.replace(/([a-zäöü])([A-ZÄÖÜ])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^./, value => value.toLocaleUpperCase('de-DE')); }
-function hasDetailValue(value: unknown) { return value != null && value !== '' && (!Array.isArray(value) || value.length > 0) && (typeof value !== 'object' || Array.isArray(value) || Object.keys(value as object).length > 0); }
 function InlineMarkdown({ text }: { text: string }) {
-  const parts = text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g);
+  const emphasized = [...text.matchAll(/\*\*([\s\S]+?)\*\*|__([\s\S]+?)__/g)].reduce((sum, match) => sum + (match[1] ?? match[2]).length, 0);
+  const normalized = emphasized > text.replace(/\*\*|__/g, '').length * 0.5 ? text.replace(/\*\*([\s\S]+?)\*\*|__([\s\S]+?)__/g, '$1$2') : text;
+  const parts = normalized.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g);
   return <>{parts.map((part, index) => part.startsWith('**') && part.endsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part.startsWith('`') && part.endsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : <Fragment key={index}>{part}</Fragment>)}</>;
 }
 function Markdown({ children }: { children: string }) {
@@ -129,25 +129,15 @@ function Markdown({ children }: { children: string }) {
   }
   return <div className="tc-markdown">{blocks}</div>;
 }
-function DetailValue({ value }: { value: unknown }) {
-  if (value == null) return null;
-  if (Array.isArray(value)) return <ol className="tc-detail-data">{value.map((item, index) => <li key={index}><DetailValue value={item}/></li>)}</ol>;
-  if (typeof value === 'object') return <dl className="tc-detail-data">{Object.entries(value as Record<string, unknown>).filter(([, item]) => hasDetailValue(item)).map(([key, item]) => <div key={key}><dt>{detailKeyLabel(key)}</dt><dd><DetailValue value={item}/></dd></div>)}</dl>;
-  if (typeof value === 'boolean') return <span>{value ? 'Ja' : 'Nein'}</span>;
-  return typeof value === 'string' ? <Markdown>{value}</Markdown> : <span>{String(value)}</span>;
-}
-function DetailData({ value }: { value: unknown }) {
-  if (!value || Array.isArray(value) || typeof value !== 'object') return <DetailValue value={value}/>;
-  const readableKeys = new Set(['title', 'summary', 'explanation', 'facts', 'errors', 'assumptions', 'questions', 'decisions', 'changes', 'unsupported', 'suggestions', 'message', 'reason', 'answer', 'text', 'correction']);
-  const readable = Object.entries(value as Record<string, unknown>).filter(([key, item]) => readableKeys.has(key) && hasDetailValue(item));
-  return <div className="tc-readable-report">{readable.map(([key, item]) => <section key={key}>{!['summary', 'explanation', 'message'].includes(key) && <h4>{detailKeyLabel(key)}</h4>}<DetailValue value={item}/></section>)}</div>;
-}
-function DetailReport({ detail, message }: { detail?: PublicDetail; message?: string }) {
+function DetailReport({ detail, message, sources }: { detail?: PublicDetail; message?: string; sources?: TestingChatEntry['sources'] }) {
   if (!detail) return null;
-  const dataSummary = detail.data && typeof detail.data === 'object' && !Array.isArray(detail.data) ? (detail.data as Record<string, unknown>).summary : undefined;
+  const data = detail.data && typeof detail.data === 'object' && !Array.isArray(detail.data) ? detail.data as Record<string, unknown> : undefined;
+  const records = [data, data?.draft, data?.plan, data?.result].filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
+  const normalized = (text: string) => text.trim().replace(/\*\*|__/g, '');
+  const alreadyInData = !!message && records.some(item => ['title', 'summary', 'explanation', 'message'].some(key => typeof item[key] === 'string' && normalized(item[key] as string) === normalized(message)));
   const placeholder = /^(?:Korrigiert(?:e|er|es|en)?\s+)?(?:Agentenantwort|Agentenentwurf|Technischer Agentenplan|Agentenausgabe)(?:,|\s).*noch nicht geprüft\.?$/i;
-  const showMessage = !!message && message.trim() !== String(dataSummary ?? '').trim() && !placeholder.test(message.trim());
-  return <section className={`tc-detail-report is-${detail.type}`}>{showMessage && <Markdown>{message}</Markdown>}<DetailData value={detail.data}/></section>;
+  const showMessage = !!message && !alreadyInData && !placeholder.test(message.trim());
+  return <section className={`tc-detail-report is-${detail.type}`}>{showMessage && <Markdown>{message}</Markdown>}<StructuredAgentReport value={detail.data} Text={Markdown} sources={sources} sourceHref={source => sourceHref(source as NonNullable<TestingChatEntry['sources']>[number])}/></section>;
 }
 function simpleNamingData(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return;
@@ -178,7 +168,7 @@ function TaskDetails({ task, onClose }: { task: PublicTask; onClose: () => void 
     <div className="tc-task-meta"><strong>{task.agent.name}</strong><span>{taskStateLabel(task)}</span>{task.stage && <span>{stageLabels[task.stage] ?? task.stage}</span>}<TaskMetrics task={task}/></div>
     {!!task.workStages?.some(step => ['knowledge', 'exploring'].includes(step.stage)) && <ol className="tc-exploration-stages" aria-label="Erkundungsschritte">{task.workStages.filter(step => ['knowledge', 'exploring'].includes(step.stage)).map((step, index) => <li key={`${step.stage}:${index}`} data-state={step.status}><strong>{stageLabels[step.stage]}</strong><span>{({ running: 'In Arbeit', completed: 'Abgeschlossen', skipped: 'Nicht benötigt', failed: 'Fehlgeschlagen' })[step.status]}</span>{step.summary && <small>{step.summary}</small>}</li>)}</ol>}
     <nav className="tc-detail-tabs" aria-label="Detailansicht"><button aria-pressed={view === 'output'} onClick={() => setView('output')}>Ausgaben · {visibleDetails.length}</button><button aria-pressed={view === 'data'} onClick={() => setView('data')}>Technische Daten</button></nav>
-    {view === 'data' ? <pre className="tc-original-data">{JSON.stringify(task.publicDetails, null, 2)}</pre> : visibleDetails.length ? <ol className="tc-task-events">{visibleDetails.map(item => { const detail = item.detail as PublicDetail | undefined; const renderedDetail = detail && replacementData.has(item.id) ? { ...detail, data: replacementData.get(item.id) } : detail; return <li key={item.id} className={`is-${item.kind} ${detail?.type === 'result' ? 'is-final' : ''}`}><time>{formatTime(item.at)}</time><div>{renderedDetail ? <DetailReport detail={renderedDetail} message={item.message}/> : <Markdown>{item.message}</Markdown>}{!!item.sources?.length && <ul className="tc-event-sources">{item.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer">{source.label}</a> : source.label}<small>{sourceKindLabels[source.kind]}</small></li>; })}</ul>}</div></li>; })}</ol> : <p className="tc-muted-copy">{task.status === 'failed' ? 'Der Auftrag ist vor der ersten Agentenausgabe fehlgeschlagen. Die Fehlermeldung steht in der Unterhaltung.' : 'Der Agent hat noch keine Ausgabe übermittelt. Neue Meldungen erscheinen hier automatisch.'}</p>}
+    {view === 'data' ? <pre className="tc-original-data">{JSON.stringify(task.publicDetails, null, 2)}</pre> : visibleDetails.length ? <ol className="tc-task-events">{visibleDetails.map(item => { const detail = item.detail as PublicDetail | undefined; const renderedDetail = detail && replacementData.has(item.id) ? { ...detail, data: replacementData.get(item.id) } : detail; return <li key={item.id} className={`is-${item.kind} ${detail?.type === 'result' ? 'is-final' : ''}`}><time>{formatTime(item.at)}</time><div>{renderedDetail ? <DetailReport detail={renderedDetail} message={item.message} sources={item.sources}/> : <Markdown>{item.message}</Markdown>}{!!item.sources?.length && <ul className="tc-event-sources">{item.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer">{source.label}</a> : source.label}<small>{sourceKindLabels[source.kind]}</small></li>; })}</ul>}</div></li>; })}</ol> : <p className="tc-muted-copy">{task.status === 'failed' ? 'Der Auftrag ist vor der ersten Agentenausgabe fehlgeschlagen. Die Fehlermeldung steht in der Unterhaltung.' : 'Der Agent hat noch keine Ausgabe übermittelt. Neue Meldungen erscheinen hier automatisch.'}</p>}
   </div></section></div>;
 }
 
@@ -244,7 +234,7 @@ function EntryDetails({ entry, onClose }: { entry: PublicChatEntry; onClose: () 
   return <div className="tc-modal-backdrop" role="presentation" onMouseDown={event => { if (event.currentTarget === event.target) onClose(); }}><section className="tc-entry-dialog" role="dialog" aria-modal="true" aria-labelledby="tc-entry-dialog-title"><header><div><small>ÖFFENTLICHER AGENTENBERICHT</small><h2 id="tc-entry-dialog-title">{entry.content?.title ?? entry.context?.taskLabel ?? 'Eintragsdetails'}</h2></div><button aria-label="Details schließen" onClick={onClose}><X size={18}/></button></header><div className="tc-dialog-body">
     {entry.context && <dl><div><dt>Aufgabe</dt><dd>{entry.context.taskLabel}</dd></div><div><dt>Agent</dt><dd>{entry.context.modelLabel ?? entry.context.modelId}{entry.context.provider ? ` · ${entry.context.provider === 'codex' ? 'Codex' : 'Claude'}` : ''}</dd></div>{entry.context.stage && <div><dt>Arbeitsschritt</dt><dd>{stageLabels[entry.context.stage] ?? entry.context.stage}</dd></div>}</dl>}
     <nav className="tc-detail-tabs" aria-label="Detailansicht"><button aria-pressed={!showData} onClick={() => setShowData(false)}>Ausgabe</button><button aria-pressed={showData} onClick={() => setShowData(true)}>Technische Daten</button></nav>
-    {showData ? <pre className="tc-original-data">{JSON.stringify(entry, null, 2)}</pre> : <>{detail ? <DetailReport detail={detail} message={entry.content?.summary ?? entry.message}/> : <p>{entry.content?.summary ?? entry.message}</p>}
+    {showData ? <pre className="tc-original-data">{JSON.stringify(entry, null, 2)}</pre> : <>{detail ? <DetailReport detail={detail} message={entry.content?.summary ?? entry.message} sources={entry.sources}/> : <p>{entry.content?.summary ?? entry.message}</p>}
     {!!entry.content?.facts?.length && <><h3>Ergebnisse und Annahmen</h3><ul>{entry.content.facts.map(fact => <li key={fact.label}><strong>{fact.label}:</strong> {fact.value}</li>)}</ul></>}
     {!!entry.sources?.length && <><h3>Verwendete Quellen</h3><ul className="tc-source-list">{entry.sources.map(source => { const href = sourceHref(source); return <li key={`${source.kind}:${source.ref}`}>{href ? <a href={href} target="_blank" rel="noreferrer"><strong>{source.label}</strong></a> : <strong>{source.label}</strong>}<span>{sourceKindLabels[source.kind]}</span></li>; })}</ul></>}
     {entry.delivery && <div className={`tc-delivery is-${entry.delivery.state}`}><strong>{deliveryLabels[entry.delivery.state]}</strong>{entry.delivery.detail && <p>{entry.delivery.detail}</p>}</div>}

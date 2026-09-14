@@ -235,3 +235,31 @@ test('zeigt auch bei einem Darstellungsfehler den konkreten Hinweis und einen Ne
   await expect(page.getByRole('alert')).toContainText('Invalid time value');
   await expect(page.getByRole('button', { name: 'Seite neu laden', exact: true })).toBeVisible();
 });
+
+test('stellt strukturierte Anforderungen als breite lesbare Aussagen ohne Metadaten und Vollfett dar', async ({ page }) => {
+  const current = snapshot(undefined, [{ id: 'question-report', purpose: 'Fachwissen prüfen', agent: { name: 'Luna', modelId: 'luna', color: '#0f9f8f' }, status: 'completed', activityState: 'done', startedAt: '2026-09-10T08:00:00.000Z', publicDetails: [{ id: 'report', kind: 'result', at: '2026-09-10T08:01:00.000Z', message: 'Die Rollenanforderungen wurden untersucht.', detail: { type: 'result', label: 'Ergebnis', data: { questions: [
+    { id: 'direktion-kann-freigeben', text: '**Die Direktion kann eine offene Direktionsanfrage mit einer erforderlichen Begründung freigeben.**', kind: 'requirement', requestQuote: 'dass eine Direktionsanfrage von der Direktion freigegeben werden kann', requiresBrowser: false, status: 'answered', answer: 'Das Formular muss nach der Freigabe den bestätigten Status anzeigen.', knowledgeIds: ['wissen-rollen'] },
+    { id: 'evidence-missing', text: 'Woran ist eine abgelehnte Aktion sichtbar?', kind: 'clarification', status: 'open', why: 'In der Anwendung wurde bisher kein sichtbares Ergebnis gefunden.', requiresBrowser: true },
+  ] } }, sources: [{ label: 'Freigaberegeln', kind: 'knowledge', ref: 'wissen-rollen' }] }] }]);
+  await mockChat(page, current);
+  await page.setViewportSize({ width: 1360, height: 900 });
+  await page.goto(`/testing/chat/${id}/chat`);
+  await page.locator('[data-task-id=question-report]').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: 'Anforderungen und Klärungen' })).toBeVisible();
+  await expect(dialog.locator('dl, table, details')).toHaveCount(0);
+  await expect(dialog).not.toContainText('direktion-kann-freigeben');
+  await expect(dialog).not.toContainText('Requires Browser');
+  await expect(dialog).not.toContainText('Request Quote');
+  const first = dialog.locator('.tc-report-question').first();
+  await expect(first).toContainText('Vorgegebene Anforderung');
+  await expect(first.getByRole('link', { name: 'Freigaberegeln' })).toHaveAttribute('href', '/testing/knowledge/wissen-rollen');
+  await expect(first.locator('.tc-report-question-text strong')).toHaveCount(0);
+  expect((await first.locator('.tc-report-question-text').boundingBox())!.width).toBeGreaterThan(950);
+  await expect(dialog.locator('.tc-report-question').last()).toContainText('Klärung offen');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await first.locator('.tc-report-question-text').boundingBox())!.width).toBeGreaterThan(280);
+  await dialog.getByRole('button', { name: 'Technische Daten', exact: true }).click();
+  await expect(dialog).toContainText('direktion-kann-freigeben');
+  await expect(dialog).toContainText('requestQuote');
+});
